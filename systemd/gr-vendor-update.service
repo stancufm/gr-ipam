@@ -1,0 +1,13 @@
+[Unit]
+Description=Update the shared gr IEEE MAC vendor database
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gr vendor update-db
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

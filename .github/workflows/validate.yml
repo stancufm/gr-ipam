@@ -1,0 +1,23 @@
+name: validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Python
+        run: python3 -m py_compile bin/gr libexec/validate-ssh libexec/collect-version
+      - name: Validate installer syntax
+        run: sh -n install.sh
+      - name: Test isolated installation
+        run: |
+          sh install.sh --destdir "$RUNNER_TEMP/gr-root" \
+            --base-url https://ipam.example.net --username api-test
+          "$RUNNER_TEMP/gr-root/usr/local/bin/gr" --help >/dev/null

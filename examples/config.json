@@ -1,0 +1,18 @@
+{
+  "app_id": "gr-app",
+  "migration_app_id": "gr-migrate",
+  "base_url": "https://ipam.example.net",
+  "ca_file": "/etc/gr/phpipam-ca.pem",
+  "credential_file": "~/.config/gr/credentials",
+  "hosts_file": "/etc/hosts",
+  "hosts_sync_enabled": false,
+  "include_tags": [2],
+  "ssh_legacy_fallback": false,
+  "ssh_output": "~/.ssh/config.d/90-phpipam.conf",
+  "ssh_profiles": {
+    "network-admin": {"password_secret": "gr/network-admin"},
+    "linux-admin": {"password_secret": "gr/linux-admin"}
+  },
+  "username": "gr-api",
+  "vendor_db_dir": "/var/lib/gr/ieee-vendors"
+}

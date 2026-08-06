@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly update of the shared gr IEEE MAC vendor database
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=1h
+Persistent=true
+Unit=gr-vendor-update.service
+
+[Install]
+WantedBy=timers.target

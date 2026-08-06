@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+import argparse
+import concurrent.futures
+import datetime
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+
+GR_PATH = "/usr/local/bin/gr"
+
+
+def load_gr():
+    loader = importlib.machinery.SourceFileLoader("gr_module", GR_PATH)
+    spec = importlib.util.spec_from_loader("gr_module", loader)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def validate_one(item, passwords, known_hosts_dir):
+    profile = item["profile"]
+    password = passwords.get(profile)
+    if not password:
+        item["result"] = "vault_unavailable"
+        return item
+    read_fd, write_fd = os.pipe()
+    known_hosts = os.path.join(known_hosts_dir, re.sub(r"[^A-Za-z0-9_.-]", "_", item["ip"]))
+    try:
+        os.write(write_fd, (password + "\n").encode("utf-8"))
+        os.close(write_fd)
+        client_binary = "/usr/bin/ssh1" if item.get("client") == "legacy" else "ssh"
+        strict_host_key = "no" if item.get("client") == "legacy" else "accept-new"
+        command = [
+            "sshpass", "-d", str(read_fd), client_binary, "-F", "/dev/null",
+            "-o", "StrictHostKeyChecking={}".format(strict_host_key),
+            "-o", "UserKnownHostsFile={}".format(known_hosts),
+            "-o", "ConnectTimeout=8", "-o", "ConnectionAttempts=1",
+            "-p", str(item["port"]), "{}@{}".format(item["user"], item["ip"]),
+            "show clock",
+        ]
+        completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   universal_newlines=True, timeout=15, pass_fds=(read_fd,))
+        item["returncode"] = completed.returncode
+        item["stdout"] = completed.stdout.strip()[-1000:]
+        item["stderr"] = completed.stderr.strip()[-1000:]
+        combined = (completed.stdout + "\n" + completed.stderr).lower()
+        if completed.returncode == 0:
+            item["result"] = "success"
+        elif "permission denied" in combined or "authentication failed" in combined:
+            item["result"] = "authentication_failed"
+        elif "host key verification failed" in combined or "remote host identification has changed" in combined:
+            item["result"] = "host_key_failed"
+        elif "no route to host" in combined or "network is unreachable" in combined:
+            item["result"] = "network_unreachable"
+        elif "connection refused" in combined:
+            item["result"] = "connection_refused"
+        else:
+            item["result"] = "ssh_failed"
+    except subprocess.TimeoutExpired as exc:
+        item["result"] = "timeout"
+        item["stdout"] = (exc.stdout or "")[-1000:] if isinstance(exc.stdout, str) else ""
+        item["stderr"] = (exc.stderr or "")[-1000:] if isinstance(exc.stderr, str) else ""
+    finally:
+        try:
+            os.close(read_fd)
+        except OSError:
+            pass
+    return item
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run", action="store_true")
+    parser.add_argument("--workers", type=int, default=6)
+    parser.add_argument("--ip", action="append", dest="ips", help="validate only this IP (repeatable)")
+    args = parser.parse_args()
+    gr = load_gr()
+    cfg = gr.load_config(None)
+    with gr.api_session(cfg, prompt=False) as client:
+        rows = client.addresses()
+    selected = []
+    for row in rows:
+        hostname = str(row.get("hostname") or "").strip()
+        if not re.match(r"^sw", hostname, re.IGNORECASE):
+            continue
+        meta = gr.phpipam_ssh_metadata(row)
+        profile = meta["profile"]
+        secret = gr.vault_secret_name(cfg, profile) if profile else ""
+        normalized_ip = str(gr.normalize_ip(row.get("ip")) or row.get("ip"))
+        if args.ips and normalized_ip not in args.ips:
+            continue
+        item = {"id": row.get("id"), "ip": normalized_ip,
+                "hostname": hostname, "enabled": meta["enabled"], "user": meta["user"],
+                "port": int(meta["port"] or 22), "profile": profile, "secret": secret,
+                "client": meta.get("client", "normal")}
+        if not meta["enabled"]:
+            item["result"] = "ssh_disabled"
+        elif not profile:
+            item["result"] = "profile_missing"
+        elif not secret:
+            item["result"] = "profile_not_configured"
+        elif not gr.vault_secret_exists(secret):
+            item["result"] = "vault_secret_missing"
+        else:
+            item["result"] = "ready"
+        selected.append(item)
+    selected.sort(key=lambda item: item["hostname"].lower())
+    counts = {}
+    for item in selected:
+        counts[item["result"]] = counts.get(item["result"], 0) + 1
+    print("Matched: {}  status={}".format(len(selected), json.dumps(counts, sort_keys=True)))
+    for item in selected:
+        print("{:<25} {:<15} {:<20} {}@{}:{} [{}]".format(
+            item["hostname"], item["ip"], item["result"], item["user"] or "-", item["ip"], item["port"],
+            item["client"]))
+    if not args.run:
+        print("List-only. Re-run with --run to validate SSH.")
+        return
+
+    passwords = {}
+    for profile in sorted({item["profile"] for item in selected if item["result"] == "ready"}):
+        passwords[profile] = gr.read_vault_password(gr.vault_secret_name(cfg, profile))
+    state_dir = os.path.expanduser("~/.local/state/gr/switch-ssh-validation")
+    os.makedirs(state_dir, mode=0o700, exist_ok=True)
+    known_hosts_dir = os.path.join(state_dir, "known-hosts")
+    os.makedirs(known_hosts_dir, mode=0o700, exist_ok=True)
+    ready = [item for item in selected if item["result"] == "ready"]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(args.workers, 12))) as executor:
+        futures = [executor.submit(validate_one, item, passwords, known_hosts_dir) for item in ready]
+        for future in concurrent.futures.as_completed(futures):
+            item = future.result()
+            print("RESULT {:<25} {:<15} {}".format(item["hostname"], item["ip"], item["result"]))
+    stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    report = os.path.join(state_dir, "sw-ssh-validation-{}.json".format(stamp))
+    with open(report, "w", encoding="utf-8") as handle:
+        json.dump(selected, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.chmod(report, 0o600)
+    final = {}
+    for item in selected:
+        final[item["result"]] = final.get(item["result"], 0) + 1
+    print("SUMMARY={}".format(json.dumps(final, sort_keys=True)))
+    print("REPORT={}".format(report))
+
+
+if __name__ == "__main__":
+    main()
