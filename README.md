@@ -78,3 +78,7 @@ gr collect version --ip 192.0.2.10
 Version `1.0.0` has been tested through an isolated `DESTDIR` installation on
 Debian. The package contains no credentials, private keys, inventory exports or
 organization-specific addressing.
+
+## License
+
+This project is available under the [MIT License](LICENSE).
