@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.sh text eol=lf
+bin/gr text eol=lf
+libexec/* text eol=lf
