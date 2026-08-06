@@ -46,9 +46,9 @@ Codex desktop app to add the host and select the remote checkout.
 ## Daily workflow
 
 ```bash
-git switch main
+git checkout main
 git pull --ff-only
-git switch -c codex/short-description
+git checkout -b codex/short-description
 .codex/setup.sh
 # implement and test
 git diff --check
