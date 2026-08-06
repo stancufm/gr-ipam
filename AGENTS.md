@@ -1,5 +1,7 @@
 # gr-ipam development guidance
 
+[Română](AGENTS.ro.md)
+
 ## Scope and compatibility
 
 - Keep the CLI dependency-free and compatible with Python 3.7 or newer.
@@ -10,7 +12,7 @@
 ## Safety
 
 - Never commit real credentials, tokens, private keys, internal CA material,
-  network scans, inventory exports, validation reports, or internal addressing.
+  network scans, inventory exports, validation reports, SSH session audits, or internal addressing.
 - Keep read and write API applications separate.
 - All write operations must remain dry-run by default and require `--apply`.
 - Never broaden legacy SSH algorithms globally; select the isolated legacy
@@ -22,7 +24,7 @@
 ## Workflow
 
 - Start changes from an up-to-date `main` on a `codex/<short-name>` branch.
-- Keep commits focused and update documentation with behavior changes.
+- Keep commits focused and update English and Romanian documentation with behavior changes.
 - Before committing, run `.codex/setup.sh` and `git diff --check`.
 - Push the branch and open a pull request; merge only after GitHub Actions pass.
 - Use semantic version tags and GitHub releases for user-facing versions.

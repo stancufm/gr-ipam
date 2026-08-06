@@ -1,5 +1,7 @@
 # Installation and upgrade guide
 
+[Română](INSTALL.ro.md)
+
 ## 1. Prepare phpIPAM
 
 Enable the phpIPAM API, create the read-only and write applications, create the
@@ -72,7 +74,7 @@ sudo sh install.sh --config /etc/gr/config.json --enable-timer
 gr doctor --api
 ```
 
-The installer does not modify user credentials, password stores, GPG keys or
+The installer includes English and Romanian documentation, and does not modify user credentials, password stores, GPG keys or
 SSH keys. Back up `/etc/gr/config.json` before major-version upgrades.
 
 ## Test installation

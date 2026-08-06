@@ -63,7 +63,9 @@ install -d -m 0755 "$destdir/usr/local/bin" "$destdir/usr/local/libexec/gr" \
 install -m 0755 "$package_dir/bin/gr" "$destdir/usr/local/bin/gr"
 install -m 0755 "$package_dir/libexec/validate-ssh" "$destdir/usr/local/libexec/gr/validate-ssh"
 install -m 0755 "$package_dir/libexec/collect-version" "$destdir/usr/local/libexec/gr/collect-version"
-install -m 0644 "$package_dir/docs/GR-PHPIPAM.md" "$destdir/usr/local/share/doc/gr/GR-PHPIPAM.md"
+install -m 0644 "$package_dir"/docs/*.md "$destdir/usr/local/share/doc/gr/"
+install -m 0644 "$package_dir"/README*.md "$package_dir"/CONTRIBUTING*.md "$destdir/usr/local/share/doc/gr/"
+install -m 0644 "$package_dir"/phpipam/*.md "$destdir/usr/local/share/doc/gr/"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.service" "$destdir/etc/systemd/system/gr-vendor-update.service"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.timer" "$destdir/etc/systemd/system/gr-vendor-update.timer"
 

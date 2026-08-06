@@ -1,5 +1,7 @@
 # gr-ipam
 
+[Română](README.ro.md)
+
 `gr-ipam` is a multi-user CLI for Debian jump servers that use phpIPAM as the
 source of truth for network inventory and SSH connection metadata.
 
@@ -17,6 +19,7 @@ version inventory.
 - Every write operation is a dry-run unless `--apply` is explicitly supplied.
 - `/etc/hosts` generation is disabled by default.
 - Legacy SSH is opt-in per device and never weakens the normal SSH client.
+- Complete SSH terminal auditing is configurable globally and per session.
 
 ## Requirements
 
@@ -55,6 +58,7 @@ gr doctor --api
 ```bash
 gr find core-switch
 gr --ssh core-switch
+gr --ssh --audit core-switch
 gr update 192.0.2.10 --ssh-enabled yes --ssh-user operator --apply
 gr vendor lookup e8:d3:22:00:00:01
 sudo gr vendor update-db
@@ -69,13 +73,14 @@ gr collect version --ip 192.0.2.10
 - [Installation and upgrades](docs/INSTALL.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security model](docs/SECURITY-MODEL.md)
+- [SSH session auditing](docs/AUDIT.md)
 - [Complete command guide](docs/GR-PHPIPAM.md)
 - [phpIPAM preparation](phpipam/SETUP.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Project status
 
-Version `1.0.0` has been tested through an isolated `DESTDIR` installation on
+Version `1.1.0` has been tested through an isolated `DESTDIR` installation on
 Debian. The package contains no credentials, private keys, inventory exports or
 organization-specific addressing.
 

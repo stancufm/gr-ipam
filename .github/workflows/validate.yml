@@ -16,6 +16,8 @@ jobs:
         run: python3 -m py_compile bin/gr libexec/validate-ssh libexec/collect-version
       - name: Validate installer syntax
         run: sh -n install.sh
+      - name: Test SSH audit format
+        run: python3 tests/test_audit.py
       - name: Test isolated installation
         run: |
           sh install.sh --destdir "$RUNNER_TEMP/gr-root" \

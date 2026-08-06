@@ -1,5 +1,7 @@
 # `gr` — integrare phpIPAM și SSH
 
+[English](GR-PHPIPAM.en.md)
+
 Clientul global este instalat pe jump server în `/usr/local/bin/gr`. Documentația
 completă este disponibilă prin `gr docs` sau `gr help`; `gr --help` afișează
 rezumatul comenzilor.
@@ -48,6 +50,10 @@ gr subnet 192.0.2.0/24
 
 Forma fără subcomandă rămâne o prescurtare pentru `find`. Vechea subcomandă
 `search` este păstrată ca alias pentru compatibilitate.
+
+## Auditarea sesiunii SSH
+
+Auditul integral se activează global prin `ssh_audit_enabled` sau pentru o conectare prin `gr --ssh --audit ȚINTĂ`; `--no-audit` îl dezactivează pentru sesiunea curentă. Fișierele private `.ses` păstrează separat stdin, stdout și stderr, inclusiv parole tastate, și pot fi redate cu `gr audit show FIȘIER`. Consultați [ghidul de audit](AUDIT.ro.md).
 
 ## Conectare SSH
 
