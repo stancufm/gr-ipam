@@ -1,5 +1,7 @@
 # phpIPAM preparation
 
+[Română](SETUP.ro.md)
+
 Enable the API in phpIPAM and create two API applications:
 
 1. a permanent read-only application (default ID `gr-app`);

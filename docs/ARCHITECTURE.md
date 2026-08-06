@@ -1,5 +1,7 @@
 # Architecture
 
+[Română](ARCHITECTURE.ro.md)
+
 ## Overview
 
 ```text
@@ -84,7 +86,8 @@ timer updates the shared database once for all users.
 3. Resolve SSH metadata and defaults.
 4. Select automatically if exactly one target exists; otherwise prompt.
 5. Obtain the selected profile's secret from the current user's GPG vault.
-6. Execute OpenSSH or the isolated legacy wrapper against the IP address.
+6. If enabled, relay the PTY through a lossless stdin/stdout/stderr recorder.
+7. Execute OpenSSH or the isolated legacy wrapper against the IP address.
 
 ### Updates
 

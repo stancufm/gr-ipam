@@ -1,5 +1,7 @@
 # Security model
 
+[Română](SECURITY-MODEL.ro.md)
+
 ## Trust boundaries
 
 - The jump server administrator controls global code and configuration.
@@ -17,7 +19,8 @@
 - write commands require explicit `--apply`;
 - read and write API applications are separated;
 - legacy algorithms are delegated to a separate client on selected devices;
-- static SSH configuration and `/etc/hosts` are not required.
+- static SSH configuration and `/etc/hosts` are not required;
+- SSH audits use private directories/files but may deliberately contain typed credentials.
 
 ## Deployment rules
 

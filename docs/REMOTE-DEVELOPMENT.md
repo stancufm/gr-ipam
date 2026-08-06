@@ -1,5 +1,7 @@
 # Remote development with Codex
 
+[Română](REMOTE-DEVELOPMENT.ro.md)
+
 The recommended development environment is a dedicated Linux account on a
 jump server or development host. The Codex desktop app connects through SSH and
 starts the remote Codex app server using the account's login shell. Repository
@@ -46,9 +48,9 @@ Codex desktop app to add the host and select the remote checkout.
 ## Daily workflow
 
 ```bash
-git switch main
+git checkout main
 git pull --ff-only
-git switch -c codex/short-description
+git checkout -b codex/short-description
 .codex/setup.sh
 # implement and test
 git diff --check
