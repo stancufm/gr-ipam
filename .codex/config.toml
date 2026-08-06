@@ -1,0 +1,3 @@
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+approvals_reviewer = "user"
