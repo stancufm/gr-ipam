@@ -34,6 +34,14 @@ sudo sh install.sh \
 Use `--ca-file ./organization-ca.pem` for a private CA. A complete prepared
 configuration can instead be installed with `--config PATH`.
 
+To enable signed application updates, also provide the project's public release key:
+
+```bash
+sudo sh install.sh --config /etc/gr/config.json \
+  --release-key ./project-release-key.asc \
+  --update-repository https://github.com/stancufm/gr-ipam.git
+```
+
 Installed paths:
 
 | Path | Scope |
@@ -43,6 +51,8 @@ Installed paths:
 | `/usr/local/share/doc/gr/` | installed documentation |
 | `/etc/gr/config.json` | global non-secret configuration |
 | `/etc/gr/phpipam-ca.pem` | optional private CA |
+| `/etc/gr/update.json` | root-owned HTTPS release repository |
+| `/etc/gr/release-key.asc` | pinned public release-signing key |
 | `/var/lib/gr/ieee-vendors/` | shared IEEE database |
 | `/etc/systemd/system/gr-vendor-update.*` | optional weekly update |
 
@@ -65,7 +75,19 @@ gr vault set PROFILE
 gr vault test PROFILE
 ```
 
-## Upgrades
+## Signed upgrades
+
+After the release key is installed:
+
+```bash
+gr self-update check
+gr self-update --dry-run
+gr self-update
+```
+
+The updater verifies the signed tag, stages the package, creates a backup and rolls back on failure. See [Signed self-update](UPDATE.md).
+
+## Manual upgrades
 
 ```bash
 cd gr-ipam

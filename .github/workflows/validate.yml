@@ -15,11 +15,16 @@ jobs:
       - name: Compile Python
         run: python3 -m py_compile bin/gr libexec/validate-ssh libexec/collect-version
       - name: Validate installer syntax
-        run: sh -n install.sh
+        run: sh -n install.sh && sh -n libexec/gr-update
       - name: Test SSH audit format
         run: python3 tests/test_audit.py
+      - name: Test self-update CLI
+        run: python3 tests/test_self_update.py
       - name: Test isolated installation
         run: |
           sh install.sh --destdir "$RUNNER_TEMP/gr-root" \
             --base-url https://ipam.example.net --username api-test
           "$RUNNER_TEMP/gr-root/usr/local/bin/gr" --help >/dev/null
+          "$RUNNER_TEMP/gr-root/usr/local/bin/gr" --version
+          test -x "$RUNNER_TEMP/gr-root/usr/local/libexec/gr/gr-update"
+          test -f "$RUNNER_TEMP/gr-root/etc/gr/update.json"

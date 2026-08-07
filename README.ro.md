@@ -41,6 +41,7 @@ gr update 192.0.2.10 --ssh-enabled yes --ssh-user operator --apply
 gr vendor lookup e8:d3:22:00:00:01
 gr ssh validate
 gr collect version --ip 192.0.2.10
+gr self-update check
 ```
 
 ## Documentație
@@ -49,8 +50,9 @@ gr collect version --ip 192.0.2.10
 - [Arhitectură](docs/ARCHITECTURE.ro.md)
 - [Securitate](docs/SECURITY-MODEL.ro.md)
 - [Audit SSH](docs/AUDIT.ro.md)
+- [Actualizare semnată](docs/UPDATE.ro.md)
 - [Ghid complet](docs/GR-PHPIPAM.ro.md)
 - [Pregătire phpIPAM](phpipam/SETUP.ro.md)
 - [Contribuții](CONTRIBUTING.ro.md)
 
-Versiunea `1.1.0` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).
+Versiunea `1.2.0` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).

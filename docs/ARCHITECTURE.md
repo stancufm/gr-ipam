@@ -40,6 +40,8 @@ documentation and vault management.
 Both helpers load the installed `gr` module so API, metadata, profiles, vault
 and legacy-client behavior remain consistent.
 
+`libexec/gr-update` is a root-only transaction helper reached through `gr self-update`. It verifies a signed release tag against a pinned public key, performs an isolated install, backs up system files and rolls back a failed live installation.
+
 ### Configuration layers
 
 `/etc/gr/config.json` contains shared, non-secret settings. An optional

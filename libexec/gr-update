@@ -1,0 +1,211 @@
+#!/bin/sh
+# Privileged, signed-release updater invoked by `gr self-update`.
+set -eu
+
+UPDATE_CONFIG=${GR_UPDATE_CONFIG:-/etc/gr/update.json}
+RELEASE_KEY=${GR_RELEASE_KEY:-/etc/gr/release-key.asc}
+BACKUP_ROOT=${GR_BACKUP_ROOT:-/var/backups/gr}
+LOCK_DIR=${GR_UPDATE_LOCK:-/run/lock/gr-self-update.lock}
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: gr-update [check] [--tag vX.Y.Z] [--dry-run] [--yes]
+
+This helper is normally invoked through `gr self-update`. Live updates run as root.
+EOF
+}
+
+action=update
+tag=
+tag_specified=0
+dry_run=0
+assume_yes=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        check) action=check; shift ;;
+        --tag) [ "$#" -ge 2 ] || { usage; exit 2; }; tag=$2; tag_specified=1; shift 2 ;;
+        --dry-run) dry_run=1; shift ;;
+        --yes) assume_yes=1; shift ;;
+        --help|-h) usage; exit 0 ;;
+        *) usage; exit 2 ;;
+    esac
+done
+
+if [ -n "$tag" ] && ! printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "Invalid release tag: $tag" >&2
+    exit 2
+fi
+if [ "$action" != check ] && [ "$dry_run" -ne 1 ] && [ "$(id -u)" -ne 0 ]; then
+    echo "gr-update must run as root for a live update." >&2
+    exit 2
+fi
+command -v git >/dev/null || { echo "Missing dependency: git" >&2; exit 2; }
+command -v gpg >/dev/null || { echo "Missing dependency: gpg" >&2; exit 2; }
+command -v python3 >/dev/null || { echo "Missing dependency: python3" >&2; exit 2; }
+[ -r "$UPDATE_CONFIG" ] || { echo "Missing update configuration: $UPDATE_CONFIG" >&2; exit 2; }
+case "$(stat -c '%U:%a' "$UPDATE_CONFIG")" in
+    root:600|root:644) ;;
+    *) echo "Update configuration must be root-owned and not writable by group/others: $UPDATE_CONFIG" >&2; exit 2 ;;
+esac
+
+repository=$(python3 - "$UPDATE_CONFIG" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    value = json.load(handle).get("repository_url", "")
+if not isinstance(value, str) or not value.startswith("https://"):
+    raise SystemExit("repository_url must be an HTTPS URL")
+print(value)
+PY
+)
+
+current=$(/usr/local/bin/gr --version 2>/dev/null | awk '{print $NF}')
+case "$current" in
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *) echo "Cannot determine the installed gr version." >&2; exit 2 ;;
+esac
+
+available_tags=$(git ls-remote --tags --refs "$repository" |
+    sed -n 's#.*refs/tags/##p' |
+    grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+[ -n "$available_tags" ] || { echo "No semantic release tags found at $repository" >&2; exit 2; }
+latest=$(printf '%s\n' "$available_tags" | sort -V | tail -n 1)
+[ -n "$tag" ] || tag=$latest
+printf 'Installed: %s\nAvailable: %s\nSelected:  %s\n' "$current" "${latest#v}" "${tag#v}"
+
+printf '%s\n' "$available_tags" | grep -Fx "$tag" >/dev/null || {
+    echo "Release tag does not exist: $tag" >&2
+    exit 2
+}
+
+newer=$(printf '%s\n%s\n' "v$current" "$tag" | sort -V | tail -n 1)
+if [ "$tag" = "v$current" ]; then
+    echo "gr is already at the selected version."
+    exit 0
+fi
+if [ "$newer" != "$tag" ]; then
+    if [ "$tag_specified" -eq 0 ]; then
+        echo "No newer stable release is available."
+        exit 0
+    fi
+    echo "Refusing downgrade from $current to ${tag#v}." >&2
+    exit 2
+fi
+[ "$action" = check ] && exit 0
+[ -r "$RELEASE_KEY" ] || {
+    echo "Missing release verification key: $RELEASE_KEY" >&2
+    echo "Reinstall with: install.sh --release-key <project-release-key.asc>" >&2
+    exit 2
+}
+case "$(stat -c '%U:%a' "$RELEASE_KEY")" in
+    root:600|root:644) ;;
+    *) echo "Release key must be root-owned and not writable by group/others: $RELEASE_KEY" >&2; exit 2 ;;
+esac
+
+if [ "$assume_yes" -ne 1 ] && [ "$dry_run" -ne 1 ]; then
+    [ -t 0 ] || { echo "Interactive confirmation required; use --yes for automation." >&2; exit 2; }
+    printf 'Install signed gr release %s? [y/N] ' "$tag"
+    read answer
+    case "$answer" in y|Y|yes|YES) ;; *) echo "Update cancelled."; exit 0 ;; esac
+fi
+
+lock_created=0
+if [ "$dry_run" -ne 1 ]; then
+    install -d -m 0755 "$(dirname "$LOCK_DIR")"
+    if ! mkdir -m 0700 "$LOCK_DIR" 2>/dev/null; then
+        echo "Another gr update is already running: $LOCK_DIR" >&2
+        exit 2
+    fi
+    lock_created=1
+fi
+
+work=$(mktemp -d /tmp/gr-self-update.XXXXXX)
+backup=
+started=0
+completed=0
+
+restore_item() {
+    target=$1
+    name=$2
+    rm -rf "$target"
+    if [ -e "$backup/$name" ] || [ -L "$backup/$name" ]; then
+        install -d -m 0755 "$(dirname "$target")"
+        cp -a "$backup/$name" "$target"
+    fi
+}
+
+rollback() {
+    echo "Update failed; restoring backup from $backup" >&2
+    restore_item /usr/local/bin/gr bin-gr
+    restore_item /usr/local/libexec/gr libexec-gr
+    restore_item /usr/local/share/doc/gr doc-gr
+    restore_item /etc/gr/config.json config.json
+    restore_item /etc/gr/update.json update.json
+    restore_item /etc/gr/release-key.asc release-key.asc
+    restore_item /etc/systemd/system/gr-vendor-update.service vendor.service
+    restore_item /etc/systemd/system/gr-vendor-update.timer vendor.timer
+    systemctl daemon-reload 2>/dev/null || true
+}
+
+finish() {
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ "$status" -ne 0 ] && [ "$started" -eq 1 ] && [ "$completed" -eq 0 ]; then
+        rollback
+    fi
+    rm -rf "$work"
+    if [ "$lock_created" -eq 1 ]; then rm -rf "$LOCK_DIR"; fi
+    exit "$status"
+}
+trap finish EXIT HUP INT TERM
+
+repo=$work/repository
+gnupg=$work/gnupg
+stage=$work/stage
+config_copy=$work/config.json
+install -d -m 0700 "$gnupg"
+GNUPGHOME=$gnupg gpg --batch --quiet --import "$RELEASE_KEY"
+git init -q "$repo"
+git -C "$repo" remote add origin "$repository"
+git -C "$repo" fetch -q --depth 1 origin "refs/tags/$tag:refs/tags/$tag"
+GNUPGHOME=$gnupg git -C "$repo" verify-tag "$tag"
+git -C "$repo" checkout -q --detach "$tag^{commit}"
+
+release_version=$(tr -d '[:space:]' < "$repo/VERSION")
+[ "$release_version" = "${tag#v}" ] || {
+    echo "Release VERSION ($release_version) does not match tag $tag" >&2
+    exit 2
+}
+
+cp -a /etc/gr/config.json "$config_copy"
+sh "$repo/install.sh" --destdir "$stage" --config "$config_copy"
+"$stage/usr/local/bin/gr" --version
+
+if [ "$dry_run" -eq 1 ]; then
+    echo "Dry-run complete: signature, version and staged installation are valid."
+    exit 0
+fi
+
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+backup=$BACKUP_ROOT/update-$stamp
+[ ! -e "$backup" ] || { echo "Backup path already exists: $backup" >&2; exit 2; }
+install -d -m 0700 "$BACKUP_ROOT" "$backup"
+backup_item() {
+    source=$1
+    name=$2
+    if [ -e "$source" ] || [ -L "$source" ]; then cp -a "$source" "$backup/$name"; fi
+}
+backup_item /usr/local/bin/gr bin-gr
+backup_item /usr/local/libexec/gr libexec-gr
+backup_item /usr/local/share/doc/gr doc-gr
+backup_item /etc/gr/config.json config.json
+backup_item /etc/gr/update.json update.json
+backup_item /etc/gr/release-key.asc release-key.asc
+backup_item /etc/systemd/system/gr-vendor-update.service vendor.service
+backup_item /etc/systemd/system/gr-vendor-update.timer vendor.timer
+
+started=1
+sh "$repo/install.sh" --config "$config_copy"
+/usr/local/bin/gr --version
+/usr/local/bin/gr doctor --system
+completed=1
+echo "Updated gr to ${tag#v}. Backup retained at $backup"

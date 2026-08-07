@@ -12,6 +12,7 @@
 ## Controls
 
 - global executables and shared data are root-owned;
+- self-update accepts only HTTPS repositories and tags signed by the pinned project release key;
 - API credentials require mode `0600`;
 - user state directories use mode `0700`;
 - vault secrets are encrypted using `pass` and GPG;

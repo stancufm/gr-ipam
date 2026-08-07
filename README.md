@@ -66,6 +66,7 @@ gr vendor sync
 gr ssh validate
 gr ssh validate --run --ip 192.0.2.10
 gr collect version --ip 192.0.2.10
+gr self-update check
 ```
 
 ## Documentation
@@ -74,13 +75,14 @@ gr collect version --ip 192.0.2.10
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security model](docs/SECURITY-MODEL.md)
 - [SSH session auditing](docs/AUDIT.md)
+- [Signed self-update](docs/UPDATE.md)
 - [Complete command guide](docs/GR-PHPIPAM.md)
 - [phpIPAM preparation](phpipam/SETUP.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Project status
 
-Version `1.1.0` has been tested through an isolated `DESTDIR` installation on
+Version `1.2.0` has been tested through an isolated `DESTDIR` installation on
 Debian. The package contains no credentials, private keys, inventory exports or
 organization-specific addressing.
 
