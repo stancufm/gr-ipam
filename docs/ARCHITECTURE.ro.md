@@ -2,6 +2,8 @@
 
 [English](ARCHITECTURE.md)
 
+`libexec/gr-update` este helperul tranzacțional accesibil prin `gr self-update`. Rulează ca root, verifică tagul semnat cu cheia publică fixată, testează instalarea izolat, creează backup și face rollback dacă instalarea live eșuează.
+
 `bin/gr` este un CLI Python fără dependențe. El folosește API-ul HTTPS phpIPAM pentru inventar și metadate SSH, seiful GPG/pass per utilizator pentru parole, OpenSSH sau clientul `ssh1` izolat și baza IEEE comună din `/var/lib/gr`.
 
 `libexec/validate-ssh` validează concurent dispozitivele `sw*`, iar `libexec/collect-version` păstrează ieșirea brută și produce inventar JSON. Ambele reutilizează logica CLI-ului.
