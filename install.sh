@@ -117,6 +117,8 @@ PY
 fi
 if [ -n "$release_key_source" ]; then
   install -m 0644 "$release_key_source" "$destdir/etc/gr/release-key.asc"
+elif [ -r "$package_dir/release/project-release-key.asc" ]; then
+  install -m 0644 "$package_dir/release/project-release-key.asc" "$destdir/etc/gr/release-key.asc"
 fi
 
 python3 -c 'import ast,sys; [ast.parse(open(path, encoding="utf-8").read(), filename=path) for path in sys.argv[1:]]' \

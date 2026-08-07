@@ -13,11 +13,10 @@ sudo sh install.sh --base-url https://ipam.example.net --username gr-api \
 
 Fără `--ca-file` se folosește trust store-ul Debian. `--app-id` selectează aplicația read-only, iar `--migration-app-id` aplicația de scriere. `--config` instalează o configurație pregătită. Installerul nu copiază parole sau chei.
 
-Pentru actualizări semnate, furnizați și cheia GPG publică a proiectului:
+Pachetul oficial include și instalează automat cheia GPG publică a proiectului. Pentru un fork administrat separat puteți suprascrie repository-ul:
 
 ```bash
 sudo sh install.sh --config /etc/gr/config.json \
-  --release-key ./project-release-key.asc \
   --update-repository https://github.com/stancufm/gr-ipam.git
 ```
 

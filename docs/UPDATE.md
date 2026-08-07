@@ -6,17 +6,16 @@
 
 ## Trust bootstrap
 
-The updater trusts only a public GPG release key installed by an administrator. Install the initial package with the public key and the HTTPS repository URL:
+The updater trusts only the bundled public GPG release key. The official package installs it automatically. `--release-key` remains available for an authorized key rotation or a separately maintained fork:
 
 ```bash
 sudo sh install.sh \
   --base-url https://ipam.example.net \
   --username gr-api \
-  --release-key ./project-release-key.asc \
   --update-repository https://github.com/stancufm/gr-ipam.git
 ```
 
-This creates `/etc/gr/release-key.asc` and `/etc/gr/update.json`. The private signing key must remain offline or in a protected maintainer environment and must never be installed on a jump server.
+This creates `/etc/gr/release-key.asc` and `/etc/gr/update.json`. The expected release-key fingerprint is `27C3 EE8B CE56 CF9D ED43 B25A DFB7 BE40 8B23 0B80`. The private signing key must remain offline or in a protected maintainer environment and must never be installed on a jump server.
 
 ## Commands
 
