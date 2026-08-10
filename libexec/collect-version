@@ -32,6 +32,7 @@ def parse_version(text):
     version = match([
         r"Cisco IOS XE Software, Version\s+([^\s,]+)",
         r"Cisco IOS Software.*?Version\s+([^\s,]+)",
+        r"Switch Software,\s*Version\s+([^\s,]+)",
         r"Software Version\s*[:=]\s*([^\s,]+)",
         r"Version\s*[:=]\s*([^\r\n]+)",
     ], text)
@@ -64,7 +65,8 @@ def parse_version(text):
         os_family = "ios"
     elif "nx-os" in lower:
         os_family = "nx-os"
-    elif "small business" in lower or "sg300" in lower or "sg500" in lower:
+    elif ("small business" in lower or "sx220" in lower or "sg220" in lower or
+          "sf220" in lower or "sg300" in lower or "sg500" in lower):
         os_family = "cisco-small-business"
     return {"model": model, "firmware": version, "os_family": os_family,
             "uptime": uptime, "serial": serial, "system_image": image, "rom": rom}
@@ -88,7 +90,11 @@ def run_cisco_small_business(item, password, command, read_fd, login_driver_clas
     stdout_chunks, stderr_chunks = [], []
     streams = {master_fd: stdout_chunks, process.stderr.fileno(): stderr_chunks}
     deadline = time.monotonic() + timeout
-    pending_commands = [b"terminal datadump\n", b"show version\n", b"show system\n", b"exit\n"]
+    # Sx220 uses the first exit to leave privileged mode (hostname# -> hostname>)
+    # and needs a second exit to close the CLI session. Newer Small Business
+    # models normally disconnect on the first exit, leaving the second unused.
+    pending_commands = [b"terminal datadump\n", b"show version\n", b"show system\n",
+                        b"exit\n", b"exit\n"]
     timed_out = False
     try:
         while streams:

@@ -39,10 +39,13 @@ prin profilul SSH, fără un câmp driver separat pentru fiecare adresă:
 În phpIPAM se setează `ssh_profile=cisco-smb`, utilizatorul corespunzător și
 portul/clientul SSH normal. `gr --ssh` răspunde prompturilor secundare și apoi
 predă CLI-ul interactiv operatorului. `gr collect version` folosește același
-driver, dezactivează paginarea cu `terminal datadump`, rulează `show version`
-pentru firmware, rulează `show system` pentru model/datele de sistem și închide
+driver, încearcă dezactivarea paginării cu `terminal datadump`, rulează
+`show version` pentru firmware, rulează `show system` pentru model/datele de sistem și închide
 sesiunea. Fiecare comandă este trimisă numai după reapariția promptului CLI.
-Parola injectată nu este scrisă în rapoartele collect.
+Pe modelele Sx220, `terminal datadump` poate să nu fie suportată, `show version`
+conține deja modelul, iar două comenzi `exit` sunt necesare deoarece prima doar
+iese din modul privilegiat. Parola injectată nu este scrisă în rapoartele
+collect.
 
 `--details` păstrează sumarul compact și apoi afișează toate câmpurile returnate
 de phpIPAM pentru fiecare adresă găsită. Câmpurile sunt sortate, valorile pe mai

@@ -29,6 +29,18 @@ class CollectVersionCliTests(unittest.TestCase):
         self.assertEqual(parsed["uptime"], "51,12:05:36")
         self.assertEqual(parsed["serial"], "DNI12345678")
 
+    def test_sx220_show_version_fields_are_parsed(self):
+        parsed = COLLECTOR.parse_version(
+            "Cisco Sx220 Series Switch Software, Version 1.1.3.1, RELEASE SOFTWARE\n"
+            "Sw-17 uptime is 0 days, 0 hours, 2 mins, 40 secs\n"
+            "Model Number     : SF220-24P\n"
+            "Serial Number    : DNI00000000\n"
+            "PID              : SF220-24P-K9\n")
+        self.assertEqual(parsed["firmware"], "1.1.3.1")
+        self.assertEqual(parsed["model"], "SF220-24P")
+        self.assertEqual(parsed["serial"], "DNI00000000")
+        self.assertEqual(parsed["os_family"], "cisco-small-business")
+
     def test_all_uses_documented_defaults(self):
         args = GR.build_parser().parse_args(["collect", "version", "--all"])
         self.assertTrue(args.all)
