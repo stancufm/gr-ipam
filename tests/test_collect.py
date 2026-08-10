@@ -72,6 +72,25 @@ class CollectVersionCliTests(unittest.TestCase):
         self.assertEqual(parsed["model"], "S5224F-ON")
         self.assertEqual(parsed["os_family"], "dell-os10")
 
+    def test_hpe_arubaos_switch_banner_and_version_are_parsed(self):
+        parsed = COLLECTOR.parse_version(
+            "HP J9726A 2920-24G Switch\n"
+            "Software revision WB.16.10.0025\n")
+        self.assertEqual(parsed["firmware"], "WB.16.10.0025")
+        self.assertEqual(parsed["model"], "J9726A 2920-24G")
+        self.assertEqual(parsed["os_family"], "hpe-arubaos-switch")
+
+    def test_hpe_login_passes_continue_banner_and_detects_prompts(self):
+        driver = GR.HpeArubaOsSwitchLogin("manager", "unused")
+        self.assertEqual(driver.feed(b"Press any key to continue\x1b[13;1H\x1b[?25h"),
+                         [("credential", b" ")])
+        self.assertEqual(driver.feed(b"\r\nSw-11# \x1b[24;8H"), [("ready", b"")])
+        self.assertEqual(driver.feed(b"output\r\nSw-11# \x1b[?25h"), [("prompt", b"")])
+        self.assertEqual(driver.feed(b"Do you want to log out (y/n)? \x1b[24;31H"),
+                         [("credential", b"y\n")])
+        self.assertEqual(driver.feed(b"Do you want to log out [y/n]? \x1b[24;31H"),
+                         [("credential", b"y\n")])
+
     def test_all_uses_documented_defaults(self):
         args = GR.build_parser().parse_args(["collect", "version", "--all"])
         self.assertTrue(args.all)

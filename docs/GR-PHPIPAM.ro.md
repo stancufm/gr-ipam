@@ -57,6 +57,13 @@ Echipamentele Dell SmartFabric OS10 folosesc `device_driver=dell-os10`.
 Driverul rulează `show version` și extrage versiunea OS și `System Type`,
 independent de profilul de credențiale SSH selectat.
 
+Echipamentele HPE ArubaOS-Switch/ProVision folosesc
+`device_driver=hpe-arubaos-switch`. Driverul interactiv confirmă ecranul
+`Press any key to continue`, dezactivează paginarea cu `no page`, rulează
+`show version` și `show system` și extrage identificatorul de
+produs HP, modelul și revizia software. Userul SSH și profilul parolei rămân
+metadate independente.
+
 `--details` păstrează sumarul compact și apoi afișează toate câmpurile returnate
 de phpIPAM pentru fiecare adresă găsită. Câmpurile sunt sortate, valorile pe mai
 multe linii sunt indentate, iar structurile JSON rămân lizibile. Afișarea este

@@ -41,24 +41,33 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.0.0"
+GR_VERSION = "2.1.0"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 DEVICE_DRIVER_SPECS = {
     "generic": {
         "interactive_cli": False,
         "version_commands": ("show version",),
+        "cleanup_commands": (),
     },
     "cisco-ios": {
         "interactive_cli": False,
         "version_commands": ("show version",),
+        "cleanup_commands": (),
     },
     "cisco-small-business": {
         "interactive_cli": True,
         "version_commands": ("terminal datadump", "show version", "show system"),
+        "cleanup_commands": ("exit", "exit"),
     },
     "dell-os10": {
         "interactive_cli": False,
         "version_commands": ("show version",),
+        "cleanup_commands": (),
+    },
+    "hpe-arubaos-switch": {
+        "interactive_cli": True,
+        "version_commands": ("no page", "show version", "show system"),
+        "cleanup_commands": ("exit", "exit"),
     },
 }
 DEVICE_DRIVERS = tuple(DEVICE_DRIVER_SPECS)
@@ -875,6 +884,49 @@ class CiscoSmallBusinessLogin:
         return []
 
 
+class HpeArubaOsSwitchLogin:
+    """Pass the ArubaOS-Switch legal banner and recognize its CLI prompt."""
+
+    CONTINUE_RE = re.compile(br"press any key to continue", re.I)
+    LOGOUT_RE = re.compile(br"do you want to log out\s*[\[(]y/n[\])]\?", re.I)
+    PROMPT_RE = re.compile(br"(?:^|[\r\n])[^\r\n]{1,128}[>#]\s*$")
+    ANSI_RE = re.compile(br"\x1b\[[0-?]*[ -/]*[@-~]")
+
+    def __init__(self, _username, _password):
+        self.state = "continue"
+        self.buffer = b""
+
+    def feed(self, data):
+        self.buffer = (self.buffer + data)[-4096:]
+        visible = self.ANSI_RE.sub(b"", self.buffer)
+        if self.state == "continue" and self.CONTINUE_RE.search(visible):
+            self.state = "prompt"
+            self.buffer = b""
+            return [("credential", b" ")]
+        if self.state == "prompt" and self.PROMPT_RE.search(visible):
+            self.state = "ready"
+            self.buffer = b""
+            return [("ready", b"")]
+        if self.state == "ready" and self.LOGOUT_RE.search(visible):
+            self.buffer = b""
+            return [("credential", b"y\n")]
+        if self.state == "ready" and self.PROMPT_RE.search(visible):
+            self.buffer = b""
+            return [("prompt", b"")]
+        return []
+
+
+def device_login_driver(driver):
+    mapping = {
+        "cisco-small-business": CiscoSmallBusinessLogin,
+        "hpe-arubaos-switch": HpeArubaOsSwitchLogin,
+    }
+    normalized = normalize_device_driver(driver)
+    if normalized not in mapping:
+        raise GrError("Device driver {} has no interactive login handler".format(driver))
+    return mapping[normalized]
+
+
 
 def audit_component(value):
     value = str(value or "unknown").strip()
@@ -1491,7 +1543,7 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
     login_driver = None
     if driver_spec["interactive_cli"]:
         print("Using device driver: {}".format(device_driver))
-        login_driver = CiscoSmallBusinessLogin(user, vault_password)
+        login_driver = device_login_driver(device_driver)(user, vault_password)
     audit_enabled = cfg.get("ssh_audit_enabled", False) if audit is None else audit
     if audit_enabled:
         recorder = SshSessionAudit(cfg, row, command)

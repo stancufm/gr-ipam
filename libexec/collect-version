@@ -34,6 +34,7 @@ def parse_version(text):
         r"Cisco IOS Software.*?Version\s+([^\s,]+)",
         r"Switch Software,\s*Version\s+([^\s,]+)",
         r"Software Version\s*[:=]\s*([^\s,]+)",
+        r"Software revision\s+([^\s]+)",
         r"Version\s*[:=]\s*([^\r\n]+)",
     ], text)
     model = match([
@@ -41,6 +42,7 @@ def parse_version(text):
         r"^Model [Nn]ame\s*[:=]\s*(\S+)",
         r"^System Model(?: ID)?\s*[:=]\s*(\S+)",
         r"^System Type\s*[:=]\s*(\S+)",
+        r"^HP\s+([A-Z0-9-]+\s+[^\r\n]+?)\s+Switch\s*$",
         r"^[\r \t]*System Description\s*[:=]\s*(\S+)",
         r"^[Cc]isco\s+(\S+)\s+.*(?:processor|revision)",
         r"^Machine type\s*[:=]\s*(\S+)",
@@ -64,6 +66,9 @@ def parse_version(text):
         os_family = "ios-xe"
     elif "dell smartfabric os10" in lower:
         os_family = "dell-os10"
+    elif ("arubaos-switch" in lower or
+          re.search(r"^HP\s+[A-Z0-9-]+\s+.+\s+Switch\s*$", text, re.I | re.M)):
+        os_family = "hpe-arubaos-switch"
     elif "cisco ios software" in lower:
         os_family = "ios"
     elif "nx-os" in lower:
@@ -103,8 +108,8 @@ def next_prompt_command(version_commands, cleanup_commands):
     return None, True
 
 
-def run_cisco_small_business(item, password, command, read_fd, login_driver_class,
-                             version_commands, timeout=50):
+def run_interactive_device(item, password, command, read_fd, login_driver_class,
+                           version_commands, cleanup_command_values, timeout=50):
     master_fd, slave_fd = os.openpty()
     command = command[:-1]
     command.insert(command.index("-p"), "-tt")
@@ -121,7 +126,7 @@ def run_cisco_small_business(item, password, command, read_fd, login_driver_clas
     # and needs a second exit to close the CLI session. Newer Small Business
     # models normally disconnect on the first exit, leaving the second unused.
     pending_commands = [(value + "\n").encode("utf-8") for value in version_commands]
-    cleanup_commands = [b"exit\n", b"exit\n"]
+    cleanup_commands = [(value + "\n").encode("utf-8") for value in cleanup_command_values]
     collection_complete = False
     timed_out = False
     try:
@@ -175,6 +180,7 @@ def run_one(item, password, output_dir):
     login_driver_class = item.pop("_login_driver", None)
     known_hosts = item.pop("_known_hosts")
     version_commands = item.pop("_version_commands")
+    cleanup_commands = item.pop("_cleanup_commands")
     read_fd, write_fd = os.pipe()
     try:
         os.write(write_fd, (password + "\n").encode("utf-8"))
@@ -187,9 +193,10 @@ def run_one(item, password, output_dir):
                    "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
                    "-p", str(item["port"]), "{}@{}".format(item["user"], item["ip"]),
                    version_commands[0]]
-        if item.get("device_driver") == "cisco-small-business":
-            returncode, stdout, stderr, timed_out, script_complete = run_cisco_small_business(
-                item, password, command, read_fd, login_driver_class, version_commands)
+        if login_driver_class is not None:
+            returncode, stdout, stderr, timed_out, script_complete = run_interactive_device(
+                item, password, command, read_fd, login_driver_class, version_commands,
+                cleanup_commands)
             read_fd = None
         else:
             completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -208,11 +215,11 @@ def run_one(item, password, output_dir):
         os.chmod(raw_path, 0o600)
         item["raw_report"] = raw_path
         parsed = parse_version(stdout)
-        if item.get("device_driver") == "cisco-small-business":
-            parsed["os_family"] = "cisco-small-business"
+        if login_driver_class is not None:
+            parsed["os_family"] = item.get("device_driver")
         item.update(parsed)
         successful = returncode == 0 or (
-            item.get("device_driver") == "cisco-small-business" and
+            login_driver_class is not None and
             script_complete and bool(parsed.get("firmware")))
         item["result"] = "timeout" if timed_out else ("success" if successful else "failed")
     except subprocess.TimeoutExpired:
@@ -256,7 +263,9 @@ def main():
                       "profile": meta["profile"], "client": meta.get("client", "normal"),
                       "device_driver": device_driver,
                       "_version_commands": driver_spec["version_commands"],
-                      "_login_driver": gr.CiscoSmallBusinessLogin})
+                      "_cleanup_commands": driver_spec["cleanup_commands"],
+                      "_login_driver": (gr.device_login_driver(device_driver)
+                                        if driver_spec["interactive_cli"] else None)})
     if not items:
         print("No eligible devices matched.")
         return 1

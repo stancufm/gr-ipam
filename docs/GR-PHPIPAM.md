@@ -59,6 +59,13 @@ Dell SmartFabric OS10 devices use `device_driver=dell-os10`. The driver runs
 `show version` and parses the OS version and `System Type` independently from
 the selected SSH credential profile.
 
+HPE ArubaOS-Switch/ProVision devices use
+`device_driver=hpe-arubaos-switch`. The interactive driver acknowledges the
+post-login `Press any key to continue` banner, disables paging with `no page`,
+runs `show version` and `show system`, and parses the HP product
+identifier, model and software revision. The SSH user and password profile
+remain independent metadata.
+
 `--details` keeps the compact summary and then prints every field returned by
 phpIPAM for each matching address. Fields are sorted, multiline values are
 indented and nested JSON values remain readable. The detailed view is read-only
