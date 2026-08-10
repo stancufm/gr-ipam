@@ -1348,6 +1348,23 @@ def command_audit_show(cfg, target=None, session=None, streams=None, use_pager=T
     return command_audit_replay(selected["path"], streams, use_pager)
 
 
+def collect_report_criteria(data, filename):
+    criteria = data.get("criteria")
+    if isinstance(criteria, dict):
+        selector = str(criteria.get("selector") or "unknown")
+        if selector == "all-non-generic-drivers":
+            return "driver!=generic"
+        if selector == "vendor-all":
+            return "vendor={} all".format(criteria.get("vendor") or "-")
+        if selector == "ip":
+            ips = ",".join(str(value) for value in criteria.get("ips", [])) or "-"
+            return "vendor={} ip={}".format(criteria.get("vendor") or "-", ips)
+        return selector
+    suffix = "-show-version-report.json"
+    vendor = filename[:-len(suffix)] if filename.endswith(suffix) else filename
+    return "vendor={} (legacy)".format(vendor or "unknown")
+
+
 def collect_report_inventory(cfg):
     root = cfg["device_version_dir"]
     if not os.path.isdir(root):
@@ -1386,6 +1403,7 @@ def collect_report_inventory(cfg):
                     "success": counts["success"],
                     "failed": counts["failed"],
                     "timeout": counts["timeout"],
+                    "criteria": collect_report_criteria(data, item.name),
                     "data": data,
                 })
     except OSError as exc:
@@ -1445,10 +1463,11 @@ def command_collect_reports(cfg, report=None, use_pager=True, raw=False):
         if not reports:
             print("No collect reports found in {}.".format(cfg["device_version_dir"]))
             return 0
-        rows = [(item["id"], item["generated"], str(item["devices"]),
+        rows = [(item["id"], item["generated"], item["criteria"], str(item["devices"]),
                  str(item["success"]), str(item["failed"]), str(item["timeout"]))
                 for item in reports]
-        print_audit_table(("REPORT", "GENERATED UTC", "DEVICES", "SUCCESS", "FAILED", "TIMEOUT"), rows)
+        print_audit_table(("REPORT", "GENERATED UTC", "CRITERIA", "DEVICES",
+                           "SUCCESS", "FAILED", "TIMEOUT"), rows)
         print("\nShow: gr collect reports <report-or-latest>")
         return 0
     selected = reports[0] if report == "latest" and reports else next(
@@ -2576,6 +2595,8 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     collect_version = collect_sub.add_parser("version", help="run and parse show version")
     collect_target = collect_version.add_mutually_exclusive_group(required=True)
     collect_target.add_argument("--all", action="store_true", help="collect from every matching vendor device")
+    collect_target.add_argument("--all-drivers", action="store_true",
+                                help="collect every device with an explicit non-generic driver")
     collect_target.add_argument("--ip", action="append", dest="ips", help="limit to an IP (repeatable)")
     collect_version.add_argument("--vendor", default="cisco",
                                  help="require this phpIPAM device_vendor value (default: cisco)")
@@ -2771,7 +2792,11 @@ def main(argv=None):
         if args.collect_action != "version":
             parser.parse_args(["collect", "--help"])
             return 0
-        helper_args = ["--vendor", args.vendor, "--workers", str(args.workers)]
+        helper_args = ["--workers", str(args.workers)]
+        if args.all_drivers:
+            helper_args.append("--all-drivers")
+        else:
+            helper_args.extend(["--vendor", args.vendor])
         if args.all:
             helper_args.append("--all")
         for ip in args.ips or []:

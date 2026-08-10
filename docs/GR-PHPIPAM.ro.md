@@ -148,6 +148,7 @@ Baza IEEE comună este actualizată atomic. Sincronizările și colectările pro
 
 ```bash
 gr collect version --all [--vendor VENDOR] [--workers N]
+gr collect version --all-drivers [--workers N]
 gr collect version --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
 ```
 
@@ -165,6 +166,8 @@ curentă. Dacă valoarea lipsește, înregistrările Cisco folosesc fallback
 Opțiuni:
 
 - `--all` selectează toate adresele eligibile care corespund lui `--vendor`;
+- `--all-drivers` ignoră vendorul și hostname-ul și selectează fiecare adresă
+  care are în phpIPAM un `device_driver` explicit diferit de `generic`;
 - `--ip IP` limitează colectarea la o adresă și poate fi repetat; filtrul de
   producător și cerințele SSH/profil se aplică în continuare;
 - `--vendor VENDOR` compară fără diferență între litere mari și mici câmpul
@@ -175,10 +178,15 @@ Opțiuni:
 Fiecare rulare creează un director privat cu timestamp în
 `~/.local/state/gr/device-version/`. Acesta conține outputul brut `show version`
 pentru fiecare dispozitiv, un depozit persistent per utilizator pentru cheile host și
-`<vendor>-show-version-report.json` cu modelul, firmware-ul, familia OS, uptime,
-seria, imaginea de sistem, ROM-ul, stderr și rezultatul. Parserul este destinat
-în principal outputului Cisco; alt producător este util numai dacă suportă
-`show version` și un format compatibil.
+`<vendor>-show-version-report.json` (sau `all-drivers-show-version-report.json`)
+cu criteriile de generare, modelul, firmware-ul, familia OS, uptime, seria,
+imaginea de sistem, ROM-ul, stderr și rezultatul. Parserul este controlat de
+driverul fiecărui echipament și suportă familiile implementate Cisco, Dell OS10,
+HPE ArubaOS-Switch și HPE Comware.
+
+`gr collect reports` afișează fiecare raport pe o linie. Coloana `CRITERIA`
+arată cum a fost generat (`vendor=... all`, IP-urile selectate sau
+`driver!=generic`). Rapoartele vechi fără criterii salvate sunt marcate `legacy`.
 
 ### Migrarea driverelor din gr 1.x
 

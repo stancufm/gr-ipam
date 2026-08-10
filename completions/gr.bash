@@ -126,7 +126,7 @@ _gr_completion() {
             if (( COMP_CWORD == 2 )); then
                 _gr_complete_words "version reports" "$current"
             elif [[ $subcommand == version ]]; then
-                _gr_complete_words "--all --ip --vendor --workers --config --help" "$current"
+                _gr_complete_words "--all --all-drivers --ip --vendor --workers --config --help" "$current"
             elif [[ $subcommand == reports && $COMP_CWORD -eq 3 ]]; then
                 if [[ $current == -* ]]; then
                     _gr_complete_words "--raw --no-more --config --help" "$current"

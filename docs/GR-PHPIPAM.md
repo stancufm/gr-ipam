@@ -151,6 +151,7 @@ The shared IEEE database is replaced atomically. Synchronization, validation and
 
 ```bash
 gr collect version --all [--vendor VENDOR] [--workers N]
+gr collect version --all-drivers [--workers N]
 gr collect version --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
 ```
 
@@ -168,6 +169,8 @@ other vendors to `generic`.
 Options:
 
 - `--all` selects every eligible address matching `--vendor`;
+- `--all-drivers` ignores vendor and hostname and selects every address with an
+  explicit phpIPAM `device_driver` value other than `generic`;
 - `--ip IP` restricts collection to one address and can be repeated; the vendor,
   SSH-enabled and profile requirements still apply;
 - `--vendor VENDOR` matches the phpIPAM `device_vendor` value
@@ -178,10 +181,15 @@ Options:
 Each run creates a private timestamped directory under
 `~/.local/state/gr/device-version/`. It contains one raw `show version` text
 file per device, a persistent per-user host-key store and
-`<vendor>-show-version-report.json` with parsed model, firmware, OS family,
+`<vendor>-show-version-report.json` (or `all-drivers-show-version-report.json`)
+with generation criteria plus parsed model, firmware, OS family,
 uptime, serial, system image, ROM, stderr and result status. The parser is
-primarily designed for Cisco output; a different vendor is useful only when
-its devices support `show version` and compatible output.
+driven by each selected device driver and supports the implemented Cisco, Dell
+OS10, HPE ArubaOS-Switch and HPE Comware command/output families.
+
+`gr collect reports` lists one report per row. Its `CRITERIA` column shows how
+the report was generated (`vendor=... all`, selected IPs, or
+`driver!=generic`). Older reports without saved criteria are labeled `legacy`.
 
 ### Driver migration from gr 1.x
 

@@ -118,6 +118,11 @@ class CollectVersionCliTests(unittest.TestCase):
         self.assertEqual(args.vendor, "cisco")
         self.assertEqual(args.workers, 4)
 
+    def test_all_drivers_is_vendor_independent(self):
+        args = GR.build_parser().parse_args(["collect", "version", "--all-drivers"])
+        self.assertTrue(args.all_drivers)
+        self.assertFalse(args.all)
+
     def test_ip_is_repeatable_and_accepts_overrides(self):
         args = GR.build_parser().parse_args([
             "collect", "version", "--ip", "192.0.2.10", "--ip", "192.0.2.11",
@@ -153,6 +158,8 @@ class CollectVersionCliTests(unittest.TestCase):
             with contextlib.redirect_stdout(listing):
                 GR.command_collect_reports(cfg)
             self.assertIn(report_id, listing.getvalue())
+            self.assertIn("CRITERIA", listing.getvalue())
+            self.assertIn("vendor=cisco (legacy)", listing.getvalue())
             self.assertRegex(listing.getvalue(), r"2\s+1\s+1\s+0")
 
             shown = io.StringIO()
@@ -180,6 +187,25 @@ class CollectVersionCliTests(unittest.TestCase):
             with contextlib.redirect_stdout(completed):
                 GR.command_completion(cfg, "collect-reports")
             self.assertEqual(completed.getvalue().splitlines(), ["latest", report_id])
+
+    def test_report_listing_shows_saved_generation_criteria(self):
+        with tempfile.TemporaryDirectory() as root:
+            report_id = "20260810T110000Z"
+            directory = os.path.join(root, report_id)
+            os.makedirs(directory)
+            data = {
+                "generated_utc": report_id,
+                "command": "show version",
+                "criteria": {"selector": "all-non-generic-drivers"},
+                "results": [],
+            }
+            with open(os.path.join(directory, "all-drivers-show-version-report.json"),
+                      "w", encoding="utf-8") as handle:
+                json.dump(data, handle)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                GR.command_collect_reports({"device_version_dir": root})
+            self.assertIn("driver!=generic", output.getvalue())
 
     def test_reports_parser_accepts_selector_and_no_more(self):
         args = GR.build_parser().parse_args([
