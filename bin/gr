@@ -43,7 +43,7 @@ VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.3.1"
+GR_VERSION = "2.3.2"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -59,9 +59,10 @@ DEVICE_DRIVER_SPECS = {
     },
     "cisco-ios": {
         "interactive_cli": False,
+        "config_interactive_cli": True,
         "version_commands": ("show version",),
-        "cleanup_commands": (),
-        "config_commands": ("terminal length 0", "show running-config"),
+        "cleanup_commands": ("exit",),
+        "config_commands": ("enable", "terminal length 0", "show running-config"),
     },
     "cisco-small-business": {
         "interactive_cli": True,
@@ -962,6 +963,7 @@ class CiscoSmallBusinessLogin:
     USERNAME_RE = re.compile(br"user\s*name\s*:\s*$", re.I)
     PASSWORD_RE = re.compile(br"password\s*:\s*$", re.I)
     PROMPT_RE = re.compile(br"(?:^|[\r\n])[^\r\n]{0,128}[>#]\s*$")
+    PAGER_RE = re.compile(br"(?:--\s*more\s*--|more\s*[:>])", re.I)
 
     def __init__(self, username, password):
         self.username = str(username).encode("utf-8")
@@ -971,6 +973,9 @@ class CiscoSmallBusinessLogin:
 
     def feed(self, data):
         self.buffer = (self.buffer + data)[-4096:]
+        if self.state == "ready" and self.PAGER_RE.search(self.buffer):
+            self.buffer = b""
+            return [("credential", b" ")]
         if self.state == "username" and self.PROMPT_RE.search(self.buffer):
             self.state = "ready"
             self.buffer = b""
@@ -993,20 +998,19 @@ class CiscoSmallBusinessLogin:
         return []
 
 
-class PlanetSgsLogin(CiscoSmallBusinessLogin):
-    """Handle PLANET's optional enable-password prompt after initial login."""
-
-    PAGER_RE = re.compile(br"(?:--\s*more\s*--|more\s*[:>])", re.I)
+class CiscoIosLogin(CiscoSmallBusinessLogin):
+    """Drive an IOS PTY and handle an optional enable-password prompt."""
 
     def feed(self, data):
         visible = (self.buffer + data)[-4096:]
-        if self.state == "ready" and self.PAGER_RE.search(visible):
-            self.buffer = b""
-            return [("credential", b" ")]
         if self.state == "ready" and self.PASSWORD_RE.search(visible):
             self.buffer = b""
             return [("credential", self.password + b"\n")]
         return super().feed(data)
+
+
+class PlanetSgsLogin(CiscoIosLogin):
+    """Drive the PLANET SGS privileged CLI and paginated output."""
 
 
 class HpeArubaOsSwitchLogin:
@@ -1066,6 +1070,7 @@ class HpeComwareLogin:
 
 def device_login_driver(driver):
     mapping = {
+        "cisco-ios": CiscoIosLogin,
         "cisco-small-business": CiscoSmallBusinessLogin,
         "planet-sgs": PlanetSgsLogin,
         "hpe-arubaos-switch": HpeArubaOsSwitchLogin,
