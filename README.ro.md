@@ -14,6 +14,7 @@ Poate căuta adrese, deschide conexiuni SSH, păstra parolele dispozitivelor în
 - scrierile sunt dry-run implicit și necesită `--apply`;
 - algoritmii SSH vechi sunt izolați per dispozitiv;
 - auditul SSH este configurabil global sau per sesiune și produce fișiere private.
+- autocomplete-ul Bash acoperă comenzile, valorile valide și navigarea în audit.
 
 ## Cerințe și instalare
 
@@ -36,7 +37,7 @@ Dacă phpIPAM folosește un certificat emis de o CA publică, omiteți `--ca-fil
 gr find core-switch
 gr --ssh core-switch
 gr --ssh --audit core-switch
-gr audit show ~/.local/state/gr/audit/core-switch/<sesiune>.ses
+gr audit show core-switch latest
 gr update 192.0.2.10 --ssh-enabled yes --ssh-user operator --apply
 gr vendor lookup e8:d3:22:00:00:01
 gr ssh validate
@@ -55,4 +56,4 @@ gr self-update check
 - [Pregătire phpIPAM](phpipam/SETUP.ro.md)
 - [Contribuții](CONTRIBUTING.ro.md)
 
-Versiunea `1.2.0` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).
+Versiunea `1.3.0` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).

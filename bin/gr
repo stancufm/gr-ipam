@@ -39,7 +39,8 @@ DEFAULT_DOCUMENTATION_RO = "/usr/local/share/doc/gr/GR-PHPIPAM.ro.md"
 SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
-GR_VERSION = "1.2.0"
+BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
+GR_VERSION = "1.3.0"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 
 
@@ -782,7 +783,7 @@ def run_audited_ssh(command, audit, inherited_fd=None):
     return exit_status
 
 
-def command_audit_show(path):
+def command_audit_replay(path):
     path = expand(path)
     try:
         with open(path, encoding="ascii") as handle:
@@ -797,6 +798,185 @@ def command_audit_show(path):
     except (OSError, ValueError, KeyError) as exc:
         raise GrError("Cannot replay audit {}: {}".format(path, exc))
     return 0
+
+
+def audit_session_summary(path):
+    """Return safe index metadata without decoding recorded terminal frames."""
+    try:
+        with open(path, "rb") as handle:
+            header = json.loads(handle.readline().decode("ascii"))
+            if header.get("format") != "gr-ssh-session-v1":
+                raise ValueError("unsupported audit format")
+            handle.seek(0, os.SEEK_END)
+            end = handle.tell()
+            start = max(0, end - 65536)
+            handle.seek(start)
+            tail = handle.read()
+            lines = tail.splitlines()
+            trailer = {}
+            for line in reversed(lines):
+                try:
+                    trailer = json.loads(line.decode("ascii"))
+                    break
+                except (UnicodeDecodeError, ValueError):
+                    continue
+            if "ended_utc" not in trailer and "exit_status" not in trailer:
+                trailer = {}
+        return {
+            "path": path,
+            "directory": os.path.basename(os.path.dirname(path)),
+            "session": os.path.splitext(os.path.basename(path))[0],
+            "hostname": str(header.get("hostname") or ""),
+            "ip": str(header.get("ip") or ""),
+            "started": str(header.get("started_utc") or ""),
+            "ended": str(trailer.get("ended_utc") or ""),
+            "exit_status": trailer.get("exit_status", "incomplete"),
+        }
+    except (OSError, ValueError, KeyError) as exc:
+        raise GrError("Cannot index audit {}: {}".format(path, exc))
+
+
+def audit_inventory(cfg):
+    root = cfg["ssh_audit_dir"]
+    if not os.path.isdir(root):
+        return []
+    sessions = []
+    try:
+        directories = sorted(os.scandir(root), key=lambda item: item.name.lower())
+        for directory in directories:
+            if not directory.is_dir(follow_symlinks=False):
+                continue
+            files = sorted(os.scandir(directory.path), key=lambda item: item.name.lower())
+            for item in files:
+                if item.name.endswith(".ses") and item.is_file(follow_symlinks=False):
+                    sessions.append(audit_session_summary(item.path))
+    except OSError as exc:
+        raise GrError("Cannot list audit directory {}: {}".format(root, exc))
+    return sessions
+
+
+def audit_session_keys(summary):
+    return tuple(value for value in (summary["directory"], summary["hostname"], summary["ip"]) if value)
+
+
+def audit_target_matches(summary, target, exact=False):
+    needle = str(target or "").lower()
+    keys = [value.lower() for value in audit_session_keys(summary)]
+    return any(value == needle for value in keys) if exact else any(needle in value for value in keys)
+
+
+def audit_target_rows(sessions, filter_value=None):
+    groups = {}
+    for summary in sessions:
+        if filter_value and not audit_target_matches(summary, filter_value):
+            continue
+        key = (summary["directory"], summary["hostname"], summary["ip"])
+        groups.setdefault(key, []).append(summary)
+    rows = []
+    for (directory, hostname, ip), items in groups.items():
+        latest = max(item["started"] for item in items)
+        rows.append((hostname or directory, ip or "-", str(len(items)), latest or "-"))
+    return sorted(rows, key=lambda row: (row[0].lower(), row[1]))
+
+
+def print_audit_table(columns, rows):
+    widths = [len(column) for column in columns]
+    for row in rows:
+        for index, value in enumerate(row):
+            widths[index] = max(widths[index], len(str(value)))
+    fmt = "  ".join("{:<" + str(width) + "}" for width in widths)
+    print(fmt.format(*columns))
+    print(fmt.format(*("-" * width for width in widths)))
+    for row in rows:
+        print(fmt.format(*(str(value) for value in row)))
+
+
+def resolve_audit_sessions(cfg, target):
+    return [item for item in audit_inventory(cfg) if audit_target_matches(item, target, exact=True)]
+
+
+def command_audit_show(cfg, target=None, session=None):
+    sessions = audit_inventory(cfg)
+    if not target:
+        rows = audit_target_rows(sessions)
+        if not rows:
+            print("No SSH audit sessions found in {}.".format(cfg["ssh_audit_dir"]))
+            return 0
+        print_audit_table(("TARGET", "IP", "SESSIONS", "LATEST UTC"), rows)
+        print("\nNext: gr audit show <hostname-or-ip>")
+        return 0
+
+    direct_path = expand(target)
+    if os.path.isfile(direct_path) and session is None:
+        return command_audit_replay(direct_path)
+
+    matches = [item for item in sessions if audit_target_matches(item, target, exact=True)]
+    if not matches:
+        rows = audit_target_rows(sessions, target)
+        if rows and session is None:
+            print_audit_table(("TARGET", "IP", "SESSIONS", "LATEST UTC"), rows)
+            print("\nUse a complete hostname or IP to list its sessions.")
+            return 0
+        raise GrError("No audit target matches: {}".format(target))
+
+    matches.sort(key=lambda item: (item["started"], item["session"]), reverse=True)
+    if session is None:
+        rows = []
+        for item in matches:
+            rows.append((item["session"], item["started"] or "-", item["ended"] or "incomplete",
+                         str(item["exit_status"])))
+        print_audit_table(("SESSION", "STARTED UTC", "ENDED UTC", "EXIT"), rows)
+        print("\nReplay: gr audit show {} <session-or-latest>".format(target))
+        return 0
+
+    if session == "latest":
+        selected = matches[0]
+    else:
+        normalized = session[:-4] if session.endswith(".ses") else session
+        candidates = [item for item in matches if item["session"] == normalized]
+        if not candidates:
+            raise GrError("No audit session {} for target {}".format(session, target))
+        selected = candidates[0]
+    return command_audit_replay(selected["path"])
+
+
+def completion_source_path():
+    candidates = [
+        BASH_COMPLETION,
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "completions", "gr.bash"),
+    ]
+    return next((path for path in candidates if os.path.isfile(path)), "")
+
+
+def command_completion(cfg, action, value=None):
+    if action == "bash":
+        source = completion_source_path()
+        if not source:
+            raise GrError("Bash completion file is not installed")
+        with open(source, encoding="utf-8") as handle:
+            sys.stdout.write(handle.read())
+        return 0
+    if action == "profiles":
+        for profile in sorted(cfg.get("ssh_profiles", {}), key=str.lower):
+            print(profile)
+        return 0
+    if action == "audit-targets":
+        values = set()
+        for summary in audit_inventory(cfg):
+            values.update(audit_session_keys(summary))
+        for target in sorted(values, key=str.lower):
+            print(target)
+        return 0
+    if action == "audit-sessions":
+        if not value:
+            raise GrError("audit-sessions requires a hostname or IP")
+        matches = resolve_audit_sessions(cfg, value)
+        if matches:
+            print("latest")
+        for summary in sorted(matches, key=lambda item: item["started"], reverse=True):
+            print(summary["session"])
+        return 0
+    raise GrError("Unsupported completion action: {}".format(action))
 
 def ssh_with_password(command, password):
     if not shutil.which("sshpass"):
@@ -1184,6 +1364,8 @@ def command_doctor(cfg, test_api=False, system_only=False):
           essential=system_only)
     check("release verification key", os.path.isfile("/etc/gr/release-key.asc"),
           "/etc/gr/release-key.asc or install with --release-key")
+    check("Bash completion", os.path.isfile(BASH_COMPLETION),
+          "{} or run: eval \"$(gr completion bash)\"".format(BASH_COMPLETION))
     if not system_only:
         state_dir = expand("~/.local/state/gr")
         if os.path.isdir(state_dir):
@@ -1640,8 +1822,13 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     vendor_sync_parser.add_argument("--overwrite", action="store_true", help="replace existing different values")
     audit_parser = sub.add_parser("audit", help="inspect private SSH session recordings")
     audit_sub = audit_parser.add_subparsers(dest="audit_action")
-    audit_show = audit_sub.add_parser("show", help="replay every recorded byte in a .ses file")
-    audit_show.add_argument("path")
+    audit_show = audit_sub.add_parser("show", help="browse targets and sessions, or replay a recording")
+    audit_show.add_argument("target", nargs="?", help="hostname, IP, or direct .ses path")
+    audit_show.add_argument("session", nargs="?", help="session name or latest")
+    completion = sub.add_parser("completion", help="print shell completion or dynamic candidates")
+    completion.add_argument("completion_action",
+                            choices=("bash", "profiles", "audit-targets", "audit-sessions"))
+    completion.add_argument("value", nargs="?", help="target required by audit-sessions")
     docs_parser = sub.add_parser("docs", aliases=["help"], help="display the complete installed documentation")
     docs_parser.add_argument("--language", choices=("en", "ro"), default="en")
     return parser
@@ -1649,7 +1836,7 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    known_commands = {"init", "doctor", "ssh", "collect", "find", "search", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "vendor", "audit", "docs", "help"}
+    known_commands = {"init", "doctor", "ssh", "collect", "find", "search", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "vendor", "audit", "completion", "docs", "help"}
     ssh_requested = "--ssh" in argv
     if ssh_requested:
         argv = [value for value in argv if value != "--ssh"]
@@ -1668,14 +1855,18 @@ def main(argv=None):
         return 0
     if args.command in ("docs", "help"):
         return command_docs(DEFAULT_DOCUMENTATION_RO if args.language == "ro" else DEFAULT_DOCUMENTATION)
+    if args.command == "self-update":
+        return command_self_update(args)
+    if args.command == "completion" and args.completion_action == "bash":
+        return command_completion({}, "bash")
+    cfg = load_config(args.config)
     if args.command == "audit":
         if args.audit_action != "show":
             parser.parse_args(["audit", "--help"])
             return 0
-        return command_audit_show(args.path)
-    if args.command == "self-update":
-        return command_self_update(args)
-    cfg = load_config(args.config)
+        return command_audit_show(cfg, args.target, args.session)
+    if args.command == "completion":
+        return command_completion(cfg, args.completion_action, args.value)
     if args.command == "init":
         return command_init(cfg, args.configure_auth)
     if args.command == "doctor":

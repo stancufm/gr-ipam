@@ -29,6 +29,11 @@ gr doctor --api
 
 Configurația globală este `/etc/gr/config.json`, suprascrierea per utilizator este `~/.config/gr/config.json`. Pentru audit adăugați `ssh_audit_enabled` și `ssh_audit_dir`; directoarele sunt create privat la prima sesiune.
 
+Autocomplete-ul global Bash este instalat în `/etc/bash_completion.d/gr`.
+Deschideți un shell nou sau rulați `source /etc/bash_completion.d/gr`. Pentru
+afișarea variantelor de la prima apăsare Tab, setați
+`GR_COMPLETION_CISCO_STYLE=1` înainte de încărcarea completării.
+
 ## Actualizare semnată
 
 După instalarea cheii publice:

@@ -25,10 +25,20 @@ Dacă există un singur rezultat, conectarea este automată; altfel se afișeaz�
 ```bash
 gr --ssh --audit <țintă>
 gr --ssh --no-audit <țintă>
-gr audit show <fișier.ses>
+gr audit show
+gr audit show <hostname-sau-ip>
+gr audit show <hostname-sau-ip> latest
 ```
 
 `ssh_audit_enabled` stabilește politica globală, iar `ssh_audit_dir` directorul rădăcină. Fișierele se salvează în `<director>/<hostname-sau-ip>/<hostname-sau-ip>-<UTC>.ses`, cu `0700/0600`. Sunt capturate fără pierderi stdin, stdout și stderr, inclusiv parolele tastate. Consultați [ghidul de audit](AUDIT.ro.md).
+
+## Autocomplete Bash
+
+Installerul global oferă completare pentru comenzi, opțiuni și navigarea
+dinamică în audit. Deschideți un shell nou sau rulați
+`source /etc/bash_completion.d/gr`. Dacă setați
+`GR_COMPLETION_CISCO_STYLE=1` înainte de încărcare, opțiunile ambigue sunt
+afișate de la prima apăsare Tab. `gr completion bash` afișează scriptul instalat.
 
 ## Autentificare și seif
 

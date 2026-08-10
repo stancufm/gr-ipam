@@ -52,6 +52,7 @@ Installed paths:
 | `/etc/gr/phpipam-ca.pem` | optional private CA |
 | `/etc/gr/update.json` | root-owned HTTPS release repository |
 | `/etc/gr/release-key.asc` | pinned public release-signing key |
+| `/etc/bash_completion.d/gr` | global Bash completion, including dynamic audit candidates |
 | `/var/lib/gr/ieee-vendors/` | shared IEEE database |
 | `/etc/systemd/system/gr-vendor-update.*` | optional weekly update |
 
@@ -97,6 +98,10 @@ gr doctor --api
 
 The installer includes English and Romanian documentation, and does not modify user credentials, password stores, GPG keys or
 SSH keys. Back up `/etc/gr/config.json` before major-version upgrades.
+
+Open a new Bash session after installation, or run
+`source /etc/bash_completion.d/gr`. Set `GR_COMPLETION_CISCO_STYLE=1` before
+completion is loaded to display ambiguous candidates on the first Tab.
 
 ## Test installation
 
