@@ -13,6 +13,17 @@ COLLECTOR = importlib.machinery.SourceFileLoader(
 
 
 class CollectVersionCliTests(unittest.TestCase):
+    def test_report_command_uses_actual_driver_commands(self):
+        fortigate = [{"device_driver": "fortigate-fortios",
+                      "_version_commands": ("get system status",)}]
+        self.assertEqual(COLLECTOR.report_command_summary(fortigate),
+                         "get system status")
+        mixed = fortigate + [{"device_driver": "cisco-ios",
+                              "_version_commands": ("show version",)}]
+        self.assertEqual(
+            COLLECTOR.report_command_summary(mixed),
+            "cisco-ios: show version | fortigate-fortios: get system status")
+
     def test_fortigate_system_status_is_parsed(self):
         parsed = COLLECTOR.parse_version(
             "Version: FortiGate-100F v7.2.8,build1639,240313 (GA.M)\n"
