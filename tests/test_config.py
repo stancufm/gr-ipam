@@ -53,6 +53,9 @@ class ConfigShowTests(unittest.TestCase):
         self.assertTrue(planet["interactive_cli"])
         self.assertEqual(planet["version_commands"], ("enable", "show version"))
         self.assertIs(GR.device_login_driver("planet-sgs"), GR.PlanetSgsLogin)
+        planet_login = GR.PlanetSgsLogin("admin", "secret")
+        planet_login.state = "ready"
+        self.assertEqual(planet_login.feed(b"--More--"), [("credential", b" ")])
         self.assertTrue(hpe["interactive_cli"])
         self.assertEqual(hpe["version_commands"],
                          ("no page", "show version", "show system"))
