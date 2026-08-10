@@ -47,9 +47,16 @@ class ConfigShowTests(unittest.TestCase):
         hpe = GR.device_driver_spec("hpe-arubaos-switch")
         comware = GR.device_driver_spec("hpe-comware7")
         self.assertFalse(ios["interactive_cli"])
+        self.assertTrue(ios["config_interactive_cli"])
         self.assertEqual(ios["version_commands"], ("show version",))
+        self.assertEqual(ios["config_commands"],
+                         ("enable", "terminal length 0", "show running-config"))
+        self.assertIs(GR.device_login_driver("cisco-ios"), GR.CiscoIosLogin)
         self.assertTrue(smb["interactive_cli"])
         self.assertIn("show system", smb["version_commands"])
+        smb_login = GR.CiscoSmallBusinessLogin("cisco", "secret")
+        smb_login.state = "ready"
+        self.assertEqual(smb_login.feed(b"--More--"), [("credential", b" ")])
         self.assertTrue(planet["interactive_cli"])
         self.assertEqual(planet["version_commands"], ("enable", "show version"))
         self.assertIs(GR.device_login_driver("planet-sgs"), GR.PlanetSgsLogin)

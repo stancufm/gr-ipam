@@ -217,7 +217,8 @@ def main():
                       "_config_commands": spec["config_commands"],
                       "_cleanup_commands": spec["cleanup_commands"],
                       "_login_driver": (gr.device_login_driver(driver)
-                                        if spec["interactive_cli"] else None)})
+                                        if spec.get("config_interactive_cli",
+                                                    spec["interactive_cli"]) else None)})
     if rejected:
         print("Rejected: {} (generic or no configuration command)".format(", ".join(rejected)),
               file=sys.stderr)
