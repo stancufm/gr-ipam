@@ -41,7 +41,7 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "1.4.0"
+GR_VERSION = "1.4.1"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 
 CONFIG_OPTIONS = (
@@ -1690,11 +1690,15 @@ def command_doctor(cfg, test_api=False, system_only=False):
             check("API credential", mode == 0o600, "{} mode {:04o}".format(credential, mode), essential=True)
         else:
             check("API credential", False, "missing; run gr auth configure", essential=True)
-    for executable in ("ssh", "sshpass", "pass", "gpg"):
+    for executable in ("python3", "ssh", "sshpass", "pass", "gpg", "git", "less", "systemctl"):
         found = shutil.which(executable)
-        check(executable, found is not None, found or "not found", essential=(executable == "ssh"))
+        check(executable, found is not None, found or "not found", essential=True)
     legacy = shutil.which("ssh1")
-    check("ssh1 legacy client", legacy is not None, legacy or "optional; not found")
+    check("ssh1 legacy client", legacy is not None, legacy or "not found", essential=True)
+    completion_runtime = "/usr/share/bash-completion/bash_completion"
+    check("bash-completion runtime", os.path.isfile(completion_runtime), completion_runtime, essential=True)
+    ca_bundle = "/etc/ssl/certs/ca-certificates.crt"
+    check("CA certificate bundle", os.path.isfile(ca_bundle), ca_bundle, essential=True)
     vendor_dir = cfg["vendor_db_dir"]
     metadata = os.path.join(vendor_dir, "metadata.json")
     check("IEEE vendor database", os.path.isfile(metadata), metadata)
@@ -1704,7 +1708,7 @@ def command_doctor(cfg, test_api=False, system_only=False):
     check("release verification key", os.path.isfile("/etc/gr/release-key.asc"),
           "/etc/gr/release-key.asc or install with --release-key")
     check("Bash completion", os.path.isfile(BASH_COMPLETION),
-          "{} or run: eval \"$(gr completion bash)\"".format(BASH_COMPLETION))
+          "{} or run: eval \"$(gr completion bash)\"".format(BASH_COMPLETION), essential=True)
     if not system_only:
         state_dir = expand("~/.local/state/gr")
         if os.path.isdir(state_dir):

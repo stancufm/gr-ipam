@@ -24,6 +24,8 @@ jobs:
         run: python3 tests/test_collect.py
       - name: Test detailed find output
         run: python3 tests/test_find.py
+      - name: Test strict installer dependencies
+        run: python3 tests/test_install.py
       - name: Test self-update CLI
         run: python3 tests/test_self_update.py
       - name: Test isolated installation
