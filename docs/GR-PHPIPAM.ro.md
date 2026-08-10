@@ -72,6 +72,11 @@ manuinfo` și închide sesiunea cu `quit`. El extrage release-ul Comware,
 produsul/modelul, imaginea de sistem, BootROM și serialul de fabricație când
 sunt disponibile.
 
+Echipamentele FortiGate cu FortiOS folosesc `device_driver=fortigate-fortios`.
+Driverul colectează read-only prin `get system status`, iar configurația este
+arhivată cu `show full-configuration`. Nu intră niciodată în modul de
+configurare, iar profilul de credențiale rămâne independent de driver.
+
 `--details` păstrează sumarul compact și apoi afișează toate câmpurile returnate
 de phpIPAM pentru fiecare adresă găsită. Câmpurile sunt sortate, valorile pe mai
 multe linii sunt indentate, iar structurile JSON rămân lizibile. Afișarea este

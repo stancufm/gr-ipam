@@ -31,6 +31,7 @@ def match(patterns, text, flags=re.I | re.M):
 
 def parse_version(text):
     version = match([
+        r"^Version:\s*FortiGate-[^\s]+\s+v([^,\s]+(?:,build[^,\s]+)?)",
         r"Cisco IOS XE Software, Version\s+([^\s,]+)",
         r"Cisco IOS Software.*?Version\s+([^\s,]+)",
         r"Switch Software,\s*Version\s+([^\s,]+)",
@@ -41,6 +42,7 @@ def parse_version(text):
         r"Version\s*[:=]\s*([^\r\n]+)",
     ], text)
     model = match([
+        r"^Version:\s*(FortiGate-[^\s]+)",
         r"^Model [Nn]umber\s*[:=]\s*(\S+)",
         r"^Model [Nn]ame\s*[:=]\s*(\S+)",
         r"^System Model(?: ID)?\s*[:=]\s*(\S+)",
@@ -59,6 +61,7 @@ def parse_version(text):
     if not uptime:
         uptime = match([r"^[\r \t]*System Up Time.*:\s*([0-9]+,[0-9:]+)\s*$"], text)
     serial = match([
+        r"^Serial-Number:\s*(\S+)",
         r"Processor board ID\s+(\S+)",
         r"System [Ss]erial [Nn]umber\s*[:=]\s*(\S+)",
         r"Serial [Nn]umber\s*[:=]\s*(\S+)",
@@ -72,6 +75,8 @@ def parse_version(text):
     lower = text.lower()
     if "ios xe" in lower:
         os_family = "ios-xe"
+    elif "serial-number:" in lower and re.search(r"^Version:\s*FortiGate-", text, re.I | re.M):
+        os_family = "fortigate-fortios"
     elif "dell smartfabric os10" in lower:
         os_family = "dell-os10"
     elif ("arubaos-switch" in lower or

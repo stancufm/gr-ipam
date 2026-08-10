@@ -13,6 +13,16 @@ COLLECTOR = importlib.machinery.SourceFileLoader(
 
 
 class CollectVersionCliTests(unittest.TestCase):
+    def test_fortigate_system_status_is_parsed(self):
+        parsed = COLLECTOR.parse_version(
+            "Version: FortiGate-100F v7.2.8,build1639,240313 (GA.M)\n"
+            "Serial-Number: FG100FTK00000000\n"
+            "Hostname: corefw\n")
+        self.assertEqual(parsed["model"], "FortiGate-100F")
+        self.assertEqual(parsed["firmware"], "7.2.8,build1639")
+        self.assertEqual(parsed["serial"], "FG100FTK00000000")
+        self.assertEqual(parsed["os_family"], "fortigate-fortios")
+
     def test_planet_sgs_version(self):
         parsed = COLLECTOR.parse_version(
             "PLANET Technology Corporation Internetwork Operating System Software\n"

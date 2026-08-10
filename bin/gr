@@ -43,7 +43,7 @@ VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.3.2"
+GR_VERSION = "2.4.0"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -94,6 +94,12 @@ DEVICE_DRIVER_SPECS = {
                              "display device manuinfo"),
         "cleanup_commands": ("quit",),
         "config_commands": ("screen-length disable", "display current-configuration"),
+    },
+    "fortigate-fortios": {
+        "interactive_cli": True,
+        "version_commands": ("get system status",),
+        "cleanup_commands": ("exit",),
+        "config_commands": ("show full-configuration",),
     },
 }
 DEVICE_DRIVERS = tuple(DEVICE_DRIVER_SPECS)
@@ -1068,6 +1074,10 @@ class HpeComwareLogin:
         return []
 
 
+class FortiGateFortiOsLogin(CiscoSmallBusinessLogin):
+    """Recognize a FortiOS CLI prompt without entering configuration mode."""
+
+
 def device_login_driver(driver):
     mapping = {
         "cisco-ios": CiscoIosLogin,
@@ -1075,6 +1085,7 @@ def device_login_driver(driver):
         "planet-sgs": PlanetSgsLogin,
         "hpe-arubaos-switch": HpeArubaOsSwitchLogin,
         "hpe-comware7": HpeComwareLogin,
+        "fortigate-fortios": FortiGateFortiOsLogin,
     }
     normalized = normalize_device_driver(driver)
     if normalized not in mapping:
@@ -1734,6 +1745,8 @@ def detect_device_driver(row, collected=None):
         "aruba": "hpe-arubaos-switch",
         "dell": "dell-os10",
         "dell-os10": "dell-os10",
+        "fortinet": "fortigate-fortios",
+        "fortigate": "fortigate-fortios",
     }
     if vendor in vendor_map:
         return vendor_map[vendor], "phpipam:vendor"
