@@ -41,8 +41,9 @@ Both helpers load the installed `gr` module so API, metadata, credential
 profiles, device drivers, vault and legacy-client behavior remain consistent.
 
 The device-driver registry currently includes generic, Cisco IOS, adaptive
-Cisco Small Business, Dell SmartFabric OS10 and HPE ArubaOS-Switch/ProVision
-behaviors. Credential profiles are never used to infer the device driver.
+Cisco Small Business, Dell SmartFabric OS10, HPE ArubaOS-Switch/ProVision and
+HPE Comware 7 behaviors. Credential profiles are never used to infer the
+device driver.
 
 `libexec/gr-update` is a root-only transaction helper reached through `gr self-update`. It verifies a signed release tag against a pinned public key, performs an isolated install, backs up system files and rolls back a failed live installation.
 

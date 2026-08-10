@@ -69,6 +69,12 @@ class FindDetailsTests(unittest.TestCase):
         ])
         self.assertEqual(args.device_driver, "cisco-ios")
 
+    def test_update_accepts_device_vendor(self):
+        args = GR.build_parser().parse_args([
+            "update", "192.0.2.10", "--device-vendor", "hpe-comware",
+        ])
+        self.assertEqual(args.device_vendor, "hpe-comware")
+
 
 if __name__ == "__main__":
     unittest.main()

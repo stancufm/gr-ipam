@@ -66,6 +66,12 @@ runs `show version` and `show system`, and parses the HP product
 identifier, model and software revision. The SSH user and password profile
 remain independent metadata.
 
+HPE Comware 7 devices use `device_driver=hpe-comware7`. The interactive
+driver recognizes the `<hostname>` prompt, disables paging with
+`screen-length disable`, runs `display version` and `display device manuinfo`,
+and exits with `quit`. It parses the Comware release, product/model, system
+image, BootROM and manufacturing serial where available.
+
 `--details` keeps the compact summary and then prints every field returned by
 phpIPAM for each matching address. Fields are sorted, multiline values are
 indented and nested JSON values remain readable. The detailed view is read-only
@@ -111,7 +117,14 @@ The API credential requires mode `0600`. SSH passwords are encrypted through pas
 
 ## Inventory updates
 
-`gr sync` previews generated SSH configuration and optionally `/etc/hosts`; writing requires `--apply`. `gr update IP` previews standard and custom-field changes, then uses the separate write application and GET-verifies applied values. `gr migrate-ssh` imports legacy `[port][user]` metadata and is also dry-run by default.
+`gr sync` previews generated SSH configuration and optionally `/etc/hosts`; writing requires `--apply`. `gr update IP` previews standard and custom-field changes, including `--device-driver` and `--device-vendor`, then uses the separate write application and GET-verifies applied values. `gr migrate-ssh` imports legacy `[port][user]` metadata and is also dry-run by default.
+
+```bash
+gr update 10.22.10.76 --hostname sw76 --ssh-enabled yes --ssh-user admin \
+  --ssh-profile admin --device-driver hpe-comware7 --device-vendor hpe-comware
+gr update 10.22.10.76 --hostname sw76 --ssh-enabled yes --ssh-user admin \
+  --ssh-profile admin --device-driver hpe-comware7 --device-vendor hpe-comware --apply
+```
 
 ## Application updates
 

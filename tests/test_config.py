@@ -30,6 +30,7 @@ class ConfigShowTests(unittest.TestCase):
         ios = GR.device_driver_spec("cisco-ios")
         smb = GR.device_driver_spec("cisco-small-business")
         hpe = GR.device_driver_spec("hpe-arubaos-switch")
+        comware = GR.device_driver_spec("hpe-comware7")
         self.assertFalse(ios["interactive_cli"])
         self.assertEqual(ios["version_commands"], ("show version",))
         self.assertTrue(smb["interactive_cli"])
@@ -39,6 +40,10 @@ class ConfigShowTests(unittest.TestCase):
                          ("no page", "show version", "show system"))
         self.assertIs(GR.device_login_driver("hpe-arubaos-switch"),
                       GR.HpeArubaOsSwitchLogin)
+        self.assertEqual(comware["version_commands"],
+                         ("screen-length disable", "display version",
+                          "display device manuinfo"))
+        self.assertIs(GR.device_login_driver("hpe-comware7"), GR.HpeComwareLogin)
 
     def test_legacy_profile_driver_is_migration_only(self):
         cfg = {"ssh_profiles": {"credential": {

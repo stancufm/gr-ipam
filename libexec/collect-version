@@ -35,6 +35,7 @@ def parse_version(text):
         r"Switch Software,\s*Version\s+([^\s,]+)",
         r"Software Version\s*[:=]\s*([^\s,]+)",
         r"Software revision\s+([^\s]+)",
+        r"HPE Comware Software,\s*Version\s+([^\r\n]+)",
         r"Version\s*[:=]\s*([^\r\n]+)",
     ], text)
     model = match([
@@ -43,6 +44,7 @@ def parse_version(text):
         r"^System Model(?: ID)?\s*[:=]\s*(\S+)",
         r"^System Type\s*[:=]\s*(\S+)",
         r"^HP\s+([A-Z0-9-]+\s+[^\r\n]+?)\s+Switch\s*$",
+        r"^HPE\s+(.+?)\s+uptime is\s+",
         r"^[\r \t]*System Description\s*[:=]\s*(\S+)",
         r"^[Cc]isco\s+(\S+)\s+.*(?:processor|revision)",
         r"^Machine type\s*[:=]\s*(\S+)",
@@ -57,9 +59,11 @@ def parse_version(text):
         r"Processor board ID\s+(\S+)",
         r"System [Ss]erial [Nn]umber\s*[:=]\s*(\S+)",
         r"Serial [Nn]umber\s*[:=]\s*(\S+)",
+        r"DEVICE_SERIAL_NUMBER\s*[:=]\s*(\S+)",
     ], text)
-    image = match([r'^System image file is\s+"([^"]+)"', r"^Image [Ff]ile\s*[:=]\s*(.+)$"], text)
-    rom = match([r"^ROM:\s*(.+)$", r"^BOOTLDR:\s*(.+)$"], text)
+    image = match([r'^System image file is\s+"([^"]+)"', r"^Image [Ff]ile\s*[:=]\s*(.+)$",
+                   r"^System image\s*:\s*(\S+)"], text)
+    rom = match([r"^ROM:\s*(.+)$", r"^BOOTLDR:\s*(.+)$", r"^Bootrom Version\s*:\s*(\S+)"], text)
     os_family = "cisco"
     lower = text.lower()
     if "ios xe" in lower:
@@ -69,6 +73,8 @@ def parse_version(text):
     elif ("arubaos-switch" in lower or
           re.search(r"^HP\s+[A-Z0-9-]+\s+.+\s+Switch\s*$", text, re.I | re.M)):
         os_family = "hpe-arubaos-switch"
+    elif "hpe comware software" in lower:
+        os_family = "hpe-comware7"
     elif "cisco ios software" in lower:
         os_family = "ios"
     elif "nx-os" in lower:

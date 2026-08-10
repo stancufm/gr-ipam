@@ -161,7 +161,7 @@ _gr_completion() {
             fi
             ;;
         update)
-            _gr_complete_words "--apply --hostname --clear-hostname --ssh-enabled --ssh-user --clear-ssh-user --ssh-port --clear-ssh-port --ssh-profile --clear-ssh-profile --ssh-jump --clear-ssh-jump --ssh-client --clear-ssh-client --device-driver --clear-device-driver --config --help" "$current"
+            _gr_complete_words "--apply --hostname --clear-hostname --ssh-enabled --ssh-user --clear-ssh-user --ssh-port --clear-ssh-port --ssh-profile --clear-ssh-profile --ssh-jump --clear-ssh-jump --ssh-client --clear-ssh-client --device-driver --clear-device-driver --device-vendor --clear-device-vendor --config --help" "$current"
             ;;
         self-update)
             _gr_complete_words "check --version --dry-run --yes --help" "$current"

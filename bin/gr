@@ -69,6 +69,12 @@ DEVICE_DRIVER_SPECS = {
         "version_commands": ("no page", "show version", "show system"),
         "cleanup_commands": ("exit", "exit"),
     },
+    "hpe-comware7": {
+        "interactive_cli": True,
+        "version_commands": ("screen-length disable", "display version",
+                             "display device manuinfo"),
+        "cleanup_commands": ("quit",),
+    },
 }
 DEVICE_DRIVERS = tuple(DEVICE_DRIVER_SPECS)
 
@@ -593,6 +599,15 @@ def profile_name(value):
     return value
 
 
+def device_vendor(value):
+    value = str(value or "").strip().lower()
+    if not re.match(r"^[a-z0-9][a-z0-9._-]{0,63}$", value):
+        raise argparse.ArgumentTypeError(
+            "device vendor may contain only lowercase letters, digits, dot, underscore and hyphen"
+        )
+    return value
+
+
 def normalized_addresses(rows):
     output = []
     for row in rows:
@@ -916,10 +931,34 @@ class HpeArubaOsSwitchLogin:
         return []
 
 
+class HpeComwareLogin:
+    """Recognize the HPE Comware angle-bracket command prompt."""
+
+    PROMPT_RE = re.compile(br"(?:^|[\r\n])<[^>\r\n]{1,128}>\s*$")
+    ANSI_RE = re.compile(br"\x1b\[[0-?]*[ -/]*[@-~]")
+
+    def __init__(self, _username, _password):
+        self.state = "prompt"
+        self.buffer = b""
+
+    def feed(self, data):
+        self.buffer = (self.buffer + data)[-4096:]
+        visible = self.ANSI_RE.sub(b"", self.buffer)
+        if self.state == "prompt" and self.PROMPT_RE.search(visible):
+            self.state = "ready"
+            self.buffer = b""
+            return [("ready", b"")]
+        if self.state == "ready" and self.PROMPT_RE.search(visible):
+            self.buffer = b""
+            return [("prompt", b"")]
+        return []
+
+
 def device_login_driver(driver):
     mapping = {
         "cisco-small-business": CiscoSmallBusinessLogin,
         "hpe-arubaos-switch": HpeArubaOsSwitchLogin,
+        "hpe-comware7": HpeComwareLogin,
     }
     normalized = normalize_device_driver(driver)
     if normalized not in mapping:
@@ -2019,6 +2058,7 @@ def ssh_custom_snapshot(row):
         "custom_ssh_jump": custom_value(row, "ssh_jump"),
         "custom_ssh_client": custom_value(row, "ssh_client"),
         "custom_device_driver": custom_value(row, "device_driver"),
+        "custom_device_vendor": custom_value(row, "device_vendor"),
     }
 
 
@@ -2129,6 +2169,10 @@ def command_update(cfg, args):
         desired["custom_device_driver"] = args.device_driver
     if args.clear_device_driver:
         desired["custom_device_driver"] = ""
+    if args.device_vendor is not None:
+        desired["custom_device_vendor"] = args.device_vendor
+    if args.clear_device_vendor:
+        desired["custom_device_vendor"] = ""
     if not desired:
         raise GrError("No changes requested")
 
@@ -2428,6 +2472,9 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     driver_group = update.add_mutually_exclusive_group()
     driver_group.add_argument("--device-driver", choices=DEVICE_DRIVERS)
     driver_group.add_argument("--clear-device-driver", action="store_true")
+    vendor_group = update.add_mutually_exclusive_group()
+    vendor_group.add_argument("--device-vendor", type=device_vendor)
+    vendor_group.add_argument("--clear-device-vendor", action="store_true")
     self_update = sub.add_parser("self-update", help="check for and install a signed gr release")
     self_update.add_argument("update_action", nargs="?", choices=("check",),
                              help="check for a newer release without installing it")
