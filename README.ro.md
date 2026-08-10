@@ -10,6 +10,8 @@ Poate căuta adrese, deschide conexiuni SSH, păstra parolele dispozitivelor în
 
 - phpIPAM rămâne sursa de adevăr, fără modificări de schemă sau sursă;
 - parolele API și SSH sunt private fiecărui utilizator;
+- profilurile de credențiale, transportul SSH și driverele sunt straturi independente;
+- driverele gestionează prompturile, comenzile și parsarea, fără să selecteze secrete;
 - aplicațiile API de citire și scriere sunt separate;
 - scrierile sunt dry-run implicit și necesită `--apply`;
 - algoritmii SSH vechi sunt izolați per dispozitiv;

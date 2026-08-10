@@ -13,6 +13,12 @@ COLLECTOR = importlib.machinery.SourceFileLoader(
 
 
 class CollectVersionCliTests(unittest.TestCase):
+    def test_host_key_status_is_classified(self):
+        self.assertEqual(COLLECTOR.host_key_status(
+            "Warning: Permanently added '192.0.2.1'"), "added")
+        self.assertEqual(COLLECTOR.host_key_status(
+            "REMOTE HOST IDENTIFICATION HAS CHANGED!"), "changed")
+        self.assertEqual(COLLECTOR.host_key_status(""), "verified")
     def test_collector_redacts_vault_password(self):
         self.assertEqual(COLLECTOR.redact_secret(
             b"User Name: cisco\r\nPassword: super-secret\r\nsw36#", "super-secret"),

@@ -55,6 +55,20 @@ class FindDetailsTests(unittest.TestCase):
         self.assertTrue(combined.details)
         self.assertTrue(combined.ssh)
 
+    def test_parser_accepts_independent_profile_and_driver(self):
+        args = GR.build_parser().parse_args([
+            "find", "switch", "--ssh", "--profile", "shared",
+            "--driver", "cisco-small-business",
+        ])
+        self.assertEqual(args.profile, "shared")
+        self.assertEqual(args.driver, "cisco-small-business")
+
+    def test_update_accepts_device_driver(self):
+        args = GR.build_parser().parse_args([
+            "update", "192.0.2.10", "--device-driver", "cisco-ios",
+        ])
+        self.assertEqual(args.device_driver, "cisco-ios")
+
 
 if __name__ == "__main__":
     unittest.main()

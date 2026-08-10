@@ -11,17 +11,33 @@ GR = importlib.machinery.SourceFileLoader("gr_config_test_module", "bin/gr").loa
 
 
 class ConfigShowTests(unittest.TestCase):
-    def test_profile_session_driver_defaults_and_validation(self):
-        cfg = {"ssh_profiles": {
-            "normal": {"password_secret": "gr/normal"},
-            "small-business": {"session_driver": "cisco-small-business"},
-            "invalid": {"session_driver": "unknown"},
-        }}
-        self.assertEqual(GR.profile_session_driver(cfg, "normal"), "standard")
-        self.assertEqual(GR.profile_session_driver(cfg, "small-business"),
-                         "cisco-small-business")
+    def test_device_driver_is_independent_from_credential_profile(self):
+        row = {"custom_ssh_profile": "shared-credential",
+               "custom_device_driver": "cisco-small-business"}
+        self.assertEqual(GR.phpipam_ssh_metadata(row)["profile"], "shared-credential")
+        self.assertEqual(GR.resolve_device_driver(row), "cisco-small-business")
+        self.assertEqual(GR.resolve_device_driver(row, "generic"), "generic")
         with self.assertRaises(GR.GrError):
-            GR.profile_session_driver(cfg, "invalid")
+            GR.normalize_device_driver("unknown")
+
+    def test_device_driver_fallback_uses_vendor_not_profile(self):
+        row = {"custom_ssh_profile": "cisco", "custom_device_vendor": "cisco"}
+        self.assertEqual(GR.resolve_device_driver(row), "cisco-ios")
+        row["custom_device_vendor"] = "dell"
+        self.assertEqual(GR.resolve_device_driver(row), "generic")
+
+    def test_driver_registry_owns_commands_and_cli_behavior(self):
+        ios = GR.device_driver_spec("cisco-ios")
+        smb = GR.device_driver_spec("cisco-small-business")
+        self.assertFalse(ios["interactive_cli"])
+        self.assertEqual(ios["version_commands"], ("show version",))
+        self.assertTrue(smb["interactive_cli"])
+        self.assertIn("show system", smb["version_commands"])
+
+    def test_legacy_profile_driver_is_migration_only(self):
+        cfg = {"ssh_profiles": {"credential": {
+            "password_secret": "gr/credential", "session_driver": "cisco-small-business"}}}
+        self.assertEqual(GR.legacy_profile_driver(cfg, "credential"), "cisco-small-business")
 
     def test_show_compares_default_global_user_and_effective_values(self):
         with tempfile.TemporaryDirectory() as root:

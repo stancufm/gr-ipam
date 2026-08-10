@@ -37,8 +37,8 @@ documentation and vault management.
 - `libexec/collect-version` runs `show version`, preserves raw output and emits
   parsed JSON inventory.
 
-Both helpers load the installed `gr` module so API, metadata, profiles, vault
-and legacy-client behavior remain consistent.
+Both helpers load the installed `gr` module so API, metadata, credential
+profiles, device drivers, vault and legacy-client behavior remain consistent.
 
 `libexec/gr-update` is a root-only transaction helper reached through `gr self-update`. It verifies a signed release tag against a pinned public key, performs an isolated install, backs up system files and rolls back a failed live installation.
 
@@ -53,11 +53,12 @@ layering.
 
 - phpIPAM password: `~/.config/gr/credentials`, mode `0600`;
 - SSH passwords: `~/.password-store/gr/`, encrypted by the user's GPG key;
-- SSH keys and known hosts: owned and managed by the Linux user;
+- SSH keys and persistent gr known hosts: owned and managed by the Linux user;
 - reports: `~/.local/state/gr/`, directory mode `0700`, files mode `0600`.
 
 No credential is stored in phpIPAM. phpIPAM contains only the profile name that
-selects a secret in the current user's vault.
+selects a secret in the current user's vault. The independent `device_driver`
+field selects prompt handling, operational commands and output parsing.
 
 ### phpIPAM integration
 
