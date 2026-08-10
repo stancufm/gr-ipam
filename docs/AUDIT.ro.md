@@ -93,6 +93,6 @@ Bash-completion. Sursa poate fi afișată și cu `gr completion bash`.
 
 ## Securitate și operare
 
-Fișierele de sesiune sunt excluse din Git și trebuie protejate ca niște credențiale: acces minim, backup criptat, reguli de retenție și ștergere, fără atașare la issue-uri publice. Redarea expune stdin, inclusiv parolele tastate când ecoul terminalului era oprit. Parolele automate transmise de `sshpass` nu traversează stdin-ul terminalului și nu sunt copiate în audit decât dacă sistemul distant le afișează.
+Fișierele de sesiune sunt excluse din Git și trebuie protejate ca niște credențiale: acces minim, backup criptat, reguli de retenție și ștergere, fără atașare la issue-uri publice. Redarea expune stdin, inclusiv parolele tastate când ecoul terminalului era oprit. Parolele automate transmise de `sshpass` sau injectate de un driver de sesiune nu traversează stdin-ul înregistrat și nu sunt copiate în audit decât dacă sistemul distant le afișează.
 
 Fiecare cadru este salvat imediat, iar fișierul este sincronizat la închiderea normală. O oprire brutală poate lăsa un prefix valid fără înregistrarea finală.

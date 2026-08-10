@@ -7,9 +7,11 @@ import importlib.util
 import json
 import os
 import re
+import select
 import subprocess
+import time
 
-GR_PATH = "/usr/local/bin/gr"
+GR_PATH = os.environ.get("GR_PATH", "/usr/local/bin/gr")
 def load_gr():
     loader = importlib.machinery.SourceFileLoader("gr_module", GR_PATH)
     spec = importlib.util.spec_from_loader("gr_module", loader)
@@ -64,7 +66,72 @@ def parse_version(text):
             "uptime": uptime, "serial": serial, "system_image": image, "rom": rom}
 
 
+def redact_secret(data, password):
+    secret = password.encode("utf-8")
+    return data.replace(secret, b"[REDACTED]") if secret else data
+
+
+def run_cisco_small_business(item, password, command, read_fd, login_driver_class, timeout=50):
+    master_fd, slave_fd = os.openpty()
+    command = command[:-1] if command[-1:] == ["show version"] else command
+    command.insert(command.index("-p"), "-tt")
+    process = subprocess.Popen(command, stdin=slave_fd, stdout=slave_fd, stderr=subprocess.PIPE,
+                               close_fds=True, pass_fds=(read_fd,))
+    os.close(slave_fd)
+    os.close(read_fd)
+    read_fd = None
+    driver = login_driver_class(item["user"], password)
+    stdout_chunks, stderr_chunks = [], []
+    streams = {master_fd: stdout_chunks, process.stderr.fileno(): stderr_chunks}
+    deadline = time.monotonic() + timeout
+    commands_sent = False
+    timed_out = False
+    try:
+        while streams:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                process.kill()
+                break
+            ready, _, _ = select.select(list(streams), [], [], min(remaining, 1.0))
+            if not ready and process.poll() is not None:
+                break
+            for descriptor in ready:
+                try:
+                    data = os.read(descriptor, 65536)
+                except OSError:
+                    data = b""
+                if not data:
+                    streams.pop(descriptor, None)
+                    continue
+                streams[descriptor].append(data)
+                if descriptor == master_fd:
+                    for action, response in driver.feed(data):
+                        if action == "credential":
+                            os.write(master_fd, response)
+                        elif action == "ready" and not commands_sent:
+                            os.write(master_fd, b"terminal datadump\nshow version\nexit\n")
+                            commands_sent = True
+        if timed_out:
+            process.wait()
+        else:
+            process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        process.kill()
+        process.wait()
+    finally:
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+    stdout = redact_secret(b"".join(stdout_chunks), password).decode("utf-8", "replace")
+    stderr = redact_secret(b"".join(stderr_chunks), password).decode("utf-8", "replace")
+    return process.returncode, stdout, stderr, timed_out
+
+
 def run_one(item, password, output_dir):
+    login_driver_class = item.pop("_login_driver", None)
     read_fd, write_fd = os.pipe()
     try:
         os.write(write_fd, (password + "\n").encode("utf-8"))
@@ -78,24 +145,32 @@ def run_one(item, password, output_dir):
                    "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
                    "-p", str(item["port"]), "{}@{}".format(item["user"], item["ip"]),
                    "show version"]
-        completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   universal_newlines=True, timeout=35, pass_fds=(read_fd,))
-        item["returncode"] = completed.returncode
-        item["stderr"] = completed.stderr.strip()
+        if item.get("session_driver") == "cisco-small-business":
+            returncode, stdout, stderr, timed_out = run_cisco_small_business(
+                item, password, command, read_fd, login_driver_class)
+            read_fd = None
+        else:
+            completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       universal_newlines=True, timeout=35, pass_fds=(read_fd,))
+            returncode, stdout, stderr, timed_out = (
+                completed.returncode, completed.stdout, completed.stderr, False)
+        item["returncode"] = returncode
+        item["stderr"] = stderr.strip()
         raw_path = os.path.join(output_dir, "{}-{}-show-version.txt".format(item["hostname"], item["ip"]))
         with open(raw_path, "w", encoding="utf-8", errors="replace") as handle:
-            handle.write(completed.stdout)
-            if completed.stderr:
-                handle.write("\n--- STDERR ---\n" + completed.stderr)
+            handle.write(stdout)
+            if stderr:
+                handle.write("\n--- STDERR ---\n" + stderr)
         os.chmod(raw_path, 0o600)
         item["raw_report"] = raw_path
-        item.update(parse_version(completed.stdout))
-        item["result"] = "success" if completed.returncode == 0 else "failed"
+        item.update(parse_version(stdout))
+        item["result"] = "timeout" if timed_out else ("success" if returncode == 0 else "failed")
     except subprocess.TimeoutExpired:
         item["result"] = "timeout"
     finally:
         try:
-            os.close(read_fd)
+            if read_fd is not None:
+                os.close(read_fd)
         except OSError:
             pass
     return item
@@ -124,9 +199,12 @@ def main():
             continue
         if not meta["enabled"] or not meta["profile"]:
             continue
+        session_driver = gr.profile_session_driver(cfg, meta["profile"])
         items.append({"id": row.get("id"), "ip": ip, "hostname": str(row.get("hostname") or ip),
                       "vendor": vendor, "user": meta["user"], "port": int(meta["port"] or 22),
-                      "profile": meta["profile"], "client": meta.get("client", "normal")})
+                      "profile": meta["profile"], "client": meta.get("client", "normal"),
+                      "session_driver": session_driver,
+                      "_login_driver": gr.CiscoSmallBusinessLogin})
     if not items:
         print("No eligible devices matched.")
         return 1

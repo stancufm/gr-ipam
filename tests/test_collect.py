@@ -8,9 +8,16 @@ import tempfile
 import unittest
 
 GR = importlib.machinery.SourceFileLoader("gr_collect_test_module", "bin/gr").load_module()
+COLLECTOR = importlib.machinery.SourceFileLoader(
+    "gr_collect_helper_test_module", "libexec/collect-version").load_module()
 
 
 class CollectVersionCliTests(unittest.TestCase):
+    def test_collector_redacts_vault_password(self):
+        self.assertEqual(COLLECTOR.redact_secret(
+            b"User Name: cisco\r\nPassword: super-secret\r\nsw36#", "super-secret"),
+            b"User Name: cisco\r\nPassword: [REDACTED]\r\nsw36#")
+
     def test_all_uses_documented_defaults(self):
         args = GR.build_parser().parse_args(["collect", "version", "--all"])
         self.assertTrue(args.all)

@@ -23,6 +23,25 @@ Dacă există un singur rezultat, conectarea este automată; altfel se afișeaz�
 
 Tabelul compact afișează câmpul phpIPAM `lastSeen` imediat după `STATUS`.
 
+### Login secundar Cisco Small Business
+
+Unele switchuri Cisco Small Business stabilesc conexiunea SSH și apoi afișează
+propriile prompturi `User Name:` și `Password:`. Comportamentul se selectează
+prin profilul SSH, fără un câmp driver separat pentru fiecare adresă:
+
+```json
+"cisco-smb": {
+  "password_secret": "gr/cisco-smb",
+  "session_driver": "cisco-small-business"
+}
+```
+
+În phpIPAM se setează `ssh_profile=cisco-smb`, utilizatorul corespunzător și
+portul/clientul SSH normal. `gr --ssh` răspunde prompturilor secundare și apoi
+predă CLI-ul interactiv operatorului. `gr collect version` folosește același
+driver, dezactivează paginarea cu `terminal datadump`, rulează `show version` și
+închide sesiunea. Parola injectată nu este scrisă în rapoartele collect.
+
 `--details` păstrează sumarul compact și apoi afișează toate câmpurile returnate
 de phpIPAM pentru fiecare adresă găsită. Câmpurile sunt sortate, valorile pe mai
 multe linii sunt indentate, iar structurile JSON rămân lizibile. Afișarea este
@@ -96,6 +115,10 @@ Comanda citește adresele din phpIPAM, selectează înregistrările al căror
 un profil în seiful SSH, apoi rulează `show version` prin clientul normal sau
 clientul legacy izolat ales pentru fiecare dispozitiv. Nu modifică phpIPAM sau
 configurația echipamentelor.
+
+Profilul selectat poate defini `session_driver`. Valoarea implicită `standard`
+păstrează comportamentul OpenSSH normal, iar `cisco-small-business` gestionează
+loginul CLI secundar descris mai sus.
 
 Opțiuni:
 

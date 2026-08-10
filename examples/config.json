@@ -14,7 +14,11 @@
   "ssh_output": "~/.ssh/config.d/90-phpipam.conf",
   "ssh_profiles": {
     "network-admin": {"password_secret": "gr/network-admin"},
-    "linux-admin": {"password_secret": "gr/linux-admin"}
+    "linux-admin": {"password_secret": "gr/linux-admin"},
+    "cisco-smb": {
+      "password_secret": "gr/cisco-smb",
+      "session_driver": "cisco-small-business"
+    }
   },
   "username": "gr-api",
   "vendor_db_dir": "/var/lib/gr/ieee-vendors"

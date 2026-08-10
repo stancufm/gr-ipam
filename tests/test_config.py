@@ -11,6 +11,18 @@ GR = importlib.machinery.SourceFileLoader("gr_config_test_module", "bin/gr").loa
 
 
 class ConfigShowTests(unittest.TestCase):
+    def test_profile_session_driver_defaults_and_validation(self):
+        cfg = {"ssh_profiles": {
+            "normal": {"password_secret": "gr/normal"},
+            "small-business": {"session_driver": "cisco-small-business"},
+            "invalid": {"session_driver": "unknown"},
+        }}
+        self.assertEqual(GR.profile_session_driver(cfg, "normal"), "standard")
+        self.assertEqual(GR.profile_session_driver(cfg, "small-business"),
+                         "cisco-small-business")
+        with self.assertRaises(GR.GrError):
+            GR.profile_session_driver(cfg, "invalid")
+
     def test_show_compares_default_global_user_and_effective_values(self):
         with tempfile.TemporaryDirectory() as root:
             system_path = os.path.join(root, "system.json")
