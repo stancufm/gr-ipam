@@ -31,10 +31,19 @@ Set `ssh_audit_enabled` globally or use `--audit`/`--no-audit` per connection. `
 
 ```bash
 gr --ssh --audit <target>
-gr audit show <recording.ses>
+gr audit show
+gr audit show <hostname-or-ip>
+gr audit show <hostname-or-ip> latest
 ```
 
 Recordings use private `0700` directories and `0600` files but remain highly sensitive. See [SSH session auditing](AUDIT.md).
+
+## Bash completion
+
+The global installer provides command, option and dynamic audit completion for
+Bash. Open a new shell or run `source /etc/bash_completion.d/gr`. Set
+`GR_COMPLETION_CISCO_STYLE=1` before loading completion to display ambiguous
+choices on the first Tab. `gr completion bash` prints the installed script.
 
 ## Authentication vault
 

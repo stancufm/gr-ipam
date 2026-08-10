@@ -32,11 +32,44 @@ O conectare creează:
 
 Directoarele au modul `0700`, iar fișierele `0600`. Formatul `.ses` este JSON Lines. Prima înregistrare conține metadatele, fiecare cadru conține timpul relativ, canalul și octeții originali codificați Base64, iar ultima înregistrare conține codul de ieșire. Astfel se păstrează exact datele și separarea stdin/stdout/stderr.
 
-Redarea tuturor octeților:
+Navigarea pornește de la echipament, apoi restrânge lista la sesiunile
+hostname-ului sau IP-ului ales, fără memorarea căilor:
+
+```bash
+gr audit show
+gr audit show core-switch
+gr audit show core-switch latest
+gr audit show 192.0.2.10 core-switch-20260806T120000.000000Z
+```
+
+Prima comandă afișează hostname-ul, IP-ul, numărul sesiunilor și cea mai recentă
+dată UTC. A doua afișează sesiunile și codurile lor de ieșire. `latest` redă
+ultima sesiune. Calea directă rămâne compatibilă:
 
 ```bash
 gr audit show ~/.local/state/gr/audit/core-switch/core-switch-20260806T120000.000000Z.ses
 ```
+
+## Autocomplete Bash
+
+Installerul global salvează completarea în `/etc/bash_completion.d/gr`.
+Deschideți o sesiune Bash nouă sau încărcați-o imediat:
+
+```bash
+source /etc/bash_completion.d/gr
+```
+
+Sunt completate comenzile, opțiunile și valorile valide, profilurile SSH,
+hostname-urile/IP-urile auditate și sesiunile țintei selectate. Bash afișează
+implicit variantele ambigue după două apăsări Tab. Pentru afișare de la prima
+apăsare, în stil Cisco, setați înainte de încărcarea completării:
+
+```bash
+export GR_COMPLETION_CISCO_STYLE=1
+```
+
+Pentru persistență, puneți exportul în `~/.bashrc` înaintea încărcării
+Bash-completion. Sursa poate fi afișată și cu `gr completion bash`.
 
 ## Securitate și operare
 

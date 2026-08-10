@@ -74,7 +74,7 @@ esac
 
 install -d -m 0755 "$destdir/usr/local/bin" "$destdir/usr/local/libexec/gr" \
   "$destdir/usr/local/share/doc/gr" "$destdir/etc/gr" "$destdir/var/lib/gr/ieee-vendors" \
-  "$destdir/etc/systemd/system"
+  "$destdir/etc/systemd/system" "$destdir/etc/bash_completion.d"
 install -m 0755 "$package_dir/bin/gr" "$destdir/usr/local/bin/gr"
 install -m 0755 "$package_dir/libexec/validate-ssh" "$destdir/usr/local/libexec/gr/validate-ssh"
 install -m 0755 "$package_dir/libexec/collect-version" "$destdir/usr/local/libexec/gr/collect-version"
@@ -85,6 +85,7 @@ install -m 0644 "$package_dir"/phpipam/*.md "$destdir/usr/local/share/doc/gr/"
 install -m 0644 "$package_dir/VERSION" "$destdir/usr/local/share/doc/gr/VERSION"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.service" "$destdir/etc/systemd/system/gr-vendor-update.service"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.timer" "$destdir/etc/systemd/system/gr-vendor-update.timer"
+install -m 0644 "$package_dir/completions/gr.bash" "$destdir/etc/bash_completion.d/gr"
 
 if [ -n "$config_source" ]; then
   install -m 0644 "$config_source" "$destdir/etc/gr/config.json"
@@ -124,6 +125,7 @@ fi
 python3 -c 'import ast,sys; [ast.parse(open(path, encoding="utf-8").read(), filename=path) for path in sys.argv[1:]]' \
   "$package_dir/bin/gr" "$package_dir/libexec/validate-ssh" "$package_dir/libexec/collect-version"
 sh -n "$package_dir/libexec/gr-update"
+bash -n "$package_dir/completions/gr.bash"
 
 if [ -z "$destdir" ]; then
   command -v ssh >/dev/null || { echo "Missing dependency: openssh-client" >&2; exit 2; }

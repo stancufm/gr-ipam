@@ -32,11 +32,45 @@ A connection creates:
 
 Directories have mode `0700`; files have mode `0600`. `.ses` is JSON Lines. The first record contains metadata, every data record contains an elapsed timestamp, stream name and Base64-encoded original bytes, and the final record contains the exit status. This preserves terminal bytes exactly and distinguishes stdin, stdout and stderr.
 
-Replay all recorded bytes with:
+Browse targets first, then narrow the list to one hostname or IP and select a
+session without memorizing storage paths:
+
+```bash
+gr audit show
+gr audit show core-switch
+gr audit show core-switch latest
+gr audit show 192.0.2.10 core-switch-20260806T120000.000000Z
+```
+
+The first command lists target names, IPs, session counts and the latest UTC
+timestamp. The second lists the matching session tokens and exit status.
+`latest` replays the newest recording. Direct paths remain supported:
 
 ```bash
 gr audit show ~/.local/state/gr/audit/core-switch/core-switch-20260806T120000.000000Z.ses
 ```
+
+## Bash completion
+
+The system installer places completion in `/etc/bash_completion.d/gr`. Start a
+new Bash session or load it immediately with:
+
+```bash
+source /etc/bash_completion.d/gr
+```
+
+Completion includes commands, valid options and values, SSH profiles, audited
+hostnames/IPs and the sessions belonging to a selected target. Bash normally
+shows ambiguous candidates after two Tab presses. To show them on the first Tab
+in a Cisco-like style, set this before Bash completion is loaded:
+
+```bash
+export GR_COMPLETION_CISCO_STYLE=1
+```
+
+For a persistent setting, put the export before the system Bash-completion
+source line in `~/.bashrc`. The completion source can also be printed with
+`gr completion bash`.
 
 ## Security and operations
 

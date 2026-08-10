@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import base64
+import contextlib
+import io
 import importlib.machinery
 import ipaddress
 import json
@@ -35,7 +37,61 @@ class AuditTests(unittest.TestCase):
         parser = GR.build_parser()
         self.assertIs(parser.parse_args(["find", "switch", "--ssh", "--audit"]).audit, True)
         self.assertIs(parser.parse_args(["find", "switch", "--ssh", "--no-audit"]).audit, False)
-        self.assertEqual(parser.parse_args(["audit", "show", "x.ses"]).audit_action, "show")
+        direct = parser.parse_args(["audit", "show", "x.ses"])
+        self.assertEqual(direct.audit_action, "show")
+        self.assertEqual(direct.target, "x.ses")
+        browse = parser.parse_args(["audit", "show", "sw50", "latest"])
+        self.assertEqual((browse.target, browse.session), ("sw50", "latest"))
+
+    def test_audit_browse_by_hostname_and_ip(self):
+        with tempfile.TemporaryDirectory() as root:
+            cfg = {"ssh_audit_dir": root}
+            first = GR.SshSessionAudit(
+                cfg, {"_hostname": "sw50", "_ip": ipaddress.ip_address("192.0.2.50")},
+                ["ssh", "192.0.2.50"])
+            first.close(0)
+            second = GR.SshSessionAudit(
+                cfg, {"_hostname": "sw50", "_ip": ipaddress.ip_address("192.0.2.50")},
+                ["ssh", "192.0.2.50"])
+            second.close(5)
+
+            by_hostname = GR.resolve_audit_sessions(cfg, "sw50")
+            by_ip = GR.resolve_audit_sessions(cfg, "192.0.2.50")
+            self.assertEqual(len(by_hostname), 2)
+            self.assertEqual({item["path"] for item in by_hostname},
+                             {item["path"] for item in by_ip})
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                GR.command_audit_show(cfg)
+            self.assertIn("sw50", output.getvalue())
+            self.assertIn("192.0.2.50", output.getvalue())
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                GR.command_audit_show(cfg, "sw50")
+            self.assertIn("SESSION", output.getvalue())
+            self.assertIn("latest", output.getvalue())
+
+    def test_completion_candidates_follow_audit_filter(self):
+        with tempfile.TemporaryDirectory() as root:
+            cfg = {"ssh_audit_dir": root, "ssh_profiles": {"cisco": {}, "local": {}}}
+            audit = GR.SshSessionAudit(
+                cfg, {"_hostname": "sw11", "_ip": ipaddress.ip_address("192.0.2.11")},
+                ["ssh", "192.0.2.11"])
+            audit.close(0)
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                GR.command_completion(cfg, "audit-targets")
+            self.assertEqual(set(output.getvalue().splitlines()), {"sw11", "192.0.2.11"})
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                GR.command_completion(cfg, "audit-sessions", "sw11")
+            values = output.getvalue().splitlines()
+            self.assertEqual(values[0], "latest")
+            self.assertEqual(values[1], GR.audit_session_summary(audit.path)["session"])
 
 
 if __name__ == "__main__":
