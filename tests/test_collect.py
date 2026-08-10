@@ -24,6 +24,20 @@ class CollectVersionCliTests(unittest.TestCase):
             b"User Name: cisco\r\nPassword: super-secret\r\nsw36#", "super-secret"),
             b"User Name: cisco\r\nPassword: [REDACTED]\r\nsw36#")
 
+    def test_cleanup_disconnect_does_not_invalidate_completed_collection(self):
+        data_commands = [b"show version\n", b"show system\n"]
+        cleanup_commands = [b"exit\n", b"exit\n"]
+        command, complete = COLLECTOR.next_prompt_command(data_commands, cleanup_commands)
+        self.assertEqual(command, b"show version\n")
+        self.assertFalse(complete)
+        command, complete = COLLECTOR.next_prompt_command(data_commands, cleanup_commands)
+        self.assertEqual(command, b"show system\n")
+        self.assertFalse(complete)
+        command, complete = COLLECTOR.next_prompt_command(data_commands, cleanup_commands)
+        self.assertEqual(command, b"exit\n")
+        self.assertTrue(complete)
+        self.assertEqual(cleanup_commands, [b"exit\n"])
+
     def test_small_business_show_system_fields_are_parsed(self):
         parsed = COLLECTOR.parse_version(
             "Active-image: flash://image.bin\n  Version: 2.4.0.94\n"

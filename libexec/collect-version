@@ -89,6 +89,20 @@ def host_key_status(stderr):
     return "verified"
 
 
+def next_prompt_command(version_commands, cleanup_commands):
+    """Return the next command and whether all data commands have completed.
+
+    This function is called only after a device prompt is observed. Once the
+    version queue is empty, that prompt proves the previously sent data command
+    completed; cleanup commands must not affect collection success.
+    """
+    if version_commands:
+        return version_commands.pop(0), False
+    if cleanup_commands:
+        return cleanup_commands.pop(0), True
+    return None, True
+
+
 def run_cisco_small_business(item, password, command, read_fd, login_driver_class,
                              version_commands, timeout=50):
     master_fd, slave_fd = os.openpty()
@@ -107,7 +121,8 @@ def run_cisco_small_business(item, password, command, read_fd, login_driver_clas
     # and needs a second exit to close the CLI session. Newer Small Business
     # models normally disconnect on the first exit, leaving the second unused.
     pending_commands = [(value + "\n").encode("utf-8") for value in version_commands]
-    pending_commands.extend([b"exit\n", b"exit\n"])
+    cleanup_commands = [b"exit\n", b"exit\n"]
+    collection_complete = False
     timed_out = False
     try:
         while streams:
@@ -132,8 +147,12 @@ def run_cisco_small_business(item, password, command, read_fd, login_driver_clas
                     for action, response in driver.feed(data):
                         if action == "credential":
                             os.write(master_fd, response)
-                        elif action in ("ready", "prompt") and pending_commands:
-                            os.write(master_fd, pending_commands.pop(0))
+                        elif action in ("ready", "prompt"):
+                            next_command, completed = next_prompt_command(
+                                pending_commands, cleanup_commands)
+                            collection_complete = collection_complete or completed
+                            if next_command is not None:
+                                os.write(master_fd, next_command)
         if timed_out:
             process.wait()
         else:
@@ -149,7 +168,7 @@ def run_cisco_small_business(item, password, command, read_fd, login_driver_clas
             pass
     stdout = redact_secret(b"".join(stdout_chunks), password).decode("utf-8", "replace")
     stderr = redact_secret(b"".join(stderr_chunks), password).decode("utf-8", "replace")
-    return process.returncode, stdout, stderr, timed_out, not pending_commands
+    return process.returncode, stdout, stderr, timed_out, collection_complete
 
 
 def run_one(item, password, output_dir):

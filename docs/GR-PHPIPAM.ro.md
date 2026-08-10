@@ -48,6 +48,11 @@ conține deja modelul, iar două comenzi `exit` sunt necesare deoarece prima doa
 iese din modul privilegiat. Parola injectată nu este scrisă în rapoartele
 collect.
 
+Colectarea este considerată reușită după ce toate comenzile de date au revenit
+la promptul CLI. Comenzile de închidere sunt urmărite separat, astfel încât un
+echipament care închide conexiunea după primul `exit` nu mai este raportat fals
+ca eșuat.
+
 Echipamentele Dell SmartFabric OS10 folosesc `device_driver=dell-os10`.
 Driverul rulează `show version` și extrage versiunea OS și `System Type`,
 independent de profilul de credențiale SSH selectat.

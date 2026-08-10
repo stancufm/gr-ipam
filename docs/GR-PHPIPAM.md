@@ -51,6 +51,10 @@ may be unsupported, `show version` already contains the model, and two `exit`
 commands are required because the first only leaves privileged mode. The injected
 password is never written to collect reports.
 
+Collection success is determined when every data command has returned to the
+CLI prompt. Cleanup commands are tracked separately, so a device that closes
+the connection after the first `exit` is not reported as a false failure.
+
 Dell SmartFabric OS10 devices use `device_driver=dell-os10`. The driver runs
 `show version` and parses the OS version and `System Type` independently from
 the selected SSH credential profile.
