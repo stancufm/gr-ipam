@@ -45,7 +45,9 @@ Set the phpIPAM address metadata to `ssh_profile=cisco-smb`, the appropriate
 `ssh_user`, and the normal SSH port/client. `gr --ssh` answers the second-stage
 prompts and then hands the live CLI to the operator. `gr collect version` uses
 the same driver, disables paging with `terminal datadump`, runs `show version`
-and exits. The injected password is never written to collect reports.
+for firmware, runs `show system` for model/system data, and exits. Each command
+is sent only after the CLI prompt returns. The injected password is never
+written to collect reports.
 
 `--details` keeps the compact summary and then prints every field returned by
 phpIPAM for each matching address. Fields are sorted, multiline values are

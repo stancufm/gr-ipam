@@ -38,6 +38,8 @@ def parse_version(text):
     model = match([
         r"^Model [Nn]umber\s*[:=]\s*(\S+)",
         r"^Model [Nn]ame\s*[:=]\s*(\S+)",
+        r"^System Model(?: ID)?\s*[:=]\s*(\S+)",
+        r"^[\r \t]*System Description\s*[:=]\s*(\S+)",
         r"^[Cc]isco\s+(\S+)\s+.*(?:processor|revision)",
         r"^Machine type\s*[:=]\s*(\S+)",
         r"^PID\s*:\s*(\S+)",
@@ -45,6 +47,8 @@ def parse_version(text):
     uptime = match([r"^(.+?) uptime is (.+)$"], text)
     if uptime:
         uptime = match([r"^.+? uptime is (.+)$"], text)
+    if not uptime:
+        uptime = match([r"^[\r \t]*System Up Time.*:\s*([0-9]+,[0-9:]+)\s*$"], text)
     serial = match([
         r"Processor board ID\s+(\S+)",
         r"System [Ss]erial [Nn]umber\s*[:=]\s*(\S+)",
@@ -84,7 +88,7 @@ def run_cisco_small_business(item, password, command, read_fd, login_driver_clas
     stdout_chunks, stderr_chunks = [], []
     streams = {master_fd: stdout_chunks, process.stderr.fileno(): stderr_chunks}
     deadline = time.monotonic() + timeout
-    commands_sent = False
+    pending_commands = [b"terminal datadump\n", b"show version\n", b"show system\n", b"exit\n"]
     timed_out = False
     try:
         while streams:
@@ -109,9 +113,8 @@ def run_cisco_small_business(item, password, command, read_fd, login_driver_clas
                     for action, response in driver.feed(data):
                         if action == "credential":
                             os.write(master_fd, response)
-                        elif action == "ready" and not commands_sent:
-                            os.write(master_fd, b"terminal datadump\nshow version\nexit\n")
-                            commands_sent = True
+                        elif action in ("ready", "prompt") and pending_commands:
+                            os.write(master_fd, pending_commands.pop(0))
         if timed_out:
             process.wait()
         else:
@@ -127,7 +130,7 @@ def run_cisco_small_business(item, password, command, read_fd, login_driver_clas
             pass
     stdout = redact_secret(b"".join(stdout_chunks), password).decode("utf-8", "replace")
     stderr = redact_secret(b"".join(stderr_chunks), password).decode("utf-8", "replace")
-    return process.returncode, stdout, stderr, timed_out
+    return process.returncode, stdout, stderr, timed_out, not pending_commands
 
 
 def run_one(item, password, output_dir):
@@ -146,7 +149,7 @@ def run_one(item, password, output_dir):
                    "-p", str(item["port"]), "{}@{}".format(item["user"], item["ip"]),
                    "show version"]
         if item.get("session_driver") == "cisco-small-business":
-            returncode, stdout, stderr, timed_out = run_cisco_small_business(
+            returncode, stdout, stderr, timed_out, script_complete = run_cisco_small_business(
                 item, password, command, read_fd, login_driver_class)
             read_fd = None
         else:
@@ -154,6 +157,7 @@ def run_one(item, password, output_dir):
                                        universal_newlines=True, timeout=35, pass_fds=(read_fd,))
             returncode, stdout, stderr, timed_out = (
                 completed.returncode, completed.stdout, completed.stderr, False)
+            script_complete = completed.returncode == 0
         item["returncode"] = returncode
         item["stderr"] = stderr.strip()
         raw_path = os.path.join(output_dir, "{}-{}-show-version.txt".format(item["hostname"], item["ip"]))
@@ -163,8 +167,14 @@ def run_one(item, password, output_dir):
                 handle.write("\n--- STDERR ---\n" + stderr)
         os.chmod(raw_path, 0o600)
         item["raw_report"] = raw_path
-        item.update(parse_version(stdout))
-        item["result"] = "timeout" if timed_out else ("success" if returncode == 0 else "failed")
+        parsed = parse_version(stdout)
+        if item.get("session_driver") == "cisco-small-business":
+            parsed["os_family"] = "cisco-small-business"
+        item.update(parsed)
+        successful = returncode == 0 or (
+            item.get("session_driver") == "cisco-small-business" and
+            script_complete and bool(parsed.get("firmware")))
+        item["result"] = "timeout" if timed_out else ("success" if successful else "failed")
     except subprocess.TimeoutExpired:
         item["result"] = "timeout"
     finally:
