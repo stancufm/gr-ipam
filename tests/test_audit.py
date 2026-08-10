@@ -14,6 +14,16 @@ GR = importlib.machinery.SourceFileLoader("gr_test_module", "bin/gr").load_modul
 
 
 class AuditTests(unittest.TestCase):
+    def test_cisco_small_business_login_handles_fragmented_prompts(self):
+        driver = GR.CiscoSmallBusinessLogin("cisco", "vault-secret")
+        self.assertEqual(driver.feed(b"Welcome\r\nUser Na"), [])
+        self.assertEqual(driver.feed(b"me: "), [("credential", b"cisco\n")])
+        self.assertEqual(driver.feed(b"Pass"), [])
+        self.assertEqual(driver.feed(b"word: "), [("credential", b"vault-secret\n")])
+        self.assertEqual(driver.feed(b"\r\nsw36#"), [("ready", b"")])
+        self.assertEqual(driver.state, "ready")
+        self.assertEqual(driver.feed(b"\r\nsw36#"), [])
+
     def test_lossless_records_and_private_permissions(self):
         with tempfile.TemporaryDirectory() as root:
             row = {"_hostname": "switch/example", "_ip": ipaddress.ip_address("192.0.2.10")}

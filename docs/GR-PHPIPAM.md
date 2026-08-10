@@ -28,6 +28,25 @@ One match connects automatically; multiple matches open an interactive selector.
 
 The compact result table shows phpIPAM `lastSeen` immediately after `STATUS`.
 
+### Cisco Small Business second-stage login
+
+Some Cisco Small Business switches establish SSH and then display their own
+`User Name:` and `Password:` prompts. Select the dedicated behavior through an
+SSH profile; no per-device driver field is required:
+
+```json
+"cisco-smb": {
+  "password_secret": "gr/cisco-smb",
+  "session_driver": "cisco-small-business"
+}
+```
+
+Set the phpIPAM address metadata to `ssh_profile=cisco-smb`, the appropriate
+`ssh_user`, and the normal SSH port/client. `gr --ssh` answers the second-stage
+prompts and then hands the live CLI to the operator. `gr collect version` uses
+the same driver, disables paging with `terminal datadump`, runs `show version`
+and exits. The injected password is never written to collect reports.
+
 `--details` keeps the compact summary and then prints every field returned by
 phpIPAM for each matching address. Fields are sorted, multiline values are
 indented and nested JSON values remain readable. The detailed view is read-only
@@ -103,6 +122,10 @@ The command reads the phpIPAM address inventory, selects records whose
 an SSH vault profile, then runs `show version` through the normal or isolated
 legacy client selected for each device. It does not modify phpIPAM or device
 configuration.
+
+The selected profile may set `session_driver`. The default `standard` value
+keeps normal OpenSSH behavior; `cisco-small-business` handles the second-stage
+CLI login described above.
 
 Options:
 
