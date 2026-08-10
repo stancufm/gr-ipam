@@ -125,6 +125,22 @@ def next_prompt_command(version_commands, cleanup_commands):
     return None, True
 
 
+def report_command_summary(items):
+    """Describe the actual driver commands represented by a report."""
+    commands_by_driver = {}
+    for item in items:
+        driver = str(item.get("device_driver") or "generic")
+        commands_by_driver[driver] = tuple(item.get("_version_commands") or ())
+    descriptions = []
+    for driver in sorted(commands_by_driver):
+        command_text = "; ".join(commands_by_driver[driver]) or "-"
+        descriptions.append((driver, command_text))
+    if len(descriptions) == 1:
+        return descriptions[0][1]
+    return " | ".join("{}: {}".format(driver, commands)
+                      for driver, commands in descriptions)
+
+
 def run_interactive_device(item, password, command, read_fd, login_driver_class,
                            version_commands, cleanup_command_values, timeout=50):
     master_fd, slave_fd = os.openpty()
@@ -353,7 +369,7 @@ def main():
                        if args.vendor else "selected-ips") or "devices"
     report = os.path.join(output_dir, "{}-show-version-report.json".format(report_slug))
     with open(report, "w", encoding="utf-8") as handle:
-        json.dump({"generated_utc": stamp, "command": "show version",
+        json.dump({"generated_utc": stamp, "command": report_command_summary(items),
                    "criteria": criteria, "results": results},
                   handle, ensure_ascii=False, indent=2)
     os.chmod(report, 0o600)
