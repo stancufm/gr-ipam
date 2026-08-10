@@ -20,6 +20,8 @@ jobs:
         run: python3 tests/test_audit.py
       - name: Test configuration inventory
         run: python3 tests/test_config.py
+      - name: Test detailed find output
+        run: python3 tests/test_find.py
       - name: Test self-update CLI
         run: python3 tests/test_self_update.py
       - name: Test isolated installation

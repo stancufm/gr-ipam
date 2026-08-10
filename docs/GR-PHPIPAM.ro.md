@@ -12,6 +12,7 @@ Metadatele SSH provin din câmpurile standard custom ale adreselor: `ssh_enabled
 
 ```bash
 gr find <text-sau-ip>
+gr find <text-sau-ip> --details
 gr <ip>
 gr subnet <cidr>
 gr --ssh <text-sau-ip>
@@ -19,6 +20,11 @@ gr --ssh --user operator --port 2222 --profile network-admin <țintă>
 ```
 
 Dacă există un singur rezultat, conectarea este automată; altfel se afișează selectorul. Override-urile CLI sunt valabile numai pentru sesiunea curentă. `--no-vault` forțează promptul OpenSSH. Clientul legacy este selectat numai prin metadata/CLI și nu slăbește clientul normal.
+
+`--details` păstrează sumarul compact și apoi afișează toate câmpurile returnate
+de phpIPAM pentru fiecare adresă găsită. Câmpurile sunt sortate, valorile pe mai
+multe linii sunt indentate, iar structurile JSON rămân lizibile. Afișarea este
+read-only și poate fi combinată și cu `--ssh`.
 
 ## Audit SSH
 

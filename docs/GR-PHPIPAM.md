@@ -17,6 +17,7 @@ phpIPAM standard custom address fields are `ssh_enabled`, `ssh_user`, `ssh_port`
 
 ```bash
 gr find <text-or-ip>
+gr find <text-or-ip> --details
 gr <ip>
 gr subnet <cidr>
 gr --ssh <target>
@@ -24,6 +25,11 @@ gr --ssh --user operator --port 2222 --profile network-admin <target>
 ```
 
 One match connects automatically; multiple matches open an interactive selector. CLI overrides last only for that connection. `--no-vault` uses the OpenSSH prompt. A `legacy` client is isolated per device.
+
+`--details` keeps the compact summary and then prints every field returned by
+phpIPAM for each matching address. Fields are sorted, multiline values are
+indented and nested JSON values remain readable. The detailed view is read-only
+and can also be combined with `--ssh`.
 
 ## Complete SSH auditing
 

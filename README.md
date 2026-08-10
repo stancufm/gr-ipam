@@ -58,6 +58,7 @@ gr doctor --api
 
 ```bash
 gr find core-switch
+gr find core-switch --details
 gr --ssh core-switch
 gr --ssh --audit core-switch
 gr audit show core-switch latest

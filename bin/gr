@@ -686,6 +686,35 @@ def print_table(rows, numbered=False, legacy_fallback=True, override_user=None, 
         print(fmt.format(*clipped))
 
 
+def address_detail_value(row, key):
+    value = str(row["_ip"]) if key == "ip" else row.get(key)
+    if value is None or value == "":
+        return ["-"]
+    if isinstance(value, bool):
+        return ["true" if value else "false"]
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2).splitlines()
+    return str(value).splitlines() or ["-"]
+
+
+def print_address_details(rows):
+    for index, row in enumerate(rows, 1):
+        hostname = row.get("_hostname") or str(row["_ip"])
+        print("\nDetails {}/{}: {} ({})".format(index, len(rows), hostname, row["_ip"]))
+        keys = [key for key in row if not key.startswith("_")]
+        keys.sort(key=lambda key: (0 if key == "ip" else 1 if key == "hostname" else 2,
+                                   key.lower()))
+        width = max([len(key) for key in keys] or [0])
+        for key in keys:
+            lines = address_detail_value(row, key)
+            if len(lines) == 1:
+                print("  {} : {}".format(key.ljust(width), lines[0]))
+                continue
+            print("  {} :".format(key.ljust(width)))
+            for line in lines:
+                print("    {}".format(line))
+
+
 def ssh_effective(target):
     try:
         output = subprocess.check_output(
@@ -1191,7 +1220,8 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
 
 
 def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
-                   ssh_profile=None, ssh_client=None, no_vault=False, audit=None):
+                   ssh_profile=None, ssh_client=None, no_vault=False, audit=None,
+                   details=False):
     needle = " ".join(terms).strip().lower()
     if not needle:
         raise GrError("Search text is required")
@@ -1212,14 +1242,19 @@ def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
         if needle in haystack:
             matches.append(row)
     if matches:
+        if details:
+            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True))
+            print_address_details(matches)
+            print()
         if use_ssh:
             if len(matches) == 1:
                 selected = matches[0]
                 print("One SSH target matched; connecting automatically:")
-                print_table(matches, numbered=False,
-                            legacy_fallback=cfg.get("ssh_legacy_fallback", True),
-                            override_user=ssh_user, override_port=ssh_port,
-                            override_profile=ssh_profile, override_client=ssh_client)
+                if not details:
+                    print_table(matches, numbered=False,
+                                legacy_fallback=cfg.get("ssh_legacy_fallback", True),
+                                override_user=ssh_user, override_port=ssh_port,
+                                override_profile=ssh_profile, override_client=ssh_client)
                 print()
             else:
                 selected = choose_ssh_target(matches, cfg.get("ssh_legacy_fallback", True), ssh_user, ssh_port,
@@ -1229,7 +1264,8 @@ def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
                     return 0
             return connect_ssh(cfg, selected, ssh_user, ssh_port, ssh_profile, ssh_client,
                                no_vault, audit)
-        print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True))
+        if not details:
+            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True))
         print("\n{} result(s)".format(len(matches)))
         return 0
     print("No phpIPAM results for: {}".format(needle), file=sys.stderr)
@@ -1903,6 +1939,8 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     collect_version.add_argument("--workers", type=int, default=4)
     find = sub.add_parser("find", aliases=["search"], help="find addresses by IP, hostname, description, owner, MAC or port")
     find.add_argument("terms", nargs="+")
+    find.add_argument("--details", action="store_true",
+                      help="show every phpIPAM field returned for each matching address")
     find.add_argument("--ssh", action="store_true", help="interactively select a result and start SSH")
     find.add_argument("--user", type=ssh_user, help="override the SSH user for this connection only")
     find.add_argument("--port", type=ssh_port, help="override the SSH port for this connection only")
@@ -2060,7 +2098,7 @@ def main(argv=None):
             raise GrError("SSH connection options require --ssh")
         return command_search(cfg, args.terms, use_ssh=args.ssh, ssh_user=args.user, ssh_port=args.port,
                               ssh_profile=args.profile, ssh_client=args.client, no_vault=args.no_vault,
-                              audit=args.audit)
+                              audit=args.audit, details=args.details)
     if args.command == "subnet":
         return command_subnet(cfg, args.cidr)
     if args.command == "local":

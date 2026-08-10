@@ -108,7 +108,7 @@ _gr_completion() {
             ;;
         find|search|--ssh)
             if [[ $current == -* ]]; then
-                _gr_complete_words "--ssh --user --port --profile --client --no-vault --audit --no-audit --config --help" "$current"
+                _gr_complete_words "--details --ssh --user --port --profile --client --no-vault --audit --no-audit --config --help" "$current"
             fi
             ;;
         ssh)
