@@ -18,6 +18,8 @@ class InstallDependencyTests(unittest.TestCase):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(os.path.isfile(os.path.join(root, "usr/local/bin/gr")))
+            self.assertTrue(os.path.isfile(os.path.join(
+                root, "usr/local/libexec/gr/collect-config")))
 
     def test_missing_packages_abort_before_installation(self):
         with tempfile.TemporaryDirectory() as root:

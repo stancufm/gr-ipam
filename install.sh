@@ -129,6 +129,7 @@ install -d -m 0755 "$destdir/usr/local/bin" "$destdir/usr/local/libexec/gr" \
 install -m 0755 "$package_dir/bin/gr" "$destdir/usr/local/bin/gr"
 install -m 0755 "$package_dir/libexec/validate-ssh" "$destdir/usr/local/libexec/gr/validate-ssh"
 install -m 0755 "$package_dir/libexec/collect-version" "$destdir/usr/local/libexec/gr/collect-version"
+install -m 0755 "$package_dir/libexec/collect-config" "$destdir/usr/local/libexec/gr/collect-config"
 install -m 0755 "$package_dir/libexec/gr-update" "$destdir/usr/local/libexec/gr/gr-update"
 install -m 0644 "$package_dir"/docs/*.md "$destdir/usr/local/share/doc/gr/"
 install -m 0644 "$package_dir"/README*.md "$package_dir"/CONTRIBUTING*.md "$destdir/usr/local/share/doc/gr/"
@@ -176,11 +177,16 @@ elif [ -r "$package_dir/release/project-release-key.asc" ]; then
 fi
 
 python3 -c 'import ast,sys; [ast.parse(open(path, encoding="utf-8").read(), filename=path) for path in sys.argv[1:]]' \
-  "$package_dir/bin/gr" "$package_dir/libexec/validate-ssh" "$package_dir/libexec/collect-version"
+  "$package_dir/bin/gr" "$package_dir/libexec/validate-ssh" "$package_dir/libexec/collect-version" \
+  "$package_dir/libexec/collect-config"
 sh -n "$package_dir/libexec/gr-update"
 bash -n "$package_dir/completions/gr.bash"
 
 if [ -z "$destdir" ]; then
+  if ! getent group gr-config >/dev/null 2>&1; then
+    groupadd --system gr-config
+  fi
+  install -d -o root -g gr-config -m 2770 /var/lib/gr/config-archive
   systemctl daemon-reload
   if [ "$enable_timer" -eq 1 ]; then
     systemctl enable --now gr-vendor-update.timer

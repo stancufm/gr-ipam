@@ -196,13 +196,50 @@ pentru fiecare dispozitiv, un depozit persistent per utilizator pentru cheile ho
 cu criteriile de generare, modelul, firmware-ul, familia OS, uptime, seria,
 imaginea de sistem, ROM-ul, stderr și rezultatul. Parserul este controlat de
 driverul fiecărui echipament și suportă familiile implementate Cisco, Dell OS10,
-HPE ArubaOS-Switch și HPE Comware.
+HPE ArubaOS-Switch, HPE Comware și PLANET SGS.
 
 `gr collect reports` afișează fiecare raport pe o linie. Coloana `CRITERIA`
 arată cum a fost generat (`vendor=... all`, IP-urile selectate sau
 `driver!=generic`). Rapoartele vechi fără criterii salvate sunt marcate `legacy`.
 Timestampurile afișate sunt convertite din UTC în `Europe/Bucharest` și au
 formatul `YYYY-MM-DD HH:MM:SS`; ID-urile stabile și valorile JSON rămân UTC.
+
+### Arhiva globală de configurații
+
+`gr collect config` extrage configurația curentă folosind comenzile definite de
+driver și salvează textul normalizat în repository-ul Git global privat
+`/var/lib/gr/config-archive`. Arhiva aparține grupului `gr-config`; numai membrii
+autorizați pot citi sau colecta configurații. Profilurile și seiful de parole
+rămân per utilizator și nu sunt introduse în Git.
+
+```bash
+gr collect config --all [--vendor VENDOR] [--workers N]
+gr collect config --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
+```
+
+Comenzile fiecărui driver sunt afișate de `gr driver list`. Țintele `generic`
+sunt respinse. Colectarea folosește lock global, normalizează outputul de
+terminal și păstrează câte un fișier pentru fiecare IP. Un commit este creat
+numai dacă s-a schimbat cel puțin o configurație. Interogările periodice
+identice nu creează commit și nu dublează fișiere; Git comprimă diferențele.
+
+Navigarea arhivei comune:
+
+```bash
+gr config devices
+gr config devices sw
+gr config history sw50
+gr config view sw50
+gr config view sw50 latest
+gr config view sw50 <revizie>
+gr config view sw50 <revizie> --no-more
+```
+
+`devices` afișează țintele, numărul versiunilor și ultima colectare. `history`
+listează reviziile Git pentru un hostname sau IP exact. `view` folosește pagerul
+automat și afișează ultima configurație sau una istorică. Autocomplete-ul
+propune dinamic echipamentele și reviziile. gr nu configurează niciun remote
+pentru această arhivă; publicarea configurațiilor necesită o decizie separată.
 
 ### Migrarea driverelor din gr 1.x
 

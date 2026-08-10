@@ -8,6 +8,12 @@
 
 `libexec/validate-ssh` validează concurent dispozitivele `sw*`, iar `libexec/collect-version` păstrează ieșirea brută și produce inventar JSON. Ambele reutilizează logica CLI-ului.
 
+`libexec/collect-config` rulează comenzile de configurație ale driverului și
+salvează numai modificările normalizate în arhiva Git globală privată
+`/var/lib/gr/config-archive`, accesibilă grupului `gr-config`. Autentificarea
+folosește seiful privat al operatorului, iar scrierea folosește lock global.
+Un commit este creat numai când conținutul diferă; gr nu configurează remote.
+
 Registrul de drivere include în prezent comportamente generic, Cisco IOS,
 Cisco Small Business adaptiv, Dell SmartFabric OS10, HPE
 ArubaOS-Switch/ProVision și HPE Comware 7. Profilurile de credențiale nu sunt

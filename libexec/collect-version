@@ -37,6 +37,7 @@ def parse_version(text):
         r"Software Version\s*[:=]\s*([^\s,]+)",
         r"Software revision\s+([^\s]+)",
         r"HPE Comware Software,\s*Version\s+([^\r\n]+)",
+        r"^\S+ Series Software,\s*Version\s+(.+?),\s*RELEASE SOFTWARE\s*$",
         r"Version\s*[:=]\s*([^\r\n]+)",
     ], text)
     model = match([
@@ -50,6 +51,7 @@ def parse_version(text):
         r"^[Cc]isco\s+(\S+)\s+.*(?:processor|revision)",
         r"^Machine type\s*[:=]\s*(\S+)",
         r"^PID\s*:\s*(\S+)",
+        r"^(\S+) Series Software,\s*Version\s+",
     ], text)
     uptime = match([r"^(.+?) uptime is (.+)$"], text)
     if uptime:
@@ -61,6 +63,7 @@ def parse_version(text):
         r"System [Ss]erial [Nn]umber\s*[:=]\s*(\S+)",
         r"Serial [Nn]umber\s*[:=]\s*(\S+)",
         r"DEVICE_SERIAL_NUMBER\s*[:=]\s*(\S+)",
+        r"^Serial num\s*:\s*([^,\s]+)",
     ], text)
     image = match([r'^System image file is\s+"([^"]+)"', r"^Image [Ff]ile\s*[:=]\s*(.+)$",
                    r"^System image\s*:\s*(\S+)"], text)
@@ -76,6 +79,8 @@ def parse_version(text):
         os_family = "hpe-arubaos-switch"
     elif "hpe comware software" in lower:
         os_family = "hpe-comware7"
+    elif "planet technology corporation internetwork operating system" in lower:
+        os_family = "planet-sgs"
     elif "cisco ios software" in lower:
         os_family = "ios"
     elif "nx-os" in lower:
@@ -249,10 +254,14 @@ def main():
                         help="collect every device with an explicit non-generic driver")
     target.add_argument("--ip", action="append", dest="ips", help="collect only this IP (repeatable)")
     parser.add_argument("--vendor", help="optional phpIPAM device_vendor filter")
+    parser.add_argument("--driver", choices=tuple(load_gr().DEVICE_DRIVERS),
+                        help="explicit driver override for selected IP probes")
     parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
     if args.all_drivers and args.vendor:
         parser.error("--vendor cannot be combined with --all-drivers")
+    if args.driver and not args.ips:
+        parser.error("--driver requires --ip")
     gr = load_gr()
     cfg = gr.load_config(None)
     with gr.api_session(cfg, prompt=False) as client:
@@ -266,6 +275,8 @@ def main():
         meta = gr.phpipam_ssh_metadata(row)
         vendor = str(gr.custom_value(row, "device_vendor") or "").strip()
         configured_driver = str(gr.custom_value(row, "device_driver") or "").strip().lower()
+        if args.driver:
+            configured_driver = args.driver
         non_generic_all = args.all_drivers or (args.all and not args.vendor)
         if non_generic_all:
             if not configured_driver or configured_driver == "generic":
@@ -274,7 +285,7 @@ def main():
         else:
             if args.vendor and vendor.lower() != args.vendor.lower():
                 continue
-            device_driver = gr.resolve_device_driver(row)
+            device_driver = gr.normalize_device_driver(args.driver) if args.driver else gr.resolve_device_driver(row)
             if args.ips and device_driver == "generic":
                 generic_rejections.append((ip, str(row.get("hostname") or "-")))
                 continue
