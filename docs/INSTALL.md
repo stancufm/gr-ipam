@@ -8,6 +8,13 @@ Enable the phpIPAM API, create the read-only and write applications, create the
 custom fields, and grant the API user access to the required sections. Follow
 [`phpipam/SETUP.md`](../phpipam/SETUP.md).
 
+On a new phpIPAM server, copy the packaged
+`phpipam/ensure-custom-fields.php` helper to the application host and run it
+there after a database backup. Schema creation cannot be performed through the
+phpIPAM address API and database credentials are deliberately never copied to
+the jump server. `gr doctor --api` is the mandatory post-install validation and
+fails when any required field is absent.
+
 ## 2. Prepare the jump server
 
 ```bash

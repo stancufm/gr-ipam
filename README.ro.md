@@ -43,6 +43,7 @@ gr --ssh --audit core-switch
 gr audit show core-switch latest
 gr config show
 gr update 192.0.2.10 --ssh-enabled yes --ssh-user operator --apply
+gr vendor list
 gr vendor lookup e8:d3:22:00:00:01
 gr ssh validate
 gr collect version --ip 192.0.2.10

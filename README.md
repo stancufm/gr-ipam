@@ -68,6 +68,7 @@ gr config show
 gr update 192.0.2.10 --ssh-enabled yes --ssh-user operator --apply
 gr vendor lookup e8:d3:22:00:00:01
 sudo gr vendor update-db
+gr vendor list
 gr vendor sync
 gr ssh validate
 gr ssh validate --run --ip 192.0.2.10

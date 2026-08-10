@@ -19,6 +19,10 @@ class CollectVersionCliTests(unittest.TestCase):
         self.assertEqual(COLLECTOR.host_key_status(
             "REMOTE HOST IDENTIFICATION HAS CHANGED!"), "changed")
         self.assertEqual(COLLECTOR.host_key_status(""), "verified")
+
+    def test_utc_timestamps_are_displayed_in_bucharest_local_time(self):
+        self.assertEqual(GR.format_local_timestamp("20260810T100000Z"),
+                         "2026-08-10 13:00:00")
     def test_collector_redacts_vault_password(self):
         self.assertEqual(COLLECTOR.redact_secret(
             b"User Name: cisco\r\nPassword: super-secret\r\nsw36#", "super-secret"),
@@ -112,11 +116,29 @@ class CollectVersionCliTests(unittest.TestCase):
         self.assertEqual(driver.feed(b"output\r\n<Sw-76-HP-GE_Centricity>"),
                          [("prompt", b"")])
 
-    def test_all_uses_documented_defaults(self):
+    def test_all_has_no_implicit_vendor(self):
         args = GR.build_parser().parse_args(["collect", "version", "--all"])
         self.assertTrue(args.all)
-        self.assertEqual(args.vendor, "cisco")
+        self.assertIsNone(args.vendor)
         self.assertEqual(args.workers, 4)
+
+    def test_all_drivers_is_vendor_independent(self):
+        args = GR.build_parser().parse_args(["collect", "version", "--all-drivers"])
+        self.assertTrue(args.all_drivers)
+        self.assertFalse(args.all)
+
+    def test_ip_does_not_require_or_assume_vendor(self):
+        args = GR.build_parser().parse_args(["collect", "version", "--ip", "192.0.2.10"])
+        self.assertIsNone(args.vendor)
+
+    def test_vendor_counts_are_case_insensitive_and_sorted(self):
+        rows = [
+            {"custom_fields": {"device_vendor": "Cisco"}},
+            {"custom_fields": {"device_vendor": "cisco"}},
+            {"custom_fields": {"device_vendor": "dell"}},
+            {"custom_fields": {"device_vendor": ""}},
+        ]
+        self.assertEqual(GR.vendor_counts(rows), [("Cisco", 2), ("dell", 1)])
 
     def test_ip_is_repeatable_and_accepts_overrides(self):
         args = GR.build_parser().parse_args([
@@ -136,7 +158,7 @@ class CollectVersionCliTests(unittest.TestCase):
                 "generated_utc": report_id,
                 "command": "show version",
                 "results": [
-                    {"hostname": "sw1", "ip": "192.0.2.1", "result": "success",
+                    {"hostname": "sw1", "ip": "192.0.2.1", "vendor": "cisco", "result": "success",
                      "model": "C1000", "uptime": "3 weeks",
                      "system_image": "flash:image.bin", "rom": "ROM1"},
                     {"hostname": "sw2", "ip": "192.0.2.2", "result": "failed",
@@ -153,6 +175,8 @@ class CollectVersionCliTests(unittest.TestCase):
             with contextlib.redirect_stdout(listing):
                 GR.command_collect_reports(cfg)
             self.assertIn(report_id, listing.getvalue())
+            self.assertIn("CRITERIA", listing.getvalue())
+            self.assertIn("vendor=cisco (legacy)", listing.getvalue())
             self.assertRegex(listing.getvalue(), r"2\s+1\s+1\s+0")
 
             shown = io.StringIO()
@@ -161,6 +185,8 @@ class CollectVersionCliTests(unittest.TestCase):
             self.assertIn("HOSTNAME", shown.getvalue())
             self.assertIn("sw1", shown.getvalue())
             self.assertIn("C1000", shown.getvalue())
+            self.assertIn("VENDOR", shown.getvalue())
+            self.assertIn("cisco", shown.getvalue())
             self.assertNotIn("STDERR", shown.getvalue())
             self.assertNotIn("denied", shown.getvalue())
             self.assertNotIn("RAW_REPORT", shown.getvalue())
@@ -180,6 +206,25 @@ class CollectVersionCliTests(unittest.TestCase):
             with contextlib.redirect_stdout(completed):
                 GR.command_completion(cfg, "collect-reports")
             self.assertEqual(completed.getvalue().splitlines(), ["latest", report_id])
+
+    def test_report_listing_shows_saved_generation_criteria(self):
+        with tempfile.TemporaryDirectory() as root:
+            report_id = "20260810T110000Z"
+            directory = os.path.join(root, report_id)
+            os.makedirs(directory)
+            data = {
+                "generated_utc": report_id,
+                "command": "show version",
+                "criteria": {"selector": "all-non-generic-drivers"},
+                "results": [],
+            }
+            with open(os.path.join(directory, "all-drivers-show-version-report.json"),
+                      "w", encoding="utf-8") as handle:
+                json.dump(data, handle)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                GR.command_collect_reports({"device_version_dir": root})
+            self.assertIn("driver!=generic", output.getvalue())
 
     def test_reports_parser_accepts_selector_and_no_more(self):
         args = GR.build_parser().parse_args([

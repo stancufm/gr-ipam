@@ -120,7 +120,8 @@ Credențiala API are modul `0600`. Parolele SSH sunt criptate de pass/GPG și tr
 
 Rezultatele căutării folosesc tabelul standard de inventar. Adăugați `--brief`
 la `gr TERMEN` sau `gr find TERMEN` pentru a afișa numai `IP`, `HOSTNAME`, `SSH`
-și `DESCRIPTION`; `--brief` și `--details` se exclud reciproc.
+și `DESCRIPTION`; `--brief` și `--details` se exclud reciproc. Adăugați
+`--show-vendor` în oricare format pentru coloana phpIPAM `device_vendor`.
 
 `gr sync` și `gr export` generează configurație SSH și, numai dacă este activat explicit, `/etc/hosts`. `gr update <ip>` afișează schimbarea, inclusiv pentru `--device-driver` și `--device-vendor`; scrierea necesită `--apply` și verificare GET. `gr migrate-ssh` migrează metadatele vechi, dry-run implicit.
 
@@ -135,6 +136,7 @@ gr update 10.22.10.76 --hostname sw76 --ssh-enabled yes --ssh-user admin \
 
 ```bash
 sudo gr vendor update-db
+gr vendor list
 gr vendor lookup <mac>
 gr vendor sync
 gr vendor sync --apply
@@ -143,11 +145,15 @@ gr collect version --ip IP
 ```
 
 Baza IEEE comună este actualizată atomic. Sincronizările și colectările produc rapoarte private. Nu comiteți rapoarte, inventare sau audituri.
+`gr vendor list` citește valorile distincte `device_vendor` din phpIPAM și
+afișează numărul adreselor. Aceleași valori reale alimentează autocomplete
+pentru `--vendor` și `--device-vendor`.
 
 ### Colectarea inventarului de versiuni
 
 ```bash
 gr collect version --all [--vendor VENDOR] [--workers N]
+gr collect version --all-drivers [--workers N]
 gr collect version --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
 ```
 
@@ -159,26 +165,38 @@ configurația echipamentelor.
 
 Driverul provine din câmpul phpIPAM `device_driver`, nu din profilul de
 credențiale. `--driver` îl suprascrie numai pentru conexiunea interactivă
-curentă. Dacă valoarea lipsește, înregistrările Cisco folosesc fallback
-`cisco-ios`, iar ceilalți producători `generic`.
+curentă. Dacă valoarea lipsește, driverul este întotdeauna `generic`; vendorul
+nu selectează niciodată implicit driverul.
 
 Opțiuni:
 
-- `--all` selectează toate adresele eligibile care corespund lui `--vendor`;
-- `--ip IP` limitează colectarea la o adresă și poate fi repetat; filtrul de
-  producător și cerințele SSH/profil se aplică în continuare;
+- `--all` fără `--vendor` selectează toate adresele cu driver explicit diferit
+  de `generic`; dacă este furnizat, `--vendor` filtrează suplimentar selecția;
+- `--all-drivers` ignoră vendorul și hostname-ul și selectează fiecare adresă
+  care are în phpIPAM un `device_driver` explicit diferit de `generic`;
+- `--ip IP` limitează colectarea la o adresă și poate fi repetat; vendorul nu
+  este filtrat decât dacă se furnizează `--vendor`. O țintă cu driver efectiv
+  `generic` este respinsă înainte de SSH, împreună cu instrucțiuni pentru
+  `gr driver detect`;
 - `--vendor VENDOR` compară fără diferență între litere mari și mici câmpul
-  phpIPAM `device_vendor`; valoarea implicită este `cisco`;
+  phpIPAM `device_vendor`; nu există vendor implicit;
 - `--workers N` stabilește numărul de sesiuni SSH paralele; implicit este `4`,
   iar valoarea efectivă este limitată la intervalul `1..12`.
 
 Fiecare rulare creează un director privat cu timestamp în
 `~/.local/state/gr/device-version/`. Acesta conține outputul brut `show version`
 pentru fiecare dispozitiv, un depozit persistent per utilizator pentru cheile host și
-`<vendor>-show-version-report.json` cu modelul, firmware-ul, familia OS, uptime,
-seria, imaginea de sistem, ROM-ul, stderr și rezultatul. Parserul este destinat
-în principal outputului Cisco; alt producător este util numai dacă suportă
-`show version` și un format compatibil.
+`<vendor>-show-version-report.json` (sau `all-drivers-show-version-report.json`)
+cu criteriile de generare, modelul, firmware-ul, familia OS, uptime, seria,
+imaginea de sistem, ROM-ul, stderr și rezultatul. Parserul este controlat de
+driverul fiecărui echipament și suportă familiile implementate Cisco, Dell OS10,
+HPE ArubaOS-Switch și HPE Comware.
+
+`gr collect reports` afișează fiecare raport pe o linie. Coloana `CRITERIA`
+arată cum a fost generat (`vendor=... all`, IP-urile selectate sau
+`driver!=generic`). Rapoartele vechi fără criterii salvate sunt marcate `legacy`.
+Timestampurile afișate sunt convertite din UTC în `Europe/Bucharest` și au
+formatul `YYYY-MM-DD HH:MM:SS`; ID-urile stabile și valorile JSON rămân UTC.
 
 ### Migrarea driverelor din gr 1.x
 
@@ -188,6 +206,36 @@ credențiale. Înainte de eliminarea cheilor vechi din configurație:
 ```bash
 gr migrate-drivers
 gr migrate-drivers --apply
+```
+
+### Detectarea automată a driverului
+
+`gr driver detect` clasifică echipamentele folosind cea mai nouă înregistrare
+reușită din rapoartele de inventar și metadatele vendor neambigue din phpIPAM.
+Dovada de model și familie OS are prioritate față de vendor. Dacă nu există o
+dovadă sigură, driverul detectat este intenționat `generic`. Profilurile de
+credențiale, userii și porturile SSH nu sunt folosite ca dovezi și nu sunt
+modificate.
+
+Selecția acceptă IP-uri exacte, subnet CIDR, range inclusiv, câmpurile normale
+de căutare sau toate adresele phpIPAM:
+
+```bash
+gr driver detect --ip 10.22.10.25 --ip 10.22.10.53
+gr driver detect --subnet 10.22.10.0/24
+gr driver detect --range 10.22.10.10-69
+gr driver detect --find sw
+gr driver detect --all
+```
+
+Comanda este dry-run implicit și afișează driverul curent, cel detectat, dovada
+și starea planificată. `--apply` scrie fiecare `custom_device_driver` schimbat,
+îl verifică prin GET și încearcă rollback la eșec. Fiecare rulare creează un
+raport JSON privat în `~/.local/state/gr/driver-detection/`.
+
+```bash
+gr driver detect --range 10.22.10.10-69 --apply
+gr driver detect --find "Linux Jump" --apply
 ```
 
 Migrarea copiază asocierile vechi în câmpul phpIPAM `device_driver`, generează

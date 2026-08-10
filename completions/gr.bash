@@ -31,7 +31,7 @@ _gr_completion() {
     COMPREPLY=()
 
     if (( COMP_CWORD == 1 )); then
-        _gr_complete_words "init doctor config ssh collect find search subnet local sync export auth vault update self-update migrate-ssh migrate-drivers vendor audit completion docs help --ssh --config --version" "$current"
+        _gr_complete_words "init doctor config ssh collect find search subnet local sync export auth vault update self-update migrate-ssh migrate-drivers driver vendor audit completion docs help --ssh --config --version" "$current"
         return
     fi
 
@@ -47,6 +47,10 @@ _gr_completion() {
             ;;
         --driver|--device-driver)
             _gr_complete_dynamic drivers "$current"
+            return
+            ;;
+        --vendor|--device-vendor)
+            _gr_complete_dynamic vendors "$current"
             return
             ;;
         --client|--ssh-client)
@@ -96,7 +100,7 @@ _gr_completion() {
             ;;
         completion)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "bash profiles drivers audit-targets audit-sessions collect-reports" "$current"
+                _gr_complete_words "bash profiles drivers vendors audit-targets audit-sessions collect-reports" "$current"
             elif [[ $subcommand == audit-sessions && $COMP_CWORD -eq 3 ]]; then
                 _gr_complete_dynamic audit-targets "$current"
             fi
@@ -112,7 +116,7 @@ _gr_completion() {
             ;;
         find|search|--ssh)
             if [[ $current == -* ]]; then
-                _gr_complete_words "--brief --details --ssh --user --port --profile --client --driver --no-vault --audit --no-audit --config --help" "$current"
+                _gr_complete_words "--brief --details --show-vendor --ssh --user --port --profile --client --driver --no-vault --audit --no-audit --config --help" "$current"
             fi
             ;;
         ssh)
@@ -126,7 +130,7 @@ _gr_completion() {
             if (( COMP_CWORD == 2 )); then
                 _gr_complete_words "version reports" "$current"
             elif [[ $subcommand == version ]]; then
-                _gr_complete_words "--all --ip --vendor --workers --config --help" "$current"
+                _gr_complete_words "--all --all-drivers --ip --vendor --workers --config --help" "$current"
             elif [[ $subcommand == reports && $COMP_CWORD -eq 3 ]]; then
                 if [[ $current == -* ]]; then
                     _gr_complete_words "--raw --no-more --config --help" "$current"
@@ -172,9 +176,16 @@ _gr_completion() {
         migrate-drivers)
             _gr_complete_words "--apply --limit --overwrite --config --help" "$current"
             ;;
+        driver)
+            if (( COMP_CWORD == 2 )); then
+                _gr_complete_words "detect" "$current"
+            elif [[ $subcommand == detect ]]; then
+                _gr_complete_words "--all --ip --subnet --range --find --apply --config --help" "$current"
+            fi
+            ;;
         vendor)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "update-db lookup sync" "$current"
+                _gr_complete_words "list update-db lookup sync" "$current"
             elif [[ $subcommand == sync ]]; then
                 _gr_complete_words "--apply --overwrite --config --help" "$current"
             fi

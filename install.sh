@@ -97,6 +97,11 @@ if [ -z "$destdir" ]; then
     echo "Install the separately packaged gr legacy SSH client, then re-run this installer." >&2
     exit 2
   fi
+  current_timezone=$(timedatectl show --property=Timezone --value 2>/dev/null || true)
+  if [ "$current_timezone" != "Europe/Bucharest" ]; then
+    echo "Setting required system timezone: Europe/Bucharest"
+    timedatectl set-timezone Europe/Bucharest
+  fi
 fi
 
 package_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -118,7 +123,8 @@ case "$update_repository" in
 esac
 
 install -d -m 0755 "$destdir/usr/local/bin" "$destdir/usr/local/libexec/gr" \
-  "$destdir/usr/local/share/doc/gr" "$destdir/etc/gr" "$destdir/var/lib/gr/ieee-vendors" \
+  "$destdir/usr/local/share/doc/gr" "$destdir/usr/local/share/gr/phpipam" \
+  "$destdir/etc/gr" "$destdir/var/lib/gr/ieee-vendors" \
   "$destdir/etc/systemd/system" "$destdir/etc/bash_completion.d"
 install -m 0755 "$package_dir/bin/gr" "$destdir/usr/local/bin/gr"
 install -m 0755 "$package_dir/libexec/validate-ssh" "$destdir/usr/local/libexec/gr/validate-ssh"
@@ -127,6 +133,8 @@ install -m 0755 "$package_dir/libexec/gr-update" "$destdir/usr/local/libexec/gr/
 install -m 0644 "$package_dir"/docs/*.md "$destdir/usr/local/share/doc/gr/"
 install -m 0644 "$package_dir"/README*.md "$package_dir"/CONTRIBUTING*.md "$destdir/usr/local/share/doc/gr/"
 install -m 0644 "$package_dir"/phpipam/*.md "$destdir/usr/local/share/doc/gr/"
+install -m 0755 "$package_dir/phpipam/ensure-custom-fields.php" \
+  "$destdir/usr/local/share/gr/phpipam/ensure-custom-fields.php"
 install -m 0644 "$package_dir/VERSION" "$destdir/usr/local/share/doc/gr/VERSION"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.service" "$destdir/etc/systemd/system/gr-vendor-update.service"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.timer" "$destdir/etc/systemd/system/gr-vendor-update.timer"

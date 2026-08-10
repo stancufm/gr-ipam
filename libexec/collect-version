@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import re
+import sys
 import select
 import subprocess
 import time
@@ -242,27 +243,43 @@ def run_one(item, password, output_dir):
 def main():
     parser = argparse.ArgumentParser(description="Collect and parse show version through gr metadata/vault")
     target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--all", action="store_true", help="collect from every matching vendor device")
+    target.add_argument("--all", action="store_true",
+                        help="collect all explicit non-generic drivers, optionally filtered by vendor")
+    target.add_argument("--all-drivers", action="store_true",
+                        help="collect every device with an explicit non-generic driver")
     target.add_argument("--ip", action="append", dest="ips", help="collect only this IP (repeatable)")
-    parser.add_argument("--vendor", default="cisco", help="phpIPAM device_vendor value (default: cisco)")
+    parser.add_argument("--vendor", help="optional phpIPAM device_vendor filter")
     parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
+    if args.all_drivers and args.vendor:
+        parser.error("--vendor cannot be combined with --all-drivers")
     gr = load_gr()
     cfg = gr.load_config(None)
     with gr.api_session(cfg, prompt=False) as client:
         rows = client.addresses()
     items = []
+    generic_rejections = []
     for row in rows:
         ip = str(gr.normalize_ip(row.get("ip")) or row.get("ip") or "")
         if args.ips and ip not in args.ips:
             continue
         meta = gr.phpipam_ssh_metadata(row)
         vendor = str(gr.custom_value(row, "device_vendor") or "").strip()
-        if vendor.lower() != args.vendor.lower():
-            continue
+        configured_driver = str(gr.custom_value(row, "device_driver") or "").strip().lower()
+        non_generic_all = args.all_drivers or (args.all and not args.vendor)
+        if non_generic_all:
+            if not configured_driver or configured_driver == "generic":
+                continue
+            device_driver = gr.normalize_device_driver(configured_driver)
+        else:
+            if args.vendor and vendor.lower() != args.vendor.lower():
+                continue
+            device_driver = gr.resolve_device_driver(row)
+            if args.ips and device_driver == "generic":
+                generic_rejections.append((ip, str(row.get("hostname") or "-")))
+                continue
         if not meta["enabled"] or not meta["profile"]:
             continue
-        device_driver = gr.resolve_device_driver(row)
         driver_spec = gr.device_driver_spec(device_driver)
         items.append({"id": row.get("id"), "ip": ip, "hostname": str(row.get("hostname") or ip),
                       "vendor": vendor, "user": meta["user"], "port": int(meta["port"] or 22),
@@ -272,6 +289,16 @@ def main():
                       "_cleanup_commands": driver_spec["cleanup_commands"],
                       "_login_driver": (gr.device_login_driver(device_driver)
                                         if driver_spec["interactive_cli"] else None)})
+    if generic_rejections:
+        for ip, hostname in generic_rejections:
+            print("Rejected {} ({}): device_driver is generic.".format(ip, hostname),
+                  file=sys.stderr)
+            print("  Detect first: gr driver detect --ip {}".format(ip), file=sys.stderr)
+            print("  Review, then apply: gr driver detect --ip {} --apply".format(ip),
+                  file=sys.stderr)
+            print("  Re-run collect after phpIPAM contains a non-generic device_driver.",
+                  file=sys.stderr)
+        return 2
     if not items:
         print("No eligible devices matched.")
         return 1
@@ -296,10 +323,22 @@ def main():
                 result["hostname"], result["ip"], result["result"],
                 result.get("model", ""), result.get("firmware", "")))
     results.sort(key=lambda item: tuple(int(part) for part in item["ip"].split(".")))
-    vendor_slug = re.sub(r"[^a-z0-9]+", "-", args.vendor.lower()).strip("-") or "devices"
-    report = os.path.join(output_dir, "{}-show-version-report.json".format(vendor_slug))
+    if args.all_drivers or (args.all and not args.vendor):
+        criteria = {"selector": "all-non-generic-drivers"}
+        report_slug = "all-drivers"
+    elif args.all:
+        criteria = {"selector": "vendor-all", "vendor": args.vendor}
+        report_slug = re.sub(r"[^a-z0-9]+", "-", args.vendor.lower()).strip("-") or "devices"
+    else:
+        criteria = {"selector": "ip", "ips": args.ips or []}
+        if args.vendor:
+            criteria["vendor"] = args.vendor
+        report_slug = (re.sub(r"[^a-z0-9]+", "-", args.vendor.lower()).strip("-")
+                       if args.vendor else "selected-ips") or "devices"
+    report = os.path.join(output_dir, "{}-show-version-report.json".format(report_slug))
     with open(report, "w", encoding="utf-8") as handle:
-        json.dump({"generated_utc": stamp, "command": "show version", "results": results},
+        json.dump({"generated_utc": stamp, "command": "show version",
+                   "criteria": criteria, "results": results},
                   handle, ensure_ascii=False, indent=2)
     os.chmod(report, 0o600)
     print("SUMMARY={}".format(json.dumps({key: sum(1 for x in results if x["result"] == key)
@@ -309,4 +348,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

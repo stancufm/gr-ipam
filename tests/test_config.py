@@ -2,6 +2,7 @@
 import contextlib
 import importlib.machinery
 import io
+import ipaddress
 import json
 import os
 import tempfile
@@ -11,6 +12,19 @@ GR = importlib.machinery.SourceFileLoader("gr_config_test_module", "bin/gr").loa
 
 
 class ConfigShowTests(unittest.TestCase):
+    def test_required_phpipam_custom_fields_are_validated(self):
+        complete = {name: None for name in GR.REQUIRED_ADDRESS_CUSTOM_FIELDS}
+        self.assertEqual(GR.missing_address_custom_fields([complete]), [])
+        del complete["custom_device_driver"]
+        self.assertEqual(GR.missing_address_custom_fields([complete]),
+                         ["custom_device_driver"])
+
+    def test_nested_phpipam_custom_fields_are_validated(self):
+        nested = {"custom_fields": {
+            name[len("custom_"):]: None for name in GR.REQUIRED_ADDRESS_CUSTOM_FIELDS
+        }}
+        self.assertEqual(GR.missing_address_custom_fields([nested]), [])
+
     def test_device_driver_is_independent_from_credential_profile(self):
         row = {"custom_ssh_profile": "shared-credential",
                "custom_device_driver": "cisco-small-business"}
@@ -20,9 +34,9 @@ class ConfigShowTests(unittest.TestCase):
         with self.assertRaises(GR.GrError):
             GR.normalize_device_driver("unknown")
 
-    def test_device_driver_fallback_uses_vendor_not_profile(self):
+    def test_device_driver_fallback_is_always_generic(self):
         row = {"custom_ssh_profile": "cisco", "custom_device_vendor": "cisco"}
-        self.assertEqual(GR.resolve_device_driver(row), "cisco-ios")
+        self.assertEqual(GR.resolve_device_driver(row), "generic")
         row["custom_device_vendor"] = "dell"
         self.assertEqual(GR.resolve_device_driver(row), "generic")
 
@@ -49,6 +63,28 @@ class ConfigShowTests(unittest.TestCase):
         cfg = {"ssh_profiles": {"credential": {
             "password_secret": "gr/credential", "session_driver": "cisco-small-business"}}}
         self.assertEqual(GR.legacy_profile_driver(cfg, "credential"), "cisco-small-business")
+
+    def test_driver_detection_uses_inventory_and_safe_generic_fallback(self):
+        cisco = {"custom_device_vendor": "cisco"}
+        self.assertEqual(GR.detect_device_driver(
+            cisco, {"model": "SG350-28P", "result": "success"})[0],
+            "cisco-small-business")
+        self.assertEqual(GR.detect_device_driver(
+            cisco, {"model": "C9200-24T", "result": "success"})[0],
+            "cisco-ios")
+        self.assertEqual(GR.detect_device_driver(cisco, {})[0], "generic")
+        self.assertEqual(GR.detect_device_driver(
+            {"custom_device_vendor": "hpe-comware"}, {})[0], "hpe-comware7")
+
+    def test_driver_detection_range_and_parser_selectors(self):
+        start, end = GR.driver_detection_range("10.22.10.10-69")
+        self.assertEqual(start, ipaddress.ip_address("10.22.10.10"))
+        self.assertEqual(end, ipaddress.ip_address("10.22.10.69"))
+        parser = GR.build_parser()
+        args = parser.parse_args(["driver", "detect", "--range", "10.22.10.10-69"])
+        self.assertEqual(args.ip_range, (start, end))
+        self.assertEqual(parser.parse_args(
+            ["driver", "detect", "--find", "sw", "--apply"]).find, "sw")
 
     def test_show_compares_default_global_user_and_effective_values(self):
         with tempfile.TemporaryDirectory() as root:

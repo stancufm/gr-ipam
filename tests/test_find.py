@@ -62,6 +62,19 @@ class FindDetailsTests(unittest.TestCase):
         self.assertIn(long_profile, output.getvalue())
         self.assertNotIn("…", output.getvalue())
 
+    def test_vendor_column_is_optional_in_standard_and_brief_tables(self):
+        row = {
+            "_ip": ipaddress.ip_address("192.0.2.10"), "_hostname": "core-switch",
+            "tag": "2", "description": "Core device",
+            "custom_fields": {"device_vendor": "cisco"},
+        }
+        for brief in (False, True):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                GR.print_table([row], brief=brief, show_vendor=True)
+            self.assertRegex(output.getvalue().splitlines()[0], r"HOSTNAME\s+VENDOR")
+            self.assertIn("cisco", output.getvalue())
+
     def test_details_prints_all_phpipam_fields_and_hides_internal_keys(self):
         row = {
             "ip": "3221225994",
@@ -105,6 +118,11 @@ class FindDetailsTests(unittest.TestCase):
         ])
         self.assertEqual(args.profile, "shared")
         self.assertEqual(args.driver, "cisco-small-business")
+
+    def test_parser_accepts_show_vendor_with_brief(self):
+        args = GR.build_parser().parse_args(["find", "switch", "--brief", "--show-vendor"])
+        self.assertTrue(args.show_vendor)
+        self.assertTrue(args.brief)
 
     def test_update_accepts_device_driver(self):
         args = GR.build_parser().parse_args([
