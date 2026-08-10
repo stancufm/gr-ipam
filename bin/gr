@@ -16,6 +16,7 @@ import fcntl
 import os
 import re
 import select
+import shlex
 import shutil
 import signal
 import ssl
@@ -40,7 +41,7 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "1.3.0"
+GR_VERSION = "1.3.1"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 
 
@@ -783,20 +784,65 @@ def run_audited_ssh(command, audit, inherited_fd=None):
     return exit_status
 
 
-def command_audit_replay(path):
+def audit_replay_streams(include_stdin=False, stream=None):
+    if stream:
+        return {stream}
+    return {"stdin", "stdout", "stderr"} if include_stdin else {"stdout", "stderr"}
+
+
+def audit_pager_command():
+    configured = os.environ.get("GR_PAGER") or os.environ.get("PAGER")
+    if configured:
+        try:
+            return shlex.split(configured)
+        except ValueError as exc:
+            raise GrError("Invalid pager command: {}".format(exc))
+    if shutil.which("less"):
+        return ["less", "-R"]
+    if shutil.which("more"):
+        return ["more"]
+    return []
+
+
+def command_audit_replay(path, streams=None, use_pager=True):
     path = expand(path)
+    streams = set(streams or ("stdout", "stderr"))
+    pager = None
+    pager_input = None
+    if use_pager and sys.stdout.isatty():
+        pager_command = audit_pager_command()
+        if pager_command:
+            try:
+                pager = subprocess.Popen(pager_command, stdin=subprocess.PIPE)
+                pager_input = pager.stdin
+            except OSError as exc:
+                raise GrError("Cannot start audit pager {}: {}".format(pager_command[0], exc))
     try:
         with open(path, encoding="ascii") as handle:
             for line_number, line in enumerate(handle, 1):
                 record = json.loads(line)
                 if "data" not in record:
                     continue
+                if record.get("stream") not in streams:
+                    continue
                 data = base64.b64decode(record["data"], validate=True)
-                destination = sys.stderr.buffer if record.get("stream") == "stderr" else sys.stdout.buffer
+                destination = pager_input or (
+                    sys.stderr.buffer if record.get("stream") == "stderr" else sys.stdout.buffer)
                 destination.write(data)
                 destination.flush()
+    except BrokenPipeError:
+        # Leaving the pager with q is a successful, intentional short replay.
+        pass
     except (OSError, ValueError, KeyError) as exc:
         raise GrError("Cannot replay audit {}: {}".format(path, exc))
+    finally:
+        if pager_input is not None:
+            try:
+                pager_input.close()
+            except BrokenPipeError:
+                pass
+        if pager is not None:
+            pager.wait()
     return 0
 
 
@@ -895,7 +941,7 @@ def resolve_audit_sessions(cfg, target):
     return [item for item in audit_inventory(cfg) if audit_target_matches(item, target, exact=True)]
 
 
-def command_audit_show(cfg, target=None, session=None):
+def command_audit_show(cfg, target=None, session=None, streams=None, use_pager=True):
     sessions = audit_inventory(cfg)
     if not target:
         rows = audit_target_rows(sessions)
@@ -908,7 +954,7 @@ def command_audit_show(cfg, target=None, session=None):
 
     direct_path = expand(target)
     if os.path.isfile(direct_path) and session is None:
-        return command_audit_replay(direct_path)
+        return command_audit_replay(direct_path, streams, use_pager)
 
     matches = [item for item in sessions if audit_target_matches(item, target, exact=True)]
     if not matches:
@@ -937,7 +983,7 @@ def command_audit_show(cfg, target=None, session=None):
         if not candidates:
             raise GrError("No audit session {} for target {}".format(session, target))
         selected = candidates[0]
-    return command_audit_replay(selected["path"])
+    return command_audit_replay(selected["path"], streams, use_pager)
 
 
 def completion_source_path():
@@ -1825,6 +1871,13 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     audit_show = audit_sub.add_parser("show", help="browse targets and sessions, or replay a recording")
     audit_show.add_argument("target", nargs="?", help="hostname, IP, or direct .ses path")
     audit_show.add_argument("session", nargs="?", help="session name or latest")
+    audit_streams = audit_show.add_mutually_exclusive_group()
+    audit_streams.add_argument("--include-stdin", action="store_true",
+                               help="also replay typed input (may duplicate terminal echo)")
+    audit_streams.add_argument("--stream", choices=("stdin", "stdout", "stderr"),
+                               help="replay only one recorded stream")
+    audit_show.add_argument("--no-more", action="store_true",
+                            help="write directly instead of using the automatic terminal pager")
     completion = sub.add_parser("completion", help="print shell completion or dynamic candidates")
     completion.add_argument("completion_action",
                             choices=("bash", "profiles", "audit-targets", "audit-sessions"))
@@ -1864,7 +1917,9 @@ def main(argv=None):
         if args.audit_action != "show":
             parser.parse_args(["audit", "--help"])
             return 0
-        return command_audit_show(cfg, args.target, args.session)
+        return command_audit_show(cfg, args.target, args.session,
+                                  audit_replay_streams(args.include_stdin, args.stream),
+                                  use_pager=not args.no_more)
     if args.command == "completion":
         return command_completion(cfg, args.completion_action, args.value)
     if args.command == "init":

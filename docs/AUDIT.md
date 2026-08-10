@@ -50,6 +50,26 @@ timestamp. The second lists the matching session tokens and exit status.
 gr audit show ~/.local/state/gr/audit/core-switch/core-switch-20260806T120000.000000Z.ses
 ```
 
+Replay defaults to stdout and stderr. Stdin remains stored in the `.ses` file
+but is omitted from the normal terminal view because most devices echo typed
+characters back on stdout; combining both copies would visually duplicate the
+command. Use the forensic or single-stream forms when needed:
+
+```bash
+gr audit show core-switch latest --include-stdin
+gr audit show core-switch latest --stream stdin
+gr audit show core-switch latest --stream stderr
+```
+
+Interactive replay automatically uses `less`, or `more` when `less` is not
+available. Pipes and redirected output never start a pager. Override the pager
+with `GR_PAGER` or `PAGER`, or disable it for one replay:
+
+```bash
+gr audit show core-switch latest --no-more
+GR_PAGER="less -R" gr audit show core-switch latest
+```
+
 ## Bash completion
 
 The system installer places completion in `/etc/bash_completion.d/gr`. Start a

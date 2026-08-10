@@ -61,6 +61,10 @@ _gr_completion() {
             _gr_complete_words "en ro" "$current"
             return
             ;;
+        --stream)
+            _gr_complete_words "stdin stdout stderr" "$current"
+            return
+            ;;
     esac
 
     case "$command" in
@@ -68,14 +72,22 @@ _gr_completion() {
             if (( COMP_CWORD == 2 )); then
                 _gr_complete_words "show" "$current"
             elif [[ $subcommand == show && $COMP_CWORD -eq 3 ]]; then
-                if [[ $current == */* || $current == .* ]]; then
+                if [[ $current == -* ]]; then
+                    _gr_complete_words "--include-stdin --stream --no-more --config --help" "$current"
+                elif [[ $current == */* || $current == .* ]]; then
                     COMPREPLY=( $(compgen -f -- "$current") )
                     compopt -o filenames 2>/dev/null || true
                 else
                     _gr_complete_dynamic audit-targets "$current"
                 fi
             elif [[ $subcommand == show && $COMP_CWORD -eq 4 ]]; then
-                _gr_complete_dynamic audit-sessions "$current" "${COMP_WORDS[3]}"
+                if [[ $current == -* ]]; then
+                    _gr_complete_words "--include-stdin --stream --no-more --config --help" "$current"
+                else
+                    _gr_complete_dynamic audit-sessions "$current" "${COMP_WORDS[3]}"
+                fi
+            elif [[ $subcommand == show && $current == -* ]]; then
+                _gr_complete_words "--include-stdin --stream --no-more --config --help" "$current"
             fi
             ;;
         completion)

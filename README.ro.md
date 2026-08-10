@@ -56,4 +56,4 @@ gr self-update check
 - [Pregătire phpIPAM](phpipam/SETUP.ro.md)
 - [Contribuții](CONTRIBUTING.ro.md)
 
-Versiunea `1.3.0` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).
+Versiunea `1.3.1` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).

@@ -34,9 +34,14 @@ gr --ssh --audit <target>
 gr audit show
 gr audit show <hostname-or-ip>
 gr audit show <hostname-or-ip> latest
+gr audit show <hostname-or-ip> latest --no-more
 ```
 
-Recordings use private `0700` directories and `0600` files but remain highly sensitive. See [SSH session auditing](AUDIT.md).
+Normal replay shows stdout/stderr through an automatic pager and omits stdin to
+avoid duplicated terminal echo. `--include-stdin` restores the forensic view,
+`--stream` isolates one channel and `--no-more` disables paging. Recordings use
+private `0700` directories and `0600` files but remain highly sensitive. See
+[SSH session auditing](AUDIT.md).
 
 ## Bash completion
 
