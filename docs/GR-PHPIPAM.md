@@ -73,6 +73,11 @@ driver recognizes the `<hostname>` prompt, disables paging with
 and exits with `quit`. It parses the Comware release, product/model, system
 image, BootROM and manufacturing serial where available.
 
+FortiGate appliances running FortiOS use `device_driver=fortigate-fortios`.
+The driver performs read-only collection with `get system status` and archives
+configuration with `show full-configuration`. It never enters configuration
+mode and keeps the credential profile independent from the device driver.
+
 `--details` keeps the compact summary and then prints every field returned by
 phpIPAM for each matching address. Fields are sorted, multiline values are
 indented and nested JSON values remain readable. The detailed view is read-only

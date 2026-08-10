@@ -46,6 +46,7 @@ class ConfigShowTests(unittest.TestCase):
         planet = GR.device_driver_spec("planet-sgs")
         hpe = GR.device_driver_spec("hpe-arubaos-switch")
         comware = GR.device_driver_spec("hpe-comware7")
+        fortigate = GR.device_driver_spec("fortigate-fortios")
         self.assertFalse(ios["interactive_cli"])
         self.assertTrue(ios["config_interactive_cli"])
         self.assertEqual(ios["version_commands"], ("show version",))
@@ -72,6 +73,11 @@ class ConfigShowTests(unittest.TestCase):
                          ("screen-length disable", "display version",
                           "display device manuinfo"))
         self.assertIs(GR.device_login_driver("hpe-comware7"), GR.HpeComwareLogin)
+        self.assertTrue(fortigate["interactive_cli"])
+        self.assertEqual(fortigate["version_commands"], ("get system status",))
+        self.assertEqual(fortigate["config_commands"], ("show full-configuration",))
+        self.assertIs(GR.device_login_driver("fortigate-fortios"),
+                      GR.FortiGateFortiOsLogin)
 
     def test_legacy_profile_driver_is_migration_only(self):
         cfg = {"ssh_profiles": {"credential": {
@@ -94,6 +100,8 @@ class ConfigShowTests(unittest.TestCase):
         self.assertEqual(GR.detect_device_driver(
             {}, {"model": "SGS-6310-16S8C4XR", "result": "success"})[0],
             "planet-sgs")
+        self.assertEqual(GR.detect_device_driver(
+            {"custom_device_vendor": "fortinet"}, {})[0], "fortigate-fortios")
 
     def test_driver_detection_range_and_parser_selectors(self):
         start, end = GR.driver_detection_range("10.22.10.10-69")
