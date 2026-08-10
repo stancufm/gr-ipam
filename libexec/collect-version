@@ -40,6 +40,7 @@ def parse_version(text):
         r"^Model [Nn]umber\s*[:=]\s*(\S+)",
         r"^Model [Nn]ame\s*[:=]\s*(\S+)",
         r"^System Model(?: ID)?\s*[:=]\s*(\S+)",
+        r"^System Type\s*[:=]\s*(\S+)",
         r"^[\r \t]*System Description\s*[:=]\s*(\S+)",
         r"^[Cc]isco\s+(\S+)\s+.*(?:processor|revision)",
         r"^Machine type\s*[:=]\s*(\S+)",
@@ -61,6 +62,8 @@ def parse_version(text):
     lower = text.lower()
     if "ios xe" in lower:
         os_family = "ios-xe"
+    elif "dell smartfabric os10" in lower:
+        os_family = "dell-os10"
     elif "cisco ios software" in lower:
         os_family = "ios"
     elif "nx-os" in lower:
@@ -259,7 +262,8 @@ def main():
                 result["hostname"], result["ip"], result["result"],
                 result.get("model", ""), result.get("firmware", "")))
     results.sort(key=lambda item: tuple(int(part) for part in item["ip"].split(".")))
-    report = os.path.join(output_dir, "cisco-show-version-report.json")
+    vendor_slug = re.sub(r"[^a-z0-9]+", "-", args.vendor.lower()).strip("-") or "devices"
+    report = os.path.join(output_dir, "{}-show-version-report.json".format(vendor_slug))
     with open(report, "w", encoding="utf-8") as handle:
         json.dump({"generated_utc": stamp, "command": "show version", "results": results},
                   handle, ensure_ascii=False, indent=2)

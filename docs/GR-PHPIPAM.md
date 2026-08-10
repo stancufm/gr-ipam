@@ -51,6 +51,10 @@ may be unsupported, `show version` already contains the model, and two `exit`
 commands are required because the first only leaves privileged mode. The injected
 password is never written to collect reports.
 
+Dell SmartFabric OS10 devices use `device_driver=dell-os10`. The driver runs
+`show version` and parses the OS version and `System Type` independently from
+the selected SSH credential profile.
+
 `--details` keeps the compact summary and then prints every field returned by
 phpIPAM for each matching address. Fields are sorted, multiline values are
 indented and nested JSON values remain readable. The detailed view is read-only
@@ -145,7 +149,7 @@ Options:
 Each run creates a private timestamped directory under
 `~/.local/state/gr/device-version/`. It contains one raw `show version` text
 file per device, a persistent per-user host-key store and
-`cisco-show-version-report.json` with parsed model, firmware, OS family,
+`<vendor>-show-version-report.json` with parsed model, firmware, OS family,
 uptime, serial, system image, ROM, stderr and result status. The parser is
 primarily designed for Cisco output; a different vendor is useful only when
 its devices support `show version` and compatible output.

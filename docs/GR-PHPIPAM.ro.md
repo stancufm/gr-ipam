@@ -48,6 +48,10 @@ conține deja modelul, iar două comenzi `exit` sunt necesare deoarece prima doa
 iese din modul privilegiat. Parola injectată nu este scrisă în rapoartele
 collect.
 
+Echipamentele Dell SmartFabric OS10 folosesc `device_driver=dell-os10`.
+Driverul rulează `show version` și extrage versiunea OS și `System Type`,
+independent de profilul de credențiale SSH selectat.
+
 `--details` păstrează sumarul compact și apoi afișează toate câmpurile returnate
 de phpIPAM pentru fiecare adresă găsită. Câmpurile sunt sortate, valorile pe mai
 multe linii sunt indentate, iar structurile JSON rămân lizibile. Afișarea este
@@ -140,7 +144,7 @@ Opțiuni:
 Fiecare rulare creează un director privat cu timestamp în
 `~/.local/state/gr/device-version/`. Acesta conține outputul brut `show version`
 pentru fiecare dispozitiv, un depozit persistent per utilizator pentru cheile host și
-`cisco-show-version-report.json` cu modelul, firmware-ul, familia OS, uptime,
+`<vendor>-show-version-report.json` cu modelul, firmware-ul, familia OS, uptime,
 seria, imaginea de sistem, ROM-ul, stderr și rezultatul. Parserul este destinat
 în principal outputului Cisco; alt producător este util numai dacă suportă
 `show version` și un format compatibil.

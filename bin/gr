@@ -56,6 +56,10 @@ DEVICE_DRIVER_SPECS = {
         "interactive_cli": True,
         "version_commands": ("terminal datadump", "show version", "show system"),
     },
+    "dell-os10": {
+        "interactive_cli": False,
+        "version_commands": ("show version",),
+    },
 }
 DEVICE_DRIVERS = tuple(DEVICE_DRIVER_SPECS)
 

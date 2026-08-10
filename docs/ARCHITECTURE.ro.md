@@ -8,6 +8,10 @@
 
 `libexec/validate-ssh` validează concurent dispozitivele `sw*`, iar `libexec/collect-version` păstrează ieșirea brută și produce inventar JSON. Ambele reutilizează logica CLI-ului.
 
+Registrul de drivere include în prezent comportamente generic, Cisco IOS,
+Cisco Small Business adaptiv și Dell SmartFabric OS10. Profilurile de
+credențiale nu sunt folosite pentru deducerea driverului de echipament.
+
 Configurația comună este `/etc/gr/config.json`; `~/.config/gr/config.json`
 suprascrie valorile utilizatorului și combină profilurile de credențiale.
 Parola phpIPAM este în `~/.config/gr/credentials` cu `0600`, parolele SSH în

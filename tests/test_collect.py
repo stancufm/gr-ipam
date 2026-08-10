@@ -47,6 +47,17 @@ class CollectVersionCliTests(unittest.TestCase):
         self.assertEqual(parsed["serial"], "DNI00000000")
         self.assertEqual(parsed["os_family"], "cisco-small-business")
 
+    def test_dell_os10_show_version_fields_are_parsed(self):
+        parsed = COLLECTOR.parse_version(
+            "Dell SmartFabric OS10 Enterprise\n"
+            "OS Version: 10.5.5.6\n"
+            "Build Version: 10.5.5.6.226\n"
+            "System Type: S5224F-ON\n"
+            "Architecture: x86_64\n")
+        self.assertEqual(parsed["firmware"], "10.5.5.6")
+        self.assertEqual(parsed["model"], "S5224F-ON")
+        self.assertEqual(parsed["os_family"], "dell-os10")
+
     def test_all_uses_documented_defaults(self):
         args = GR.build_parser().parse_args(["collect", "version", "--all"])
         self.assertTrue(args.all)
