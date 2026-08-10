@@ -22,6 +22,7 @@ Under **Administration → Custom fields → IP addresses**, create:
 | `ssh_profile` | varchar | 64 | Per-user vault profile name |
 | `ssh_jump` | varchar | 255 | Optional ProxyJump target |
 | `ssh_client` | varchar | 16 | `normal` or `legacy` |
+| `device_driver` | varchar | 64 | Device CLI behavior, independent from credentials |
 | `device_vendor` | varchar | 64 | Normalized vendor inferred from MAC OUI |
 
 phpIPAM returns these through the API as `custom_ssh_enabled`,

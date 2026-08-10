@@ -38,6 +38,24 @@ gr init --configure-auth
 gr doctor --api
 ```
 
+`gr init` creează și depozitul privat persistent pentru cheile host în
+`~/.local/state/gr/known_hosts`.
+
+### Upgrade de la gr 1.x la 2.x
+
+Creați câmpul custom standard phpIPAM `device_driver`, instalați 2.x, apoi
+migrați înainte să eliminați cheile vechi `session_driver` din profilurile de
+credențiale globale/per utilizator:
+
+```bash
+gr migrate-drivers
+gr migrate-drivers --apply
+gr doctor --api
+```
+
+Profilurile păstrează numai secrete/identity files, iar comportamentul CLI este
+stocat per adresă în phpIPAM.
+
 Configurația globală este `/etc/gr/config.json`, suprascrierea per utilizator este `~/.config/gr/config.json`. Pentru audit adăugați `ssh_audit_enabled` și `ssh_audit_dir`; directoarele sunt create privat la prima sesiune.
 
 Autocomplete-ul global Bash este instalat în `/etc/bash_completion.d/gr`.

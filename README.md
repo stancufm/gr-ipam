@@ -15,6 +15,8 @@ version inventory.
 - phpIPAM remains the source of truth; no fork or database schema patch is used.
 - SSH metadata is stored in standard phpIPAM custom address fields.
 - API and SSH passwords remain private to each jump-server user.
+- Credential profiles, SSH transport and device drivers are independent layers.
+- Device drivers own CLI prompts, commands and parsing; they never select secrets.
 - Read and write API applications are separated.
 - Every write operation is a dry-run unless `--apply` is explicitly supplied.
 - `/etc/hosts` generation is disabled by default.

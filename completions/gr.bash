@@ -31,7 +31,7 @@ _gr_completion() {
     COMPREPLY=()
 
     if (( COMP_CWORD == 1 )); then
-        _gr_complete_words "init doctor config ssh collect find search subnet local sync export auth vault update self-update migrate-ssh vendor audit completion docs help --ssh --config --version" "$current"
+        _gr_complete_words "init doctor config ssh collect find search subnet local sync export auth vault update self-update migrate-ssh migrate-drivers vendor audit completion docs help --ssh --config --version" "$current"
         return
     fi
 
@@ -43,6 +43,10 @@ _gr_completion() {
             ;;
         --profile)
             _gr_complete_dynamic profiles "$current"
+            return
+            ;;
+        --driver|--device-driver)
+            _gr_complete_dynamic drivers "$current"
             return
             ;;
         --client|--ssh-client)
@@ -92,7 +96,7 @@ _gr_completion() {
             ;;
         completion)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "bash profiles audit-targets audit-sessions collect-reports" "$current"
+                _gr_complete_words "bash profiles drivers audit-targets audit-sessions collect-reports" "$current"
             elif [[ $subcommand == audit-sessions && $COMP_CWORD -eq 3 ]]; then
                 _gr_complete_dynamic audit-targets "$current"
             fi
@@ -108,7 +112,7 @@ _gr_completion() {
             ;;
         find|search|--ssh)
             if [[ $current == -* ]]; then
-                _gr_complete_words "--details --ssh --user --port --profile --client --no-vault --audit --no-audit --config --help" "$current"
+                _gr_complete_words "--details --ssh --user --port --profile --client --driver --no-vault --audit --no-audit --config --help" "$current"
             fi
             ;;
         ssh)
@@ -157,13 +161,16 @@ _gr_completion() {
             fi
             ;;
         update)
-            _gr_complete_words "--apply --hostname --clear-hostname --ssh-enabled --ssh-user --clear-ssh-user --ssh-port --clear-ssh-port --ssh-profile --clear-ssh-profile --ssh-jump --clear-ssh-jump --ssh-client --clear-ssh-client --config --help" "$current"
+            _gr_complete_words "--apply --hostname --clear-hostname --ssh-enabled --ssh-user --clear-ssh-user --ssh-port --clear-ssh-port --ssh-profile --clear-ssh-profile --ssh-jump --clear-ssh-jump --ssh-client --clear-ssh-client --device-driver --clear-device-driver --config --help" "$current"
             ;;
         self-update)
             _gr_complete_words "check --version --dry-run --yes --help" "$current"
             ;;
         migrate-ssh)
             _gr_complete_words "--apply --limit --config --help" "$current"
+            ;;
+        migrate-drivers)
+            _gr_complete_words "--apply --limit --overwrite --config --help" "$current"
             ;;
         vendor)
             if (( COMP_CWORD == 2 )); then

@@ -70,6 +70,24 @@ gr init --configure-auth
 gr doctor --api
 ```
 
+`gr init` also creates the private persistent host-key store at
+`~/.local/state/gr/known_hosts`.
+
+### Upgrading from gr 1.x to 2.x
+
+Create the standard phpIPAM address custom field `device_driver`, install 2.x,
+then migrate before removing legacy `session_driver` keys from user/global
+credential profiles:
+
+```bash
+gr migrate-drivers
+gr migrate-drivers --apply
+gr doctor --api
+```
+
+Credential profiles retain only secrets/identity files. Device CLI behavior is
+stored per address in phpIPAM.
+
 For an encrypted password vault, create a GPG key with an encryption-capable
 subkey and then run:
 

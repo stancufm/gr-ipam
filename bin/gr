@@ -41,8 +41,27 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "1.5.2"
+GR_VERSION = "2.0.0"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
+DEVICE_DRIVER_SPECS = {
+    "generic": {
+        "interactive_cli": False,
+        "version_commands": ("show version",),
+    },
+    "cisco-ios": {
+        "interactive_cli": False,
+        "version_commands": ("show version",),
+    },
+    "cisco-small-business": {
+        "interactive_cli": True,
+        "version_commands": ("terminal datadump", "show version", "show system"),
+    },
+    "dell-os10": {
+        "interactive_cli": False,
+        "version_commands": ("show version",),
+    },
+}
+DEVICE_DRIVERS = tuple(DEVICE_DRIVER_SPECS)
 
 CONFIG_OPTIONS = (
     ("base_url", None),
@@ -58,6 +77,7 @@ CONFIG_OPTIONS = (
     ("ssh_legacy_fallback", True),
     ("ssh_audit_enabled", False),
     ("ssh_audit_dir", "~/.local/state/gr/audit"),
+    ("ssh_known_hosts", "~/.local/state/gr/known_hosts"),
     ("ssh_profiles", {}),
     ("device_version_dir", "~/.local/state/gr/device-version"),
     ("vendor_db_dir", "/var/lib/gr/ieee-vendors"),
@@ -124,6 +144,7 @@ def load_config(path=None):
     cfg["ssh_legacy_fallback"] = bool(cfg.get("ssh_legacy_fallback", True))
     cfg["ssh_audit_enabled"] = bool(cfg.get("ssh_audit_enabled", False))
     cfg["ssh_audit_dir"] = expand(cfg.get("ssh_audit_dir", "~/.local/state/gr/audit"))
+    cfg["ssh_known_hosts"] = expand(cfg.get("ssh_known_hosts", "~/.local/state/gr/known_hosts"))
     cfg["hosts_sync_enabled"] = bool(cfg.get("hosts_sync_enabled", False))
     cfg["ssh_profiles"] = cfg.get("ssh_profiles", {})
     cfg["device_version_dir"] = expand(cfg.get("device_version_dir", "~/.local/state/gr/device-version"))
@@ -619,6 +640,7 @@ def phpipam_ssh_metadata(row):
     profile = str(custom_value(row, "ssh_profile") or "").strip()
     jump = str(custom_value(row, "ssh_jump") or "").strip()
     client = str(custom_value(row, "ssh_client") or "normal").strip().lower()
+    driver = str(custom_value(row, "device_driver") or "").strip().lower()
     if client not in ("normal", "legacy"):
         client = "invalid"
     valid_port = port.isdigit() and 1 <= int(port) <= 65535
@@ -629,6 +651,7 @@ def phpipam_ssh_metadata(row):
         "profile": profile,
         "jump": jump,
         "client": client,
+        "driver": driver,
         "complete": enabled and bool(user) and valid_port,
     }
 
@@ -654,6 +677,7 @@ def ssh_display(row, legacy_fallback=True, override_user=None, override_port=Non
         target += " [legacy-client]"
     elif selected_client == "invalid":
         target += " [invalid-client]"
+    target += " [driver={}]".format(resolve_device_driver(row))
     if meta["jump"]:
         target += " via {}".format(meta["jump"])
     if defaults:
@@ -782,14 +806,40 @@ def vault_secret_exists(secret):
     return os.path.isfile(os.path.join(store, secret + ".gpg"))
 
 
-def profile_session_driver(cfg, profile):
+def normalize_device_driver(value, allow_empty=False):
+    driver = str(value or "").strip().lower()
+    if not driver and allow_empty:
+        return ""
+    if driver not in DEVICE_DRIVERS:
+        raise GrError("Unsupported device driver: {} (valid: {})".format(
+            driver or "<empty>", ", ".join(DEVICE_DRIVERS)))
+    return driver
+
+
+def device_driver_spec(driver):
+    return DEVICE_DRIVER_SPECS[normalize_device_driver(driver)]
+
+
+def resolve_device_driver(row, override=None):
+    """Resolve device behavior independently from credentials and SSH transport."""
+    if override:
+        return normalize_device_driver(override)
+    explicit = str(custom_value(row, "device_driver") or "").strip()
+    if explicit:
+        return normalize_device_driver(explicit)
+    vendor = str(custom_value(row, "device_vendor") or "").strip().lower()
+    return "cisco-ios" if vendor == "cisco" else "generic"
+
+
+def legacy_profile_driver(cfg, profile):
+    """Read the v1 profile/driver association only for explicit migration."""
     profile_cfg = cfg.get("ssh_profiles", {}).get(profile, {}) if profile else {}
     if not isinstance(profile_cfg, dict):
         raise GrError("SSH profile {} must be an object".format(profile))
-    driver = str(profile_cfg.get("session_driver") or "standard").strip().lower()
-    if driver not in ("standard", "cisco-small-business"):
-        raise GrError("Unsupported session_driver for profile {}: {}".format(profile, driver))
-    return driver
+    legacy = str(profile_cfg.get("session_driver") or "").strip().lower()
+    if legacy in ("", "standard"):
+        return ""
+    return normalize_device_driver(legacy)
 
 
 class CiscoSmallBusinessLogin:
@@ -1335,6 +1385,10 @@ def command_completion(cfg, action, value=None):
         for profile in sorted(cfg.get("ssh_profiles", {}), key=str.lower):
             print(profile)
         return 0
+    if action == "drivers":
+        for driver in DEVICE_DRIVERS:
+            print(driver)
+        return 0
     if action == "audit-targets":
         values = set()
         for summary in audit_inventory(cfg):
@@ -1372,8 +1426,17 @@ def ssh_with_password(command, password):
     return ["sshpass", "-d", str(read_fd)] + command, read_fd
 
 
+def ensure_known_hosts(cfg):
+    path = cfg["ssh_known_hosts"]
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
+    os.close(fd)
+    os.chmod(path, 0o600)
+    return path
+
+
 def connect_ssh(cfg, row, override_user=None, override_port=None, override_profile=None,
-                override_client=None, no_vault=False, audit=None):
+                override_client=None, override_driver=None, no_vault=False, audit=None):
     # Always connect to the selected IP, not a potentially duplicated hostname.
     target = str(row["_ip"])
     meta = phpipam_ssh_metadata(row)
@@ -1387,6 +1450,8 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
         if not shutil.which(client_binary):
             raise GrError("SSH client is not installed: {}".format(client_binary))
         command = [client_binary, "-F", "/dev/null", "-p", port]
+        command.extend(["-o", "UserKnownHostsFile={}".format(ensure_known_hosts(cfg)),
+                        "-o", "StrictHostKeyChecking=ask"])
         selected_profile = override_profile or meta["profile"]
         profile_cfg = cfg.get("ssh_profiles", {}).get(selected_profile, {}) if selected_profile else {}
         identity = str(profile_cfg.get("identity_file") or "").strip()
@@ -1410,7 +1475,7 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
             effective["user"], target, effective["port"]))
     selected_profile = override_profile or meta["profile"]
     secret = vault_secret_name(cfg, selected_profile) if selected_profile and not no_vault else ""
-    session_driver = profile_session_driver(cfg, selected_profile)
+    device_driver = resolve_device_driver(row, override_driver)
     inherited_fd = None
     vault_password = None
     if secret and vault_secret_exists(secret):
@@ -1419,12 +1484,13 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
         command, inherited_fd = ssh_with_password(command, vault_password)
     elif secret:
         print("Vault secret {} is not configured; using the normal OpenSSH prompt.".format(secret))
-    if session_driver == "cisco-small-business" and not vault_password:
-        raise GrError("Profile {} requires a configured vault secret for session_driver {}".format(
-            selected_profile, session_driver))
+    driver_spec = device_driver_spec(device_driver)
+    if driver_spec["interactive_cli"] and not vault_password:
+        raise GrError("Device driver {} requires a configured credential profile".format(
+            device_driver))
     login_driver = None
-    if session_driver == "cisco-small-business":
-        print("Using SSH session driver: {}".format(session_driver))
+    if driver_spec["interactive_cli"]:
+        print("Using device driver: {}".format(device_driver))
         login_driver = CiscoSmallBusinessLogin(user, vault_password)
     audit_enabled = cfg.get("ssh_audit_enabled", False) if audit is None else audit
     if audit_enabled:
@@ -1437,7 +1503,7 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
 
 
 def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
-                   ssh_profile=None, ssh_client=None, no_vault=False, audit=None,
+                   ssh_profile=None, ssh_client=None, device_driver=None, no_vault=False, audit=None,
                    details=False):
     needle = " ".join(terms).strip().lower()
     if not needle:
@@ -1480,7 +1546,7 @@ def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
                     print("SSH connection cancelled.")
                     return 0
             return connect_ssh(cfg, selected, ssh_user, ssh_port, ssh_profile, ssh_client,
-                               no_vault, audit)
+                               device_driver, no_vault, audit)
         if not details:
             print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True))
         print("\n{} result(s)".format(len(matches)))
@@ -1726,6 +1792,7 @@ def command_init(cfg, configure_auth=False):
         os.makedirs(directory, mode=0o700, exist_ok=True)
         os.chmod(directory, 0o700)
     print("Initialized per-user gr directories (mode 0700).")
+    print("Persistent gr host-key store: {}".format(ensure_known_hosts(cfg)))
     print("Configuration sources: {}".format(" + ".join(cfg.get("_config_sources", []))))
     if configure_auth:
         return command_auth(cfg, "configure")
@@ -1771,6 +1838,13 @@ def command_doctor(cfg, test_api=False, system_only=False):
           "/etc/gr/release-key.asc or install with --release-key")
     check("Bash completion", os.path.isfile(BASH_COMPLETION),
           "{} or run: eval \"$(gr completion bash)\"".format(BASH_COMPLETION), essential=True)
+    legacy_driver_profiles = sorted(
+        profile for profile, value in cfg.get("ssh_profiles", {}).items()
+        if isinstance(value, dict) and value.get("session_driver"))
+    check("credential/driver separation", not legacy_driver_profiles,
+          "clean" if not legacy_driver_profiles else
+          "legacy session_driver in {}; run gr migrate-drivers, then remove the keys".format(
+              ", ".join(legacy_driver_profiles)))
     if not system_only:
         state_dir = expand("~/.local/state/gr")
         if os.path.isdir(state_dir):
@@ -1779,6 +1853,11 @@ def command_doctor(cfg, test_api=False, system_only=False):
         else:
             check("private state directory", False, "missing; run gr init")
         check("password vault", os.path.isdir(expand("~/.password-store")), expand("~/.password-store"))
+        known_hosts = cfg["ssh_known_hosts"]
+        known_hosts_mode = (os.stat(known_hosts).st_mode & 0o777) if os.path.isfile(known_hosts) else 0
+        check("gr known_hosts", os.path.isfile(known_hosts) and known_hosts_mode == 0o600,
+              "{} mode {:04o}".format(known_hosts, known_hosts_mode) if known_hosts_mode else
+              "missing; run gr init")
     if test_api:
         try:
             with api_session(cfg, prompt=False) as client:
@@ -1887,7 +1966,76 @@ def ssh_custom_snapshot(row):
         "custom_ssh_profile": custom_value(row, "ssh_profile"),
         "custom_ssh_jump": custom_value(row, "ssh_jump"),
         "custom_ssh_client": custom_value(row, "ssh_client"),
+        "custom_device_driver": custom_value(row, "device_driver"),
     }
+
+
+def command_migrate_drivers(cfg, apply=False, limit=None, overwrite=False):
+    """Move legacy v1 profile session_driver values into phpIPAM address metadata."""
+    mappings = {}
+    for profile in cfg.get("ssh_profiles", {}):
+        driver = legacy_profile_driver(cfg, profile)
+        if driver:
+            mappings[profile] = driver
+    if not mappings:
+        print("No legacy profile session_driver mappings were found.")
+        return 0
+    api_cfg = dict(cfg)
+    if apply:
+        api_cfg["app_id"] = cfg.get("migration_app_id", "gr-migrate")
+    counts = {"candidate": 0, "same": 0, "conflict": 0, "updated": 0, "failed": 0}
+    entries = []
+    writes = 0
+    with api_session(api_cfg) as client:
+        for row in client.addresses():
+            meta = phpipam_ssh_metadata(row)
+            desired = mappings.get(meta["profile"])
+            if not desired:
+                continue
+            current = str(custom_value(row, "device_driver") or "").strip().lower()
+            item = {"id": row.get("id"), "ip": str(normalize_ip(row.get("ip")) or row.get("ip")),
+                    "hostname": row.get("hostname"), "profile": meta["profile"],
+                    "before": current, "desired": desired}
+            if current == desired:
+                item["status"] = "same"
+                counts["same"] += 1
+            elif current and not overwrite:
+                item["status"] = "conflict"
+                counts["conflict"] += 1
+            else:
+                item["status"] = "candidate"
+                counts["candidate"] += 1
+                if apply and (limit is None or writes < limit):
+                    try:
+                        client.request("PATCH", "addresses/{}/".format(row.get("id")),
+                                       payload={"custom_device_driver": desired})
+                        after = client.request("GET", "addresses/{}/".format(row.get("id")))
+                        actual = str(custom_value(after or {}, "device_driver") or "").strip().lower()
+                        if actual != desired:
+                            raise GrError("verification returned {!r}".format(actual))
+                        item["status"] = "updated"
+                        counts["updated"] += 1
+                        writes += 1
+                    except Exception as exc:
+                        item["status"] = "failed"
+                        item["error"] = str(exc)
+                        counts["failed"] += 1
+            entries.append(item)
+    stamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    report = expand("~/.local/state/gr/driver-migration/driver-{}-{}.json".format(
+        "apply" if apply else "preview", stamp))
+    os.makedirs(os.path.dirname(report), mode=0o700, exist_ok=True)
+    with open(report, "w", encoding="utf-8") as handle:
+        json.dump({"apply": apply, "limit": limit, "overwrite": overwrite,
+                   "legacy_profile_mappings": mappings, "counts": counts, "entries": entries},
+                  handle, ensure_ascii=False, indent=2)
+    os.chmod(report, 0o600)
+    print("Driver migration: {}".format(json.dumps(counts, sort_keys=True)))
+    print("Legacy mappings: {}".format(json.dumps(mappings, sort_keys=True)))
+    print("Report: {}".format(report))
+    if not apply:
+        print("Dry-run only. Re-run with --apply to write verified changes.")
+    return 2 if counts["failed"] else 0
 
 
 def command_update(cfg, args):
@@ -1925,6 +2073,10 @@ def command_update(cfg, args):
         desired["custom_ssh_client"] = args.ssh_client
     if args.clear_ssh_client:
         desired["custom_ssh_client"] = ""
+    if args.device_driver is not None:
+        desired["custom_device_driver"] = args.device_driver
+    if args.clear_device_driver:
+        desired["custom_device_driver"] = ""
     if not desired:
         raise GrError("No changes requested")
 
@@ -2175,6 +2327,8 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     find.add_argument("--port", type=ssh_port, help="override the SSH port for this connection only")
     find.add_argument("--profile", type=profile_name, help="override the SSH/vault profile for this connection only")
     find.add_argument("--client", choices=("normal", "legacy"), help="override the SSH client for this connection only")
+    find.add_argument("--driver", choices=DEVICE_DRIVERS,
+                      help="override device CLI behavior for this connection only")
     find.add_argument("--no-vault", action="store_true", help="do not use the encrypted password vault")
     audit_group = find.add_mutually_exclusive_group()
     audit_group.add_argument("--audit", dest="audit", action="store_true", default=None,
@@ -2219,6 +2373,9 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     client_group = update.add_mutually_exclusive_group()
     client_group.add_argument("--ssh-client", choices=("normal", "legacy"))
     client_group.add_argument("--clear-ssh-client", action="store_true")
+    driver_group = update.add_mutually_exclusive_group()
+    driver_group.add_argument("--device-driver", choices=DEVICE_DRIVERS)
+    driver_group.add_argument("--clear-device-driver", action="store_true")
     self_update = sub.add_parser("self-update", help="check for and install a signed gr release")
     self_update.add_argument("update_action", nargs="?", choices=("check",),
                              help="check for a newer release without installing it")
@@ -2229,6 +2386,13 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     migrate = sub.add_parser("migrate-ssh", help="migrate [port][user] metadata from /etc/hosts to phpIPAM")
     migrate.add_argument("--apply", action="store_true", help="write and verify custom_ssh fields")
     migrate.add_argument("--limit", type=int, help="limit writes for a pilot run")
+    migrate_drivers = sub.add_parser(
+        "migrate-drivers", help="move legacy profile session_driver values to phpIPAM device_driver")
+    migrate_drivers.add_argument("--apply", action="store_true",
+                                 help="write and GET-verify custom_device_driver")
+    migrate_drivers.add_argument("--limit", type=int, help="limit writes for a pilot run")
+    migrate_drivers.add_argument("--overwrite", action="store_true",
+                                 help="replace an existing different device_driver")
     vendor = sub.add_parser("vendor", help="manage the local IEEE vendor database and phpIPAM vendor fields")
     vendor_sub = vendor.add_subparsers(dest="vendor_action")
     vendor_sub.add_parser("update-db", help="download current IEEE MA-L, MA-M and MA-S registries")
@@ -2251,7 +2415,7 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                             help="write directly instead of using the automatic terminal pager")
     completion = sub.add_parser("completion", help="print shell completion or dynamic candidates")
     completion.add_argument("completion_action",
-                            choices=("bash", "profiles", "audit-targets", "audit-sessions",
+                            choices=("bash", "profiles", "drivers", "audit-targets", "audit-sessions",
                                      "collect-reports"))
     completion.add_argument("value", nargs="?", help="target required by audit-sessions")
     docs_parser = sub.add_parser("docs", aliases=["help"], help="display the complete installed documentation")
@@ -2261,7 +2425,7 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    known_commands = {"init", "doctor", "config", "ssh", "collect", "find", "search", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "vendor", "audit", "completion", "docs", "help"}
+    known_commands = {"init", "doctor", "config", "ssh", "collect", "find", "search", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "migrate-drivers", "vendor", "audit", "completion", "docs", "help"}
     ssh_requested = "--ssh" in argv
     if ssh_requested:
         argv = [value for value in argv if value != "--ssh"]
@@ -2326,10 +2490,12 @@ def main(argv=None):
         return command_helper(VERSION_COLLECTOR, helper_args)
     if args.command in ("find", "search"):
         if (args.user is not None or args.port is not None or args.profile is not None or
-                args.client is not None or args.no_vault or args.audit is not None) and not args.ssh:
+                args.client is not None or args.driver is not None or args.no_vault or
+                args.audit is not None) and not args.ssh:
             raise GrError("SSH connection options require --ssh")
         return command_search(cfg, args.terms, use_ssh=args.ssh, ssh_user=args.user, ssh_port=args.port,
-                              ssh_profile=args.profile, ssh_client=args.client, no_vault=args.no_vault,
+                              ssh_profile=args.profile, ssh_client=args.client,
+                              device_driver=args.driver, no_vault=args.no_vault,
                               audit=args.audit, details=args.details)
     if args.command == "subnet":
         return command_subnet(cfg, args.cidr)
@@ -2349,6 +2515,12 @@ def main(argv=None):
         if args.limit is not None and args.limit < 1:
             raise GrError("--limit must be at least 1")
         return command_migrate_ssh(cfg, args.apply, args.limit)
+    if args.command == "migrate-drivers":
+        if args.limit is not None and args.limit < 1:
+            raise GrError("--limit must be at least 1")
+        if args.overwrite and not args.apply:
+            raise GrError("--overwrite requires --apply")
+        return command_migrate_drivers(cfg, args.apply, args.limit, args.overwrite)
     if args.command == "vendor":
         if not args.vendor_action:
             parser.parse_args(["vendor", "--help"])

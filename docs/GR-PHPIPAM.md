@@ -11,7 +11,10 @@ gr init --configure-auth
 gr doctor --api
 ```
 
-phpIPAM standard custom address fields are `ssh_enabled`, `ssh_user`, `ssh_port`, `ssh_profile`, `ssh_jump`, `ssh_client` and `device_vendor`. Passwords are never stored in phpIPAM.
+phpIPAM standard custom address fields are `ssh_enabled`, `ssh_user`, `ssh_port`,
+`ssh_profile`, `ssh_jump`, `ssh_client`, `device_driver` and `device_vendor`.
+Passwords are never stored in phpIPAM. `ssh_profile` selects credentials only;
+`device_driver` independently selects device CLI behavior.
 
 ## Search and SSH
 
@@ -21,7 +24,7 @@ gr find <text-or-ip> --details
 gr <ip>
 gr subnet <cidr>
 gr --ssh <target>
-gr --ssh --user operator --port 2222 --profile network-admin <target>
+gr --ssh --user operator --port 2222 --profile network-admin --driver cisco-ios <target>
 ```
 
 One match connects automatically; multiple matches open an interactive selector. CLI overrides last only for that connection. `--no-vault` uses the OpenSSH prompt. A `legacy` client is isolated per device.
@@ -31,18 +34,15 @@ The compact result table shows phpIPAM `lastSeen` immediately after `STATUS`.
 ### Cisco Small Business second-stage login
 
 Some Cisco Small Business switches establish SSH and then display their own
-`User Name:` and `Password:` prompts. Select the dedicated behavior through an
-SSH profile; no per-device driver field is required:
+`User Name:` and `Password:` prompts. Select this behavior independently in
+phpIPAM:
 
 ```json
-"cisco-smb": {
-  "password_secret": "gr/cisco-smb",
-  "session_driver": "cisco-small-business"
-}
+"shared-network": {"password_secret": "gr/shared-network"}
 ```
 
-Set the phpIPAM address metadata to `ssh_profile=cisco-smb`, the appropriate
-`ssh_user`, and the normal SSH port/client. `gr --ssh` answers the second-stage
+Set `ssh_profile` to the required credential profile and set
+`device_driver=cisco-small-business`. `gr --ssh` answers the second-stage
 prompts and then hands the live CLI to the operator. `gr collect version` uses
 the same driver, attempts to disable paging with `terminal datadump`, runs
 `show version` for firmware, runs `show system` for model/system data, and exits. Each command
@@ -50,6 +50,14 @@ is sent only after the CLI prompt returns. On Sx220 models, `terminal datadump`
 may be unsupported, `show version` already contains the model, and two `exit`
 commands are required because the first only leaves privileged mode. The injected
 password is never written to collect reports.
+
+Collection success is determined when every data command has returned to the
+CLI prompt. Cleanup commands are tracked separately, so a device that closes
+the connection after the first `exit` is not reported as a false failure.
+
+Dell SmartFabric OS10 devices use `device_driver=dell-os10`. The driver runs
+`show version` and parses the OS version and `System Type` independently from
+the selected SSH credential profile.
 
 `--details` keeps the compact summary and then prints every field returned by
 phpIPAM for each matching address. Fields are sorted, multiline values are
@@ -127,9 +135,10 @@ an SSH vault profile, then runs `show version` through the normal or isolated
 legacy client selected for each device. It does not modify phpIPAM or device
 configuration.
 
-The selected profile may set `session_driver`. The default `standard` value
-keeps normal OpenSSH behavior; `cisco-small-business` handles the second-stage
-CLI login described above.
+The device driver comes from phpIPAM `device_driver`, not from the credential
+profile. An explicit `--driver` overrides it for one interactive connection.
+When `device_driver` is blank, Cisco vendor records fall back to `cisco-ios` and
+other vendors to `generic`.
 
 Options:
 
@@ -143,11 +152,29 @@ Options:
 
 Each run creates a private timestamped directory under
 `~/.local/state/gr/device-version/`. It contains one raw `show version` text
-file per device, private temporary host-key files and
-`cisco-show-version-report.json` with parsed model, firmware, OS family,
+file per device, a persistent per-user host-key store and
+`<vendor>-show-version-report.json` with parsed model, firmware, OS family,
 uptime, serial, system image, ROM, stderr and result status. The parser is
 primarily designed for Cisco output; a different vendor is useful only when
 its devices support `show version` and compatible output.
+
+### Driver migration from gr 1.x
+
+Version 2 removes runtime use of `session_driver` from credential profiles.
+Preview and apply migration before deleting the legacy configuration keys:
+
+```bash
+gr migrate-drivers
+gr migrate-drivers --apply
+```
+
+The migration copies legacy associations into phpIPAM `device_driver`, writes a
+private report and GET-verifies every applied value. `--limit` supports a pilot;
+`--overwrite` requires `--apply`.
+
+`gr` keeps host keys in `~/.local/state/gr/known_hosts`. New keys are accepted
+and reported as `added`; changed keys fail as `changed` and are never replaced
+automatically.
 
 Exit status is `0` when every selected device succeeds, `1` when no eligible
 device matches and `2` when at least one connection fails or times out.

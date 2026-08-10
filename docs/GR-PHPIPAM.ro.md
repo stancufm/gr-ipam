@@ -6,7 +6,10 @@
 
 `/etc/gr/config.json` conține URL-ul phpIPAM, aplicațiile API, utilizatorul, CA-ul, fișierul de credențiale, opțiunile SSH, profilurile și baza IEEE. `~/.config/gr/config.json` suprascrie valorile per utilizator. Inițializați cu `gr init --configure-auth` și verificați cu `gr doctor --api`.
 
-Metadatele SSH provin din câmpurile standard custom ale adreselor: `ssh_enabled`, `ssh_user`, `ssh_port`, `ssh_profile`, `ssh_jump`, `ssh_client`. phpIPAM nu stochează parole. Profilul selectează un secret din pass/GPG.
+Metadatele provin din câmpurile custom standard `ssh_enabled`, `ssh_user`,
+`ssh_port`, `ssh_profile`, `ssh_jump`, `ssh_client`, `device_driver` și
+`device_vendor`. phpIPAM nu stochează parole. `ssh_profile` selectează numai
+credențialele, iar `device_driver` selectează independent comportamentul CLI.
 
 ## Căutare și SSH
 
@@ -16,7 +19,7 @@ gr find <text-sau-ip> --details
 gr <ip>
 gr subnet <cidr>
 gr --ssh <text-sau-ip>
-gr --ssh --user operator --port 2222 --profile network-admin <țintă>
+gr --ssh --user operator --port 2222 --profile network-admin --driver cisco-ios <țintă>
 ```
 
 Dacă există un singur rezultat, conectarea este automată; altfel se afișează selectorul. Override-urile CLI sunt valabile numai pentru sesiunea curentă. `--no-vault` forțează promptul OpenSSH. Clientul legacy este selectat numai prin metadata/CLI și nu slăbește clientul normal.
@@ -27,17 +30,15 @@ Tabelul compact afișează câmpul phpIPAM `lastSeen` imediat după `STATUS`.
 
 Unele switchuri Cisco Small Business stabilesc conexiunea SSH și apoi afișează
 propriile prompturi `User Name:` și `Password:`. Comportamentul se selectează
-prin profilul SSH, fără un câmp driver separat pentru fiecare adresă:
+independent în phpIPAM:
 
 ```json
-"cisco-smb": {
-  "password_secret": "gr/cisco-smb",
-  "session_driver": "cisco-small-business"
-}
+"shared-network": {"password_secret": "gr/shared-network"}
 ```
 
-În phpIPAM se setează `ssh_profile=cisco-smb`, utilizatorul corespunzător și
-portul/clientul SSH normal. `gr --ssh` răspunde prompturilor secundare și apoi
+În phpIPAM, `ssh_profile` indică profilul de credențiale necesar, iar
+`device_driver=cisco-small-business` selectează comportamentul. `gr --ssh`
+răspunde prompturilor secundare și apoi
 predă CLI-ul interactiv operatorului. `gr collect version` folosește același
 driver, încearcă dezactivarea paginării cu `terminal datadump`, rulează
 `show version` pentru firmware, rulează `show system` pentru model/datele de sistem și închide
@@ -46,6 +47,15 @@ Pe modelele Sx220, `terminal datadump` poate să nu fie suportată, `show versio
 conține deja modelul, iar două comenzi `exit` sunt necesare deoarece prima doar
 iese din modul privilegiat. Parola injectată nu este scrisă în rapoartele
 collect.
+
+Colectarea este considerată reușită după ce toate comenzile de date au revenit
+la promptul CLI. Comenzile de închidere sunt urmărite separat, astfel încât un
+echipament care închide conexiunea după primul `exit` nu mai este raportat fals
+ca eșuat.
+
+Echipamentele Dell SmartFabric OS10 folosesc `device_driver=dell-os10`.
+Driverul rulează `show version` și extrage versiunea OS și `System Type`,
+independent de profilul de credențiale SSH selectat.
 
 `--details` păstrează sumarul compact și apoi afișează toate câmpurile returnate
 de phpIPAM pentru fiecare adresă găsită. Câmpurile sunt sortate, valorile pe mai
@@ -121,9 +131,10 @@ un profil în seiful SSH, apoi rulează `show version` prin clientul normal sau
 clientul legacy izolat ales pentru fiecare dispozitiv. Nu modifică phpIPAM sau
 configurația echipamentelor.
 
-Profilul selectat poate defini `session_driver`. Valoarea implicită `standard`
-păstrează comportamentul OpenSSH normal, iar `cisco-small-business` gestionează
-loginul CLI secundar descris mai sus.
+Driverul provine din câmpul phpIPAM `device_driver`, nu din profilul de
+credențiale. `--driver` îl suprascrie numai pentru conexiunea interactivă
+curentă. Dacă valoarea lipsește, înregistrările Cisco folosesc fallback
+`cisco-ios`, iar ceilalți producători `generic`.
 
 Opțiuni:
 
@@ -137,11 +148,29 @@ Opțiuni:
 
 Fiecare rulare creează un director privat cu timestamp în
 `~/.local/state/gr/device-version/`. Acesta conține outputul brut `show version`
-pentru fiecare dispozitiv, fișiere private temporare pentru cheile host și
-`cisco-show-version-report.json` cu modelul, firmware-ul, familia OS, uptime,
+pentru fiecare dispozitiv, un depozit persistent per utilizator pentru cheile host și
+`<vendor>-show-version-report.json` cu modelul, firmware-ul, familia OS, uptime,
 seria, imaginea de sistem, ROM-ul, stderr și rezultatul. Parserul este destinat
 în principal outputului Cisco; alt producător este util numai dacă suportă
 `show version` și un format compatibil.
+
+### Migrarea driverelor din gr 1.x
+
+Versiunea 2 nu mai folosește la runtime `session_driver` din profilurile de
+credențiale. Înainte de eliminarea cheilor vechi din configurație:
+
+```bash
+gr migrate-drivers
+gr migrate-drivers --apply
+```
+
+Migrarea copiază asocierile vechi în câmpul phpIPAM `device_driver`, generează
+un raport privat și verifică GET fiecare scriere. `--limit` permite un pilot,
+iar `--overwrite` necesită `--apply`.
+
+Cheile host sunt păstrate în `~/.local/state/gr/known_hosts`. Cheile noi sunt
+acceptate și raportate `added`; o cheie schimbată produce `changed` și nu este
+înlocuită automat.
 
 Codul de ieșire este `0` dacă toate dispozitivele reușesc, `1` dacă nu există
 niciun dispozitiv eligibil și `2` dacă cel puțin o conexiune eșuează sau expiră.

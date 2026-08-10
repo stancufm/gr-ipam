@@ -40,6 +40,7 @@ def parse_version(text):
         r"^Model [Nn]umber\s*[:=]\s*(\S+)",
         r"^Model [Nn]ame\s*[:=]\s*(\S+)",
         r"^System Model(?: ID)?\s*[:=]\s*(\S+)",
+        r"^System Type\s*[:=]\s*(\S+)",
         r"^[\r \t]*System Description\s*[:=]\s*(\S+)",
         r"^[Cc]isco\s+(\S+)\s+.*(?:processor|revision)",
         r"^Machine type\s*[:=]\s*(\S+)",
@@ -61,6 +62,8 @@ def parse_version(text):
     lower = text.lower()
     if "ios xe" in lower:
         os_family = "ios-xe"
+    elif "dell smartfabric os10" in lower:
+        os_family = "dell-os10"
     elif "cisco ios software" in lower:
         os_family = "ios"
     elif "nx-os" in lower:
@@ -77,9 +80,33 @@ def redact_secret(data, password):
     return data.replace(secret, b"[REDACTED]") if secret else data
 
 
-def run_cisco_small_business(item, password, command, read_fd, login_driver_class, timeout=50):
+def host_key_status(stderr):
+    lower = str(stderr or "").lower()
+    if "remote host identification has changed" in lower or "host key verification failed" in lower:
+        return "changed"
+    if "permanently added" in lower:
+        return "added"
+    return "verified"
+
+
+def next_prompt_command(version_commands, cleanup_commands):
+    """Return the next command and whether all data commands have completed.
+
+    This function is called only after a device prompt is observed. Once the
+    version queue is empty, that prompt proves the previously sent data command
+    completed; cleanup commands must not affect collection success.
+    """
+    if version_commands:
+        return version_commands.pop(0), False
+    if cleanup_commands:
+        return cleanup_commands.pop(0), True
+    return None, True
+
+
+def run_cisco_small_business(item, password, command, read_fd, login_driver_class,
+                             version_commands, timeout=50):
     master_fd, slave_fd = os.openpty()
-    command = command[:-1] if command[-1:] == ["show version"] else command
+    command = command[:-1]
     command.insert(command.index("-p"), "-tt")
     process = subprocess.Popen(command, stdin=slave_fd, stdout=slave_fd, stderr=subprocess.PIPE,
                                close_fds=True, pass_fds=(read_fd,))
@@ -93,8 +120,9 @@ def run_cisco_small_business(item, password, command, read_fd, login_driver_clas
     # Sx220 uses the first exit to leave privileged mode (hostname# -> hostname>)
     # and needs a second exit to close the CLI session. Newer Small Business
     # models normally disconnect on the first exit, leaving the second unused.
-    pending_commands = [b"terminal datadump\n", b"show version\n", b"show system\n",
-                        b"exit\n", b"exit\n"]
+    pending_commands = [(value + "\n").encode("utf-8") for value in version_commands]
+    cleanup_commands = [b"exit\n", b"exit\n"]
+    collection_complete = False
     timed_out = False
     try:
         while streams:
@@ -119,8 +147,12 @@ def run_cisco_small_business(item, password, command, read_fd, login_driver_clas
                     for action, response in driver.feed(data):
                         if action == "credential":
                             os.write(master_fd, response)
-                        elif action in ("ready", "prompt") and pending_commands:
-                            os.write(master_fd, pending_commands.pop(0))
+                        elif action in ("ready", "prompt"):
+                            next_command, completed = next_prompt_command(
+                                pending_commands, cleanup_commands)
+                            collection_complete = collection_complete or completed
+                            if next_command is not None:
+                                os.write(master_fd, next_command)
         if timed_out:
             process.wait()
         else:
@@ -136,27 +168,28 @@ def run_cisco_small_business(item, password, command, read_fd, login_driver_clas
             pass
     stdout = redact_secret(b"".join(stdout_chunks), password).decode("utf-8", "replace")
     stderr = redact_secret(b"".join(stderr_chunks), password).decode("utf-8", "replace")
-    return process.returncode, stdout, stderr, timed_out, not pending_commands
+    return process.returncode, stdout, stderr, timed_out, collection_complete
 
 
 def run_one(item, password, output_dir):
     login_driver_class = item.pop("_login_driver", None)
+    known_hosts = item.pop("_known_hosts")
+    version_commands = item.pop("_version_commands")
     read_fd, write_fd = os.pipe()
     try:
         os.write(write_fd, (password + "\n").encode("utf-8"))
         os.close(write_fd)
         client = "/usr/bin/ssh1" if item["client"] == "legacy" else "ssh"
-        known_hosts = os.path.join(output_dir, "known-hosts-{}".format(item["ip"]))
         strict = "no" if item["client"] == "legacy" else "accept-new"
         command = ["sshpass", "-d", str(read_fd), client, "-F", "/dev/null",
                    "-o", "StrictHostKeyChecking={}".format(strict),
                    "-o", "UserKnownHostsFile={}".format(known_hosts),
                    "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
                    "-p", str(item["port"]), "{}@{}".format(item["user"], item["ip"]),
-                   "show version"]
-        if item.get("session_driver") == "cisco-small-business":
+                   version_commands[0]]
+        if item.get("device_driver") == "cisco-small-business":
             returncode, stdout, stderr, timed_out, script_complete = run_cisco_small_business(
-                item, password, command, read_fd, login_driver_class)
+                item, password, command, read_fd, login_driver_class, version_commands)
             read_fd = None
         else:
             completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -166,6 +199,7 @@ def run_one(item, password, output_dir):
             script_complete = completed.returncode == 0
         item["returncode"] = returncode
         item["stderr"] = stderr.strip()
+        item["host_key_status"] = host_key_status(stderr)
         raw_path = os.path.join(output_dir, "{}-{}-show-version.txt".format(item["hostname"], item["ip"]))
         with open(raw_path, "w", encoding="utf-8", errors="replace") as handle:
             handle.write(stdout)
@@ -174,11 +208,11 @@ def run_one(item, password, output_dir):
         os.chmod(raw_path, 0o600)
         item["raw_report"] = raw_path
         parsed = parse_version(stdout)
-        if item.get("session_driver") == "cisco-small-business":
+        if item.get("device_driver") == "cisco-small-business":
             parsed["os_family"] = "cisco-small-business"
         item.update(parsed)
         successful = returncode == 0 or (
-            item.get("session_driver") == "cisco-small-business" and
+            item.get("device_driver") == "cisco-small-business" and
             script_complete and bool(parsed.get("firmware")))
         item["result"] = "timeout" if timed_out else ("success" if successful else "failed")
     except subprocess.TimeoutExpired:
@@ -215,11 +249,13 @@ def main():
             continue
         if not meta["enabled"] or not meta["profile"]:
             continue
-        session_driver = gr.profile_session_driver(cfg, meta["profile"])
+        device_driver = gr.resolve_device_driver(row)
+        driver_spec = gr.device_driver_spec(device_driver)
         items.append({"id": row.get("id"), "ip": ip, "hostname": str(row.get("hostname") or ip),
                       "vendor": vendor, "user": meta["user"], "port": int(meta["port"] or 22),
                       "profile": meta["profile"], "client": meta.get("client", "normal"),
-                      "session_driver": session_driver,
+                      "device_driver": device_driver,
+                      "_version_commands": driver_spec["version_commands"],
                       "_login_driver": gr.CiscoSmallBusinessLogin})
     if not items:
         print("No eligible devices matched.")
@@ -232,6 +268,9 @@ def main():
     os.chmod(report_root, 0o700)
     output_dir = os.path.join(report_root, stamp)
     os.makedirs(output_dir, mode=0o700)
+    known_hosts = gr.ensure_known_hosts(cfg)
+    for item in items:
+        item["_known_hosts"] = known_hosts
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(args.workers, 12))) as pool:
         futures = [pool.submit(run_one, dict(item), passwords[item["profile"]], output_dir) for item in items]
@@ -242,7 +281,8 @@ def main():
                 result["hostname"], result["ip"], result["result"],
                 result.get("model", ""), result.get("firmware", "")))
     results.sort(key=lambda item: tuple(int(part) for part in item["ip"].split(".")))
-    report = os.path.join(output_dir, "cisco-show-version-report.json")
+    vendor_slug = re.sub(r"[^a-z0-9]+", "-", args.vendor.lower()).strip("-") or "devices"
+    report = os.path.join(output_dir, "{}-show-version-report.json".format(vendor_slug))
     with open(report, "w", encoding="utf-8") as handle:
         json.dump({"generated_utc": stamp, "command": "show version", "results": results},
                   handle, ensure_ascii=False, indent=2)
