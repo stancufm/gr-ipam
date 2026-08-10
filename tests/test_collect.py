@@ -36,7 +36,8 @@ class CollectVersionCliTests(unittest.TestCase):
                 "command": "show version",
                 "results": [
                     {"hostname": "sw1", "ip": "192.0.2.1", "result": "success",
-                     "model": "C1000", "system_image": "flash:image.bin", "rom": "ROM1"},
+                     "model": "C1000", "uptime": "3 weeks",
+                     "system_image": "flash:image.bin", "rom": "ROM1"},
                     {"hostname": "sw2", "ip": "192.0.2.2", "result": "failed",
                      "stderr": "denied", "raw_report": "/private/report.txt"},
                 ],
@@ -64,12 +65,15 @@ class CollectVersionCliTests(unittest.TestCase):
             self.assertNotIn("RAW_REPORT", shown.getvalue())
             self.assertNotIn("SYSTEM_IMAGE", shown.getvalue())
             self.assertNotIn("ROM1", shown.getvalue())
+            self.assertNotIn("UPTIME", shown.getvalue())
+            self.assertNotIn("3 weeks", shown.getvalue())
 
             raw = io.StringIO()
             with contextlib.redirect_stdout(raw):
                 GR.command_collect_reports(cfg, report_id, use_pager=False, raw=True)
             self.assertEqual(raw.getvalue(), raw_content)
             self.assertIn('"stderr": "denied"', raw.getvalue())
+            self.assertIn('"uptime": "3 weeks"', raw.getvalue())
 
             completed = io.StringIO()
             with contextlib.redirect_stdout(completed):

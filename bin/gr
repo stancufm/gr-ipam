@@ -41,7 +41,7 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "1.4.1"
+GR_VERSION = "1.4.2"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 
 CONFIG_OPTIONS = (
@@ -663,13 +663,14 @@ def ssh_display(row, legacy_fallback=True, override_user=None, override_port=Non
 
 def print_table(rows, numbered=False, legacy_fallback=True, override_user=None, override_port=None,
                 override_profile=None, override_client=None):
-    columns = (("#",) if numbered else ()) + ("IP", "HOSTNAME", "STATUS", "SSH", "DESCRIPTION")
+    columns = (("#",) if numbered else ()) + ("IP", "HOSTNAME", "STATUS", "LASTSEEN", "SSH", "DESCRIPTION")
     values = []
     for index, row in enumerate(rows, 1):
         value = (
             str(row["_ip"]),
             row.get("_hostname") or "-",
             tag_label(row),
+            str(row.get("lastSeen") or "-"),
             ssh_display(row, legacy_fallback, override_user, override_port, override_profile, override_client),
             clean_comment(row.get("description") or row.get("note") or "-"),
         )
@@ -1195,9 +1196,9 @@ def collect_report_inventory(cfg):
 
 def collect_report_table(data, report_id):
     results = data.get("results", [])
-    excluded = {"stderr", "raw_report", "system_image", "rom"}
+    excluded = {"stderr", "raw_report", "system_image", "rom", "uptime"}
     preferred = ("hostname", "ip", "vendor", "result", "model", "firmware", "os_family",
-                 "uptime", "serial", "user", "port", "profile", "client", "returncode")
+                 "serial", "user", "port", "profile", "client", "returncode")
     available = set()
     for result in results:
         available.update(key for key in result if key not in excluded)
