@@ -1193,9 +1193,54 @@ def collect_report_inventory(cfg):
     return reports
 
 
-def command_collect_reports(cfg, report=None, use_pager=True):
+def collect_report_table(data, report_id):
+    results = data.get("results", [])
+    excluded = {"stderr", "raw_report", "system_image", "rom"}
+    preferred = ("hostname", "ip", "vendor", "result", "model", "firmware", "os_family",
+                 "uptime", "serial", "user", "port", "profile", "client", "returncode")
+    available = set()
+    for result in results:
+        available.update(key for key in result if key not in excluded)
+    columns = [key for key in preferred if key in available]
+    columns.extend(sorted(available - set(columns), key=str.lower))
+    lines = ["Report: {}".format(report_id),
+             "Generated UTC: {}".format(data.get("generated_utc") or "-"), ""]
+    if not results:
+        lines.append("No device results in this report.")
+        return "\n".join(lines) + "\n"
+    if not columns:
+        lines.append("No displayable device attributes in this report.")
+        return "\n".join(lines) + "\n"
+    widths = [len(column.upper()) for column in columns]
+    rows = []
+    for result in results:
+        row = []
+        for index, column in enumerate(columns):
+            value = result.get(column)
+            if value is None or value == "":
+                rendered = "-"
+            elif isinstance(value, bool):
+                rendered = "true" if value else "false"
+            elif isinstance(value, (dict, list)):
+                rendered = json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                      separators=(",", ":"))
+            else:
+                rendered = " ".join(str(value).splitlines())
+            row.append(rendered)
+            widths[index] = max(widths[index], len(rendered))
+        rows.append(row)
+    fmt = "  ".join("{{:<{}}}".format(width) for width in widths)
+    lines.append(fmt.format(*(column.upper() for column in columns)))
+    lines.append(fmt.format(*("-" * width for width in widths)))
+    lines.extend(fmt.format(*row) for row in rows)
+    return "\n".join(lines) + "\n"
+
+
+def command_collect_reports(cfg, report=None, use_pager=True, raw=False):
     reports = collect_report_inventory(cfg)
     if not report:
+        if raw:
+            raise GrError("--raw requires a report ID or latest")
         if not reports:
             print("No collect reports found in {}.".format(cfg["device_version_dir"]))
             return 0
@@ -1209,7 +1254,14 @@ def command_collect_reports(cfg, report=None, use_pager=True):
         (item for item in reports if item["id"] == report), None)
     if selected is None:
         raise GrError("No collect report matches: {}".format(report))
-    content = json.dumps(selected["data"], ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    if raw:
+        try:
+            with open(selected["path"], encoding="utf-8") as handle:
+                content = handle.read()
+        except OSError as exc:
+            raise GrError("Cannot read collect report {}: {}".format(selected["path"], exc))
+    else:
+        content = collect_report_table(selected["data"], selected["id"])
     return write_paged_text(content, use_pager)
 
 
@@ -2044,6 +2096,8 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                                  help="parallel SSH sessions (default: 4; effective range: 1-12)")
     collect_reports = collect_sub.add_parser("reports", help="list or display collected version reports")
     collect_reports.add_argument("report", nargs="?", help="report timestamp/ID or latest")
+    collect_reports.add_argument("--raw", action="store_true",
+                                 help="display the original JSON instead of the default device table")
     collect_reports.add_argument("--no-more", action="store_true",
                                  help="write report directly instead of using the automatic pager")
     find = sub.add_parser("find", aliases=["search"], help="find addresses by IP, hostname, description, owner, MAC or port")
@@ -2194,7 +2248,7 @@ def main(argv=None):
         return command_helper(SSH_VALIDATOR, helper_args)
     if args.command == "collect":
         if args.collect_action == "reports":
-            return command_collect_reports(cfg, args.report, use_pager=not args.no_more)
+            return command_collect_reports(cfg, args.report, use_pager=not args.no_more, raw=args.raw)
         if args.collect_action != "version":
             parser.parse_args(["collect", "--help"])
             return 0

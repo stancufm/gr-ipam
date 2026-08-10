@@ -129,14 +129,18 @@ Browse complete collection runs without remembering report paths:
 gr collect reports
 gr collect reports latest
 gr collect reports <report-timestamp>
+gr collect reports <report-timestamp> --raw
 gr collect reports <report-timestamp> --no-more
 ```
 
 The first command lists one row per collection run with its timestamp, device
 count and `success`/`failed`/`timeout` totals. Selecting `latest` or a report ID
-prints the complete JSON report through the automatic pager; `--no-more`
-writes it directly. Bash completion proposes `latest` and every available
-report ID. Reports are discovered under `device_version_dir`, whose default is
+shows a device table by default. Its columns are derived from every available
+result attribute except `stderr`, `raw_report`, `system_image` and `rom`.
+`--raw` displays the original JSON file without transformation. Both formats
+use the automatic pager; `--no-more` writes directly. Bash completion proposes
+`latest`, every available report ID and the display options. Reports are
+discovered under `device_version_dir`, whose default is
 `~/.local/state/gr/device-version` and which can be overridden globally or per
 user.
 

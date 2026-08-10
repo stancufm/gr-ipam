@@ -125,12 +125,12 @@ _gr_completion() {
                 _gr_complete_words "--all --ip --vendor --workers --config --help" "$current"
             elif [[ $subcommand == reports && $COMP_CWORD -eq 3 ]]; then
                 if [[ $current == -* ]]; then
-                    _gr_complete_words "--no-more --config --help" "$current"
+                    _gr_complete_words "--raw --no-more --config --help" "$current"
                 else
                     _gr_complete_dynamic collect-reports "$current"
                 fi
             elif [[ $subcommand == reports && $current == -* ]]; then
-                _gr_complete_words "--no-more --config --help" "$current"
+                _gr_complete_words "--raw --no-more --config --help" "$current"
             fi
             ;;
         subnet|local)

@@ -122,15 +122,19 @@ Rulările complete pot fi navigate fără memorarea căilor rapoartelor:
 gr collect reports
 gr collect reports latest
 gr collect reports <timestamp-raport>
+gr collect reports <timestamp-raport> --raw
 gr collect reports <timestamp-raport> --no-more
 ```
 
 Prima comandă afișează câte un rând pentru fiecare rulare, cu timestampul,
 numărul de dispozitive și totalurile `success`/`failed`/`timeout`. Selectarea lui
-`latest` sau a unui ID afișează raportul JSON integral prin pagerul automat;
-`--no-more` scrie direct în terminal. Autocomplete-ul Bash propune `latest` și
-toate ID-urile disponibile. Rapoartele sunt căutate în `device_version_dir`,
-implicit `~/.local/state/gr/device-version`, configurabil global sau per user.
+`latest` sau a unui ID afișează implicit un tabel de echipamente. Coloanele sunt
+obținute din toate atributele disponibile, cu excepția `stderr`, `raw_report`,
+`system_image` și `rom`. `--raw` afișează fișierul JSON original fără
+transformare. Ambele formate folosesc pagerul automat; `--no-more` scrie direct
+în terminal. Autocomplete-ul Bash propune `latest`, toate ID-urile și opțiunile
+de afișare. Rapoartele sunt căutate în `device_version_dir`, implicit
+`~/.local/state/gr/device-version`, configurabil global sau per user.
 
 ## Diagnostic și documentație
 
