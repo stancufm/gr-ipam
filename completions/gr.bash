@@ -31,7 +31,7 @@ _gr_completion() {
     COMPREPLY=()
 
     if (( COMP_CWORD == 1 )); then
-        _gr_complete_words "init doctor ssh collect find search subnet local sync export auth vault update self-update migrate-ssh vendor audit completion docs help --ssh --config --version" "$current"
+        _gr_complete_words "init doctor config ssh collect find search subnet local sync export auth vault update self-update migrate-ssh vendor audit completion docs help --ssh --config --version" "$current"
         return
     fi
 
@@ -92,7 +92,7 @@ _gr_completion() {
             ;;
         completion)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "bash profiles audit-targets audit-sessions" "$current"
+                _gr_complete_words "bash profiles audit-targets audit-sessions collect-reports" "$current"
             elif [[ $subcommand == audit-sessions && $COMP_CWORD -eq 3 ]]; then
                 _gr_complete_dynamic audit-targets "$current"
             fi
@@ -100,12 +100,15 @@ _gr_completion() {
         doctor)
             _gr_complete_words "--api --system --config --help" "$current"
             ;;
+        config)
+            (( COMP_CWORD == 2 )) && _gr_complete_words "show --config --help" "$current"
+            ;;
         init)
             _gr_complete_words "--configure-auth --config --help" "$current"
             ;;
         find|search|--ssh)
             if [[ $current == -* ]]; then
-                _gr_complete_words "--ssh --user --port --profile --client --no-vault --audit --no-audit --config --help" "$current"
+                _gr_complete_words "--details --ssh --user --port --profile --client --no-vault --audit --no-audit --config --help" "$current"
             fi
             ;;
         ssh)
@@ -117,9 +120,17 @@ _gr_completion() {
             ;;
         collect)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "version" "$current"
+                _gr_complete_words "version reports" "$current"
             elif [[ $subcommand == version ]]; then
                 _gr_complete_words "--all --ip --vendor --workers --config --help" "$current"
+            elif [[ $subcommand == reports && $COMP_CWORD -eq 3 ]]; then
+                if [[ $current == -* ]]; then
+                    _gr_complete_words "--raw --no-more --config --help" "$current"
+                else
+                    _gr_complete_dynamic collect-reports "$current"
+                fi
+            elif [[ $subcommand == reports && $current == -* ]]; then
+                _gr_complete_words "--raw --no-more --config --help" "$current"
             fi
             ;;
         subnet|local)

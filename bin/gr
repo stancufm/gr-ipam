@@ -41,8 +41,27 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "1.3.1"
+GR_VERSION = "1.4.0"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
+
+CONFIG_OPTIONS = (
+    ("base_url", None),
+    ("app_id", None),
+    ("migration_app_id", "gr-migrate"),
+    ("username", None),
+    ("ca_file", None),
+    ("credential_file", None),
+    ("hosts_file", "/etc/hosts"),
+    ("hosts_sync_enabled", False),
+    ("include_tags", [2]),
+    ("ssh_output", "~/.ssh/config.d/90-phpipam.conf"),
+    ("ssh_legacy_fallback", True),
+    ("ssh_audit_enabled", False),
+    ("ssh_audit_dir", "~/.local/state/gr/audit"),
+    ("ssh_profiles", {}),
+    ("device_version_dir", "~/.local/state/gr/device-version"),
+    ("vendor_db_dir", "/var/lib/gr/ieee-vendors"),
+)
 
 
 class GrError(Exception):
@@ -107,9 +126,94 @@ def load_config(path=None):
     cfg["ssh_audit_dir"] = expand(cfg.get("ssh_audit_dir", "~/.local/state/gr/audit"))
     cfg["hosts_sync_enabled"] = bool(cfg.get("hosts_sync_enabled", False))
     cfg["ssh_profiles"] = cfg.get("ssh_profiles", {})
+    cfg["device_version_dir"] = expand(cfg.get("device_version_dir", "~/.local/state/gr/device-version"))
     cfg["vendor_db_dir"] = expand(cfg.get("vendor_db_dir", "/var/lib/gr/ieee-vendors"))
     cfg["_config_sources"] = sources
     return cfg
+
+
+def config_display(value, missing="-"):
+    if value is None:
+        return missing
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return str(value)
+
+
+def profile_count(value):
+    if value is None:
+        return "-"
+    count = len(value) if isinstance(value, dict) else 0
+    return "{} profile{}".format(count, "" if count == 1 else "s")
+
+
+def print_config_table(columns, rows):
+    widths = [len(column) for column in columns]
+    rendered = []
+    for row in rows:
+        values = [config_display(value) for value in row]
+        rendered.append(values)
+        widths = [max(width, len(value)) for width, value in zip(widths, values)]
+    print("  ".join(column.ljust(width) for column, width in zip(columns, widths)))
+    print("  ".join("-" * width for width in widths))
+    for row in rendered:
+        print("  ".join(value.ljust(width) for value, width in zip(row, widths)))
+
+
+def command_config_show(cfg, custom_path=None):
+    global_cfg = read_json_config(SYSTEM_CONFIG, required=False)
+    user_cfg = read_json_config(USER_CONFIG, required=False)
+    custom_cfg = read_json_config(custom_path) if custom_path else None
+    rows = []
+    for key, default in CONFIG_OPTIONS:
+        global_value = global_cfg.get(key)
+        user_value = user_cfg.get(key)
+        if custom_cfg is not None:
+            source = "custom" if key in custom_cfg else ("default" if default is not None else "required")
+        elif key in user_cfg:
+            source = "user"
+        elif key in global_cfg:
+            source = "global"
+        else:
+            source = "default" if default is not None else "required"
+        if key == "ssh_profiles":
+            rows.append((key, profile_count(default), profile_count(global_value),
+                         profile_count(user_value), profile_count(cfg.get(key)), source))
+            global_profiles = global_value if isinstance(global_value, dict) else {}
+            user_profiles = user_value if isinstance(user_value, dict) else {}
+            effective_profiles = cfg.get(key) if isinstance(cfg.get(key), dict) else {}
+            profile_names = sorted(set(global_profiles) | set(user_profiles) | set(effective_profiles),
+                                   key=str.lower)
+            for profile in profile_names:
+                global_profile = global_profiles.get(profile, {})
+                user_profile = user_profiles.get(profile, {})
+                effective_profile = effective_profiles.get(profile, {})
+                fields = sorted(set(global_profile) | set(user_profile) | set(effective_profile),
+                                key=str.lower)
+                for field in fields:
+                    if field in user_profile:
+                        profile_source = "user"
+                    elif field in global_profile:
+                        profile_source = "global"
+                    else:
+                        profile_source = "effective"
+                    rows.append(("ssh_profiles.{}.{}".format(profile, field), "-",
+                                 global_profile.get(field), user_profile.get(field),
+                                 effective_profile.get(field), profile_source))
+            continue
+        rows.append((key, config_display(default, "<required>"), global_value,
+                     user_value, cfg.get(key), source))
+    print("Global configuration: {}{}".format(
+        SYSTEM_CONFIG, " (missing)" if not os.path.isfile(SYSTEM_CONFIG) else ""))
+    print("User configuration:   {}{}".format(
+        USER_CONFIG, " (missing)" if not os.path.isfile(USER_CONFIG) else ""))
+    if custom_path:
+        print("Effective custom file: {}".format(expand(custom_path)))
+    print()
+    print_config_table(("OPTION", "DEFAULT", "GLOBAL", "USER", "EFFECTIVE", "SOURCE"), rows)
+    return 0
 
 
 IEEE_VENDOR_SOURCES = {
@@ -584,6 +688,35 @@ def print_table(rows, numbered=False, legacy_fallback=True, override_user=None, 
         print(fmt.format(*clipped))
 
 
+def address_detail_value(row, key):
+    value = str(row["_ip"]) if key == "ip" else row.get(key)
+    if value is None or value == "":
+        return ["-"]
+    if isinstance(value, bool):
+        return ["true" if value else "false"]
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2).splitlines()
+    return str(value).splitlines() or ["-"]
+
+
+def print_address_details(rows):
+    for index, row in enumerate(rows, 1):
+        hostname = row.get("_hostname") or str(row["_ip"])
+        print("\nDetails {}/{}: {} ({})".format(index, len(rows), hostname, row["_ip"]))
+        keys = [key for key in row if not key.startswith("_")]
+        keys.sort(key=lambda key: (0 if key == "ip" else 1 if key == "hostname" else 2,
+                                   key.lower()))
+        width = max([len(key) for key in keys] or [0])
+        for key in keys:
+            lines = address_detail_value(row, key)
+            if len(lines) == 1:
+                print("  {} : {}".format(key.ljust(width), lines[0]))
+                continue
+            print("  {} :".format(key.ljust(width)))
+            for line in lines:
+                print("    {}".format(line))
+
+
 def ssh_effective(target):
     try:
         output = subprocess.check_output(
@@ -804,6 +937,34 @@ def audit_pager_command():
     return []
 
 
+def write_paged_text(content, use_pager=True):
+    pager = None
+    pager_input = None
+    if use_pager and getattr(sys.stdout, "isatty", lambda: False)():
+        command = audit_pager_command()
+        if command:
+            try:
+                pager = subprocess.Popen(command, stdin=subprocess.PIPE, universal_newlines=True)
+                pager_input = pager.stdin
+            except OSError as exc:
+                raise GrError("Cannot start pager {}: {}".format(command[0], exc))
+    try:
+        destination = pager_input or sys.stdout
+        destination.write(content)
+        destination.flush()
+    except BrokenPipeError:
+        pass
+    finally:
+        if pager_input is not None:
+            try:
+                pager_input.close()
+            except BrokenPipeError:
+                pass
+        if pager is not None:
+            pager.wait()
+    return 0
+
+
 def command_audit_replay(path, streams=None, use_pager=True):
     path = expand(path)
     streams = set(streams or ("stdout", "stderr"))
@@ -986,6 +1147,124 @@ def command_audit_show(cfg, target=None, session=None, streams=None, use_pager=T
     return command_audit_replay(selected["path"], streams, use_pager)
 
 
+def collect_report_inventory(cfg):
+    root = cfg["device_version_dir"]
+    if not os.path.isdir(root):
+        return []
+    reports = []
+    try:
+        directories = sorted(os.scandir(root), key=lambda item: item.name, reverse=True)
+        for directory in directories:
+            if not directory.is_dir(follow_symlinks=False):
+                continue
+            candidates = [item for item in os.scandir(directory.path)
+                          if item.is_file(follow_symlinks=False)
+                          and item.name.endswith("-show-version-report.json")]
+            for item in sorted(candidates, key=lambda entry: entry.name):
+                try:
+                    with open(item.path, encoding="utf-8") as handle:
+                        data = json.load(handle)
+                except (OSError, ValueError) as exc:
+                    raise GrError("Cannot read collect report {}: {}".format(item.path, exc))
+                if not isinstance(data, dict):
+                    raise GrError("Invalid collect report {}: top-level JSON must be an object".format(
+                        item.path))
+                results = data.get("results", [])
+                if not isinstance(results, list):
+                    raise GrError("Invalid collect report {}: results must be a list".format(item.path))
+                if not all(isinstance(result, dict) for result in results):
+                    raise GrError("Invalid collect report {}: every result must be an object".format(
+                        item.path))
+                counts = {status: sum(1 for result in results if result.get("result") == status)
+                          for status in ("success", "failed", "timeout")}
+                reports.append({
+                    "id": directory.name,
+                    "path": item.path,
+                    "generated": str(data.get("generated_utc") or directory.name),
+                    "devices": len(results),
+                    "success": counts["success"],
+                    "failed": counts["failed"],
+                    "timeout": counts["timeout"],
+                    "data": data,
+                })
+    except OSError as exc:
+        raise GrError("Cannot list collect reports in {}: {}".format(root, exc))
+    reports.sort(key=lambda item: (item["generated"], item["id"]), reverse=True)
+    return reports
+
+
+def collect_report_table(data, report_id):
+    results = data.get("results", [])
+    excluded = {"stderr", "raw_report", "system_image", "rom"}
+    preferred = ("hostname", "ip", "vendor", "result", "model", "firmware", "os_family",
+                 "uptime", "serial", "user", "port", "profile", "client", "returncode")
+    available = set()
+    for result in results:
+        available.update(key for key in result if key not in excluded)
+    columns = [key for key in preferred if key in available]
+    columns.extend(sorted(available - set(columns), key=str.lower))
+    lines = ["Report: {}".format(report_id),
+             "Generated UTC: {}".format(data.get("generated_utc") or "-"), ""]
+    if not results:
+        lines.append("No device results in this report.")
+        return "\n".join(lines) + "\n"
+    if not columns:
+        lines.append("No displayable device attributes in this report.")
+        return "\n".join(lines) + "\n"
+    widths = [len(column.upper()) for column in columns]
+    rows = []
+    for result in results:
+        row = []
+        for index, column in enumerate(columns):
+            value = result.get(column)
+            if value is None or value == "":
+                rendered = "-"
+            elif isinstance(value, bool):
+                rendered = "true" if value else "false"
+            elif isinstance(value, (dict, list)):
+                rendered = json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                      separators=(",", ":"))
+            else:
+                rendered = " ".join(str(value).splitlines())
+            row.append(rendered)
+            widths[index] = max(widths[index], len(rendered))
+        rows.append(row)
+    fmt = "  ".join("{{:<{}}}".format(width) for width in widths)
+    lines.append(fmt.format(*(column.upper() for column in columns)))
+    lines.append(fmt.format(*("-" * width for width in widths)))
+    lines.extend(fmt.format(*row) for row in rows)
+    return "\n".join(lines) + "\n"
+
+
+def command_collect_reports(cfg, report=None, use_pager=True, raw=False):
+    reports = collect_report_inventory(cfg)
+    if not report:
+        if raw:
+            raise GrError("--raw requires a report ID or latest")
+        if not reports:
+            print("No collect reports found in {}.".format(cfg["device_version_dir"]))
+            return 0
+        rows = [(item["id"], item["generated"], str(item["devices"]),
+                 str(item["success"]), str(item["failed"]), str(item["timeout"]))
+                for item in reports]
+        print_audit_table(("REPORT", "GENERATED UTC", "DEVICES", "SUCCESS", "FAILED", "TIMEOUT"), rows)
+        print("\nShow: gr collect reports <report-or-latest>")
+        return 0
+    selected = reports[0] if report == "latest" and reports else next(
+        (item for item in reports if item["id"] == report), None)
+    if selected is None:
+        raise GrError("No collect report matches: {}".format(report))
+    if raw:
+        try:
+            with open(selected["path"], encoding="utf-8") as handle:
+                content = handle.read()
+        except OSError as exc:
+            raise GrError("Cannot read collect report {}: {}".format(selected["path"], exc))
+    else:
+        content = collect_report_table(selected["data"], selected["id"])
+    return write_paged_text(content, use_pager)
+
+
 def completion_source_path():
     candidates = [
         BASH_COMPLETION,
@@ -1021,6 +1300,13 @@ def command_completion(cfg, action, value=None):
             print("latest")
         for summary in sorted(matches, key=lambda item: item["started"], reverse=True):
             print(summary["session"])
+        return 0
+    if action == "collect-reports":
+        reports = collect_report_inventory(cfg)
+        if reports:
+            print("latest")
+        for report in reports:
+            print(report["id"])
         return 0
     raise GrError("Unsupported completion action: {}".format(action))
 
@@ -1089,7 +1375,8 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
 
 
 def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
-                   ssh_profile=None, ssh_client=None, no_vault=False, audit=None):
+                   ssh_profile=None, ssh_client=None, no_vault=False, audit=None,
+                   details=False):
     needle = " ".join(terms).strip().lower()
     if not needle:
         raise GrError("Search text is required")
@@ -1110,14 +1397,19 @@ def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
         if needle in haystack:
             matches.append(row)
     if matches:
+        if details:
+            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True))
+            print_address_details(matches)
+            print()
         if use_ssh:
             if len(matches) == 1:
                 selected = matches[0]
                 print("One SSH target matched; connecting automatically:")
-                print_table(matches, numbered=False,
-                            legacy_fallback=cfg.get("ssh_legacy_fallback", True),
-                            override_user=ssh_user, override_port=ssh_port,
-                            override_profile=ssh_profile, override_client=ssh_client)
+                if not details:
+                    print_table(matches, numbered=False,
+                                legacy_fallback=cfg.get("ssh_legacy_fallback", True),
+                                override_user=ssh_user, override_port=ssh_port,
+                                override_profile=ssh_profile, override_client=ssh_client)
                 print()
             else:
                 selected = choose_ssh_target(matches, cfg.get("ssh_legacy_fallback", True), ssh_user, ssh_port,
@@ -1127,7 +1419,8 @@ def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
                     return 0
             return connect_ssh(cfg, selected, ssh_user, ssh_port, ssh_profile, ssh_client,
                                no_vault, audit)
-        print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True))
+        if not details:
+            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True))
         print("\n{} result(s)".format(len(matches)))
         return 0
     print("No phpIPAM results for: {}".format(needle), file=sys.stderr)
@@ -1783,6 +2076,8 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     doctor.add_argument("--api", action="store_true", help="also test phpIPAM without prompting for a password")
     doctor.add_argument("--system", action="store_true",
                         help="validate only the shared installation, without per-user credentials")
+    config_parser = sub.add_parser("config", help="inspect default, global, user and effective configuration")
+    config_parser.add_argument("config_action", nargs="?", choices=("show",), default="show")
     ssh_command = sub.add_parser("ssh", help="validate SSH metadata and connectivity in bulk")
     ssh_sub = ssh_command.add_subparsers(dest="ssh_action")
     ssh_validate = ssh_sub.add_parser("validate", help="list or validate SSH access to sw* devices")
@@ -1795,10 +2090,20 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     collect_target = collect_version.add_mutually_exclusive_group(required=True)
     collect_target.add_argument("--all", action="store_true", help="collect from every matching vendor device")
     collect_target.add_argument("--ip", action="append", dest="ips", help="limit to an IP (repeatable)")
-    collect_version.add_argument("--vendor", default="cisco")
-    collect_version.add_argument("--workers", type=int, default=4)
+    collect_version.add_argument("--vendor", default="cisco",
+                                 help="require this phpIPAM device_vendor value (default: cisco)")
+    collect_version.add_argument("--workers", type=int, default=4,
+                                 help="parallel SSH sessions (default: 4; effective range: 1-12)")
+    collect_reports = collect_sub.add_parser("reports", help="list or display collected version reports")
+    collect_reports.add_argument("report", nargs="?", help="report timestamp/ID or latest")
+    collect_reports.add_argument("--raw", action="store_true",
+                                 help="display the original JSON instead of the default device table")
+    collect_reports.add_argument("--no-more", action="store_true",
+                                 help="write report directly instead of using the automatic pager")
     find = sub.add_parser("find", aliases=["search"], help="find addresses by IP, hostname, description, owner, MAC or port")
     find.add_argument("terms", nargs="+")
+    find.add_argument("--details", action="store_true",
+                      help="show every phpIPAM field returned for each matching address")
     find.add_argument("--ssh", action="store_true", help="interactively select a result and start SSH")
     find.add_argument("--user", type=ssh_user, help="override the SSH user for this connection only")
     find.add_argument("--port", type=ssh_port, help="override the SSH port for this connection only")
@@ -1880,7 +2185,8 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                             help="write directly instead of using the automatic terminal pager")
     completion = sub.add_parser("completion", help="print shell completion or dynamic candidates")
     completion.add_argument("completion_action",
-                            choices=("bash", "profiles", "audit-targets", "audit-sessions"))
+                            choices=("bash", "profiles", "audit-targets", "audit-sessions",
+                                     "collect-reports"))
     completion.add_argument("value", nargs="?", help="target required by audit-sessions")
     docs_parser = sub.add_parser("docs", aliases=["help"], help="display the complete installed documentation")
     docs_parser.add_argument("--language", choices=("en", "ro"), default="en")
@@ -1889,7 +2195,7 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    known_commands = {"init", "doctor", "ssh", "collect", "find", "search", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "vendor", "audit", "completion", "docs", "help"}
+    known_commands = {"init", "doctor", "config", "ssh", "collect", "find", "search", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "vendor", "audit", "completion", "docs", "help"}
     ssh_requested = "--ssh" in argv
     if ssh_requested:
         argv = [value for value in argv if value != "--ssh"]
@@ -1913,6 +2219,8 @@ def main(argv=None):
     if args.command == "completion" and args.completion_action == "bash":
         return command_completion({}, "bash")
     cfg = load_config(args.config)
+    if args.command == "config":
+        return command_config_show(cfg, args.config)
     if args.command == "audit":
         if args.audit_action != "show":
             parser.parse_args(["audit", "--help"])
@@ -1939,6 +2247,8 @@ def main(argv=None):
             helper_args.extend(["--ip", ip])
         return command_helper(SSH_VALIDATOR, helper_args)
     if args.command == "collect":
+        if args.collect_action == "reports":
+            return command_collect_reports(cfg, args.report, use_pager=not args.no_more, raw=args.raw)
         if args.collect_action != "version":
             parser.parse_args(["collect", "--help"])
             return 0
@@ -1954,7 +2264,7 @@ def main(argv=None):
             raise GrError("SSH connection options require --ssh")
         return command_search(cfg, args.terms, use_ssh=args.ssh, ssh_user=args.user, ssh_port=args.port,
                               ssh_profile=args.profile, ssh_client=args.client, no_vault=args.no_vault,
-                              audit=args.audit)
+                              audit=args.audit, details=args.details)
     if args.command == "subnet":
         return command_subnet(cfg, args.cidr)
     if args.command == "local":

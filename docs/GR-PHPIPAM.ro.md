@@ -12,6 +12,7 @@ Metadatele SSH provin din câmpurile standard custom ale adreselor: `ssh_enabled
 
 ```bash
 gr find <text-sau-ip>
+gr find <text-sau-ip> --details
 gr <ip>
 gr subnet <cidr>
 gr --ssh <text-sau-ip>
@@ -19,6 +20,11 @@ gr --ssh --user operator --port 2222 --profile network-admin <țintă>
 ```
 
 Dacă există un singur rezultat, conectarea este automată; altfel se afișează selectorul. Override-urile CLI sunt valabile numai pentru sesiunea curentă. `--no-vault` forțează promptul OpenSSH. Clientul legacy este selectat numai prin metadata/CLI și nu slăbește clientul normal.
+
+`--details` păstrează sumarul compact și apoi afișează toate câmpurile returnate
+de phpIPAM pentru fiecare adresă găsită. Câmpurile sunt sortate, valorile pe mai
+multe linii sunt indentate, iar structurile JSON rămân lizibile. Afișarea este
+read-only și poate fi combinată și cu `--ssh`.
 
 ## Audit SSH
 
@@ -76,6 +82,73 @@ gr collect version --ip IP
 
 Baza IEEE comună este actualizată atomic. Sincronizările și colectările produc rapoarte private. Nu comiteți rapoarte, inventare sau audituri.
 
+### Colectarea inventarului de versiuni
+
+```bash
+gr collect version --all [--vendor VENDOR] [--workers N]
+gr collect version --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
+```
+
+Comanda citește adresele din phpIPAM, selectează înregistrările al căror
+`device_vendor` corespunde producătorului cerut, necesită metadate SSH active și
+un profil în seiful SSH, apoi rulează `show version` prin clientul normal sau
+clientul legacy izolat ales pentru fiecare dispozitiv. Nu modifică phpIPAM sau
+configurația echipamentelor.
+
+Opțiuni:
+
+- `--all` selectează toate adresele eligibile care corespund lui `--vendor`;
+- `--ip IP` limitează colectarea la o adresă și poate fi repetat; filtrul de
+  producător și cerințele SSH/profil se aplică în continuare;
+- `--vendor VENDOR` compară fără diferență între litere mari și mici câmpul
+  phpIPAM `device_vendor`; valoarea implicită este `cisco`;
+- `--workers N` stabilește numărul de sesiuni SSH paralele; implicit este `4`,
+  iar valoarea efectivă este limitată la intervalul `1..12`.
+
+Fiecare rulare creează un director privat cu timestamp în
+`~/.local/state/gr/device-version/`. Acesta conține outputul brut `show version`
+pentru fiecare dispozitiv, fișiere private temporare pentru cheile host și
+`cisco-show-version-report.json` cu modelul, firmware-ul, familia OS, uptime,
+seria, imaginea de sistem, ROM-ul, stderr și rezultatul. Parserul este destinat
+în principal outputului Cisco; alt producător este util numai dacă suportă
+`show version` și un format compatibil.
+
+Codul de ieșire este `0` dacă toate dispozitivele reușesc, `1` dacă nu există
+niciun dispozitiv eligibil și `2` dacă cel puțin o conexiune eșuează sau expiră.
+
+Rulările complete pot fi navigate fără memorarea căilor rapoartelor:
+
+```bash
+gr collect reports
+gr collect reports latest
+gr collect reports <timestamp-raport>
+gr collect reports <timestamp-raport> --raw
+gr collect reports <timestamp-raport> --no-more
+```
+
+Prima comandă afișează câte un rând pentru fiecare rulare, cu timestampul,
+numărul de dispozitive și totalurile `success`/`failed`/`timeout`. Selectarea lui
+`latest` sau a unui ID afișează implicit un tabel de echipamente. Coloanele sunt
+obținute din toate atributele disponibile, cu excepția `stderr`, `raw_report`,
+`system_image` și `rom`. `--raw` afișează fișierul JSON original fără
+transformare. Ambele formate folosesc pagerul automat; `--no-more` scrie direct
+în terminal. Autocomplete-ul Bash propune `latest`, toate ID-urile și opțiunile
+de afișare. Rapoartele sunt căutate în `device_version_dir`, implicit
+`~/.local/state/gr/device-version`, configurabil global sau per user.
+
 ## Diagnostic și documentație
 
 `gr doctor --api` verifică fișierele, permisiunile, dependențele, baza IEEE și API-ul. `gr docs --language en` afișează ghidul englez, iar `gr docs --language ro` ghidul român. Toate scrierile de inventar rămân dry-run până la `--apply`.
+
+### Inventarul configurației
+
+```bash
+gr config show
+```
+
+Inventarul afișează toate opțiunile acceptate de versiunea instalată. Pentru
+fiecare opțiune compară valoarea implicită documentată, valoarea globală din
+`/etc/gr/config.json`, suprascrierea utilizatorului activ din
+`~/.config/gr/config.json`, valoarea efectivă normalizată și sursa ei.
+Opțiunile obligatorii fără valoare implicită sunt marcate `<required>`.
+Comanda este read-only și nu citește credențiala API separată sau seiful SSH.

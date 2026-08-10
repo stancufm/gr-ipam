@@ -4,6 +4,7 @@
   "base_url": "https://ipam.example.net",
   "ca_file": "/etc/gr/phpipam-ca.pem",
   "credential_file": "~/.config/gr/credentials",
+  "device_version_dir": "~/.local/state/gr/device-version",
   "hosts_file": "/etc/hosts",
   "hosts_sync_enabled": false,
   "include_tags": [2],
