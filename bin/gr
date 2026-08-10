@@ -710,11 +710,13 @@ def ssh_display(row, legacy_fallback=True, override_user=None, override_port=Non
 
 
 def print_table(rows, numbered=False, legacy_fallback=True, override_user=None, override_port=None,
-                override_profile=None, override_client=None):
-    columns = (("#",) if numbered else ()) + ("IP", "HOSTNAME", "STATUS", "LASTSEEN", "SSH", "DESCRIPTION")
+                override_profile=None, override_client=None, brief=False):
+    base_columns = ("IP", "HOSTNAME", "SSH", "DESCRIPTION") if brief else (
+        "IP", "HOSTNAME", "STATUS", "LASTSEEN", "SSH", "DESCRIPTION")
+    columns = (("#",) if numbered else ()) + base_columns
     values = []
     for index, row in enumerate(rows, 1):
-        value = (
+        full_value = (
             str(row["_ip"]),
             row.get("_hostname") or "-",
             tag_label(row),
@@ -722,6 +724,7 @@ def print_table(rows, numbered=False, legacy_fallback=True, override_user=None, 
             ssh_display(row, legacy_fallback, override_user, override_port, override_profile, override_client),
             clean_comment(row.get("description") or row.get("note") or "-"),
         )
+        value = (full_value[0], full_value[1], full_value[4], full_value[5]) if brief else full_value
         if numbered:
             value = (str(index),) + value
         values.append(value)
@@ -786,12 +789,12 @@ def ssh_effective(target):
 
 
 def choose_ssh_target(rows, legacy_fallback=True, override_user=None, override_port=None,
-                      override_profile=None, override_client=None):
+                      override_profile=None, override_client=None, brief=False):
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise GrError("--ssh requires an interactive terminal")
     print_table(rows, numbered=True, legacy_fallback=legacy_fallback,
                 override_user=override_user, override_port=override_port,
-                override_profile=override_profile, override_client=override_client)
+                override_profile=override_profile, override_client=override_client, brief=brief)
     print()
     while True:
         answer = input("Select SSH target [1-{}, q]: ".format(len(rows))).strip().lower()
@@ -1595,7 +1598,7 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
 
 def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
                    ssh_profile=None, ssh_client=None, device_driver=None, no_vault=False, audit=None,
-                   details=False):
+                   details=False, brief=False):
     needle = " ".join(terms).strip().lower()
     if not needle:
         raise GrError("Search text is required")
@@ -1617,7 +1620,7 @@ def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
             matches.append(row)
     if matches:
         if details:
-            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True))
+            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True), brief=brief)
             print_address_details(matches)
             print()
         if use_ssh:
@@ -1628,18 +1631,19 @@ def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
                     print_table(matches, numbered=False,
                                 legacy_fallback=cfg.get("ssh_legacy_fallback", True),
                                 override_user=ssh_user, override_port=ssh_port,
-                                override_profile=ssh_profile, override_client=ssh_client)
+                                override_profile=ssh_profile, override_client=ssh_client,
+                                brief=brief)
                 print()
             else:
                 selected = choose_ssh_target(matches, cfg.get("ssh_legacy_fallback", True), ssh_user, ssh_port,
-                                             ssh_profile, ssh_client)
+                                             ssh_profile, ssh_client, brief=brief)
                 if selected is None:
                     print("SSH connection cancelled.")
                     return 0
             return connect_ssh(cfg, selected, ssh_user, ssh_port, ssh_profile, ssh_client,
                                device_driver, no_vault, audit)
         if not details:
-            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True))
+            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True), brief=brief)
         print("\n{} result(s)".format(len(matches)))
         return 0
     print("No phpIPAM results for: {}".format(needle), file=sys.stderr)
@@ -2416,8 +2420,11 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                                  help="write report directly instead of using the automatic pager")
     find = sub.add_parser("find", aliases=["search"], help="find addresses by IP, hostname, description, owner, MAC or port")
     find.add_argument("terms", nargs="+")
-    find.add_argument("--details", action="store_true",
-                      help="show every phpIPAM field returned for each matching address")
+    output_group = find.add_mutually_exclusive_group()
+    output_group.add_argument("--details", action="store_true",
+                              help="show every phpIPAM field returned for each matching address")
+    output_group.add_argument("--brief", action="store_true",
+                              help="show only IP, hostname, SSH and description columns")
     find.add_argument("--ssh", action="store_true", help="interactively select a result and start SSH")
     find.add_argument("--user", type=ssh_user, help="override the SSH user for this connection only")
     find.add_argument("--port", type=ssh_port, help="override the SSH port for this connection only")
@@ -2595,7 +2602,7 @@ def main(argv=None):
         return command_search(cfg, args.terms, use_ssh=args.ssh, ssh_user=args.user, ssh_port=args.port,
                               ssh_profile=args.profile, ssh_client=args.client,
                               device_driver=args.driver, no_vault=args.no_vault,
-                              audit=args.audit, details=args.details)
+                              audit=args.audit, details=args.details, brief=args.brief)
     if args.command == "subnet":
         return command_subnet(cfg, args.cidr)
     if args.command == "local":

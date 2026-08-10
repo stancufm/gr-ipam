@@ -117,6 +117,10 @@ The API credential requires mode `0600`. SSH passwords are encrypted through pas
 
 ## Inventory updates
 
+Search results use the standard inventory table. Add `--brief` to either
+`gr TERM` or `gr find TERM` to display only `IP`, `HOSTNAME`, `SSH` and
+`DESCRIPTION`; `--brief` and `--details` are mutually exclusive.
+
 `gr sync` previews generated SSH configuration and optionally `/etc/hosts`; writing requires `--apply`. `gr update IP` previews standard and custom-field changes, including `--device-driver` and `--device-vendor`, then uses the separate write application and GET-verifies applied values. `gr migrate-ssh` imports legacy `[port][user]` metadata and is also dry-run by default.
 
 ```bash

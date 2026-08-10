@@ -112,7 +112,7 @@ _gr_completion() {
             ;;
         find|search|--ssh)
             if [[ $current == -* ]]; then
-                _gr_complete_words "--details --ssh --user --port --profile --client --driver --no-vault --audit --no-audit --config --help" "$current"
+                _gr_complete_words "--brief --details --ssh --user --port --profile --client --driver --no-vault --audit --no-audit --config --help" "$current"
             fi
             ;;
         ssh)

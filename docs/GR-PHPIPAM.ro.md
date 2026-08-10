@@ -117,6 +117,10 @@ Credențiala API are modul `0600`. Parolele SSH sunt criptate de pass/GPG și tr
 
 ## Sincronizare și actualizări
 
+Rezultatele căutării folosesc tabelul standard de inventar. Adăugați `--brief`
+la `gr TERMEN` sau `gr find TERMEN` pentru a afișa numai `IP`, `HOSTNAME`, `SSH`
+și `DESCRIPTION`; `--brief` și `--details` se exclud reciproc.
+
 `gr sync` și `gr export` generează configurație SSH și, numai dacă este activat explicit, `/etc/hosts`. `gr update <ip>` afișează schimbarea, inclusiv pentru `--device-driver` și `--device-vendor`; scrierea necesită `--apply` și verificare GET. `gr migrate-ssh` migrează metadatele vechi, dry-run implicit.
 
 ```bash

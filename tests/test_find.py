@@ -25,6 +25,23 @@ class FindDetailsTests(unittest.TestCase):
         self.assertRegex(lines[0], r"STATUS\s+LASTSEEN\s+SSH")
         self.assertIn("2026-08-10 12:00:00", output.getvalue())
 
+    def test_brief_table_contains_only_requested_columns(self):
+        row = {
+            "_ip": ipaddress.ip_address("192.0.2.10"),
+            "_hostname": "core-switch",
+            "lastSeen": "2026-08-10 12:00:00",
+            "tag": "2",
+            "description": "Core device",
+            "custom_fields": {},
+        }
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            GR.print_table([row], brief=True)
+        header = output.getvalue().splitlines()[0]
+        self.assertRegex(header, r"^IP\s+HOSTNAME\s+SSH\s+DESCRIPTION$")
+        self.assertNotIn("STATUS", header)
+        self.assertNotIn("LASTSEEN", header)
+
     def test_details_prints_all_phpipam_fields_and_hides_internal_keys(self):
         row = {
             "ip": "3221225994",
@@ -54,6 +71,12 @@ class FindDetailsTests(unittest.TestCase):
         combined = parser.parse_args(["find", "switch", "--details", "--ssh"])
         self.assertTrue(combined.details)
         self.assertTrue(combined.ssh)
+
+    def test_parser_accepts_brief_and_rejects_details_combination(self):
+        parser = GR.build_parser()
+        self.assertTrue(parser.parse_args(["find", "switch", "--brief"]).brief)
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["find", "switch", "--brief", "--details"])
 
     def test_parser_accepts_independent_profile_and_driver(self):
         args = GR.build_parser().parse_args([
