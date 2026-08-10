@@ -41,7 +41,7 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.1.1"
+GR_VERSION = "2.1.2"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 DEVICE_DRIVER_SPECS = {
     "generic": {
@@ -887,6 +887,10 @@ class CiscoSmallBusinessLogin:
 
     def feed(self, data):
         self.buffer = (self.buffer + data)[-4096:]
+        if self.state == "username" and self.PROMPT_RE.search(self.buffer):
+            self.state = "ready"
+            self.buffer = b""
+            return [("ready", b"")]
         if self.state == "username" and self.USERNAME_RE.search(self.buffer):
             self.state = "password"
             self.buffer = b""

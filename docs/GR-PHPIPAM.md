@@ -34,7 +34,8 @@ The compact result table shows phpIPAM `lastSeen` immediately after `STATUS`.
 ### Cisco Small Business second-stage login
 
 Some Cisco Small Business switches establish SSH and then display their own
-`User Name:` and `Password:` prompts. Select this behavior independently in
+`User Name:` and `Password:` prompts, while others open directly at the CLI
+prompt. The adaptive driver recognizes both paths. Select this behavior independently in
 phpIPAM:
 
 ```json

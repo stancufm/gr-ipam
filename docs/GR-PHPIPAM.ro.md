@@ -29,7 +29,8 @@ Tabelul compact afișează câmpul phpIPAM `lastSeen` imediat după `STATUS`.
 ### Login secundar Cisco Small Business
 
 Unele switchuri Cisco Small Business stabilesc conexiunea SSH și apoi afișează
-propriile prompturi `User Name:` și `Password:`. Comportamentul se selectează
+propriile prompturi `User Name:` și `Password:`, iar altele ajung direct în
+promptul CLI. Driverul adaptiv recunoaște ambele fluxuri. Comportamentul se selectează
 independent în phpIPAM:
 
 ```json
