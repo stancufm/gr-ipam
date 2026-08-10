@@ -61,6 +61,7 @@ gr find core-switch
 gr --ssh core-switch
 gr --ssh --audit core-switch
 gr audit show core-switch latest
+gr config show
 gr update 192.0.2.10 --ssh-enabled yes --ssh-user operator --apply
 gr vendor lookup e8:d3:22:00:00:01
 sudo gr vendor update-db
@@ -84,7 +85,7 @@ gr self-update check
 
 ## Project status
 
-Version `1.3.1` has been tested through an isolated `DESTDIR` installation on
+Version `1.4.0` has been tested through an isolated `DESTDIR` installation on
 Debian. The package contains no credentials, private keys, inventory exports or
 organization-specific addressing.
 

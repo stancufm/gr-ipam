@@ -18,6 +18,8 @@ jobs:
         run: sh -n install.sh && sh -n libexec/gr-update
       - name: Test SSH audit format
         run: python3 tests/test_audit.py
+      - name: Test configuration inventory
+        run: python3 tests/test_config.py
       - name: Test self-update CLI
         run: python3 tests/test_self_update.py
       - name: Test isolated installation

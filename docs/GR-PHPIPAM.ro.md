@@ -79,3 +79,16 @@ Baza IEEE comună este actualizată atomic. Sincronizările și colectările pro
 ## Diagnostic și documentație
 
 `gr doctor --api` verifică fișierele, permisiunile, dependențele, baza IEEE și API-ul. `gr docs --language en` afișează ghidul englez, iar `gr docs --language ro` ghidul român. Toate scrierile de inventar rămân dry-run până la `--apply`.
+
+### Inventarul configurației
+
+```bash
+gr config show
+```
+
+Inventarul afișează toate opțiunile acceptate de versiunea instalată. Pentru
+fiecare opțiune compară valoarea implicită documentată, valoarea globală din
+`/etc/gr/config.json`, suprascrierea utilizatorului activ din
+`~/.config/gr/config.json`, valoarea efectivă normalizată și sursa ei.
+Opțiunile obligatorii fără valoare implicită sunt marcate `<required>`.
+Comanda este read-only și nu citește credențiala API separată sau seiful SSH.

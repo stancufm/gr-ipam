@@ -86,3 +86,16 @@ The shared IEEE database is replaced atomically. Synchronization, validation and
 ## Diagnostics and documentation
 
 `gr doctor --api` checks configuration, permissions, executables, IEEE data and API access. `gr docs --language en` shows this guide; `gr docs --language ro` shows Romanian documentation. Inventory writes remain dry-run until `--apply`.
+
+### Configuration inventory
+
+```bash
+gr config show
+```
+
+The configuration inventory lists every option supported by the installed
+version. For each option it compares the documented default, the global value
+from `/etc/gr/config.json`, the active user's override from
+`~/.config/gr/config.json`, the normalized effective value and its source.
+Required options without a built-in default are marked `<required>`. The
+command is read-only and never reads the separate API credential or SSH vault.

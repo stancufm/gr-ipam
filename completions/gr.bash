@@ -31,7 +31,7 @@ _gr_completion() {
     COMPREPLY=()
 
     if (( COMP_CWORD == 1 )); then
-        _gr_complete_words "init doctor ssh collect find search subnet local sync export auth vault update self-update migrate-ssh vendor audit completion docs help --ssh --config --version" "$current"
+        _gr_complete_words "init doctor config ssh collect find search subnet local sync export auth vault update self-update migrate-ssh vendor audit completion docs help --ssh --config --version" "$current"
         return
     fi
 
@@ -99,6 +99,9 @@ _gr_completion() {
             ;;
         doctor)
             _gr_complete_words "--api --system --config --help" "$current"
+            ;;
+        config)
+            (( COMP_CWORD == 2 )) && _gr_complete_words "show --config --help" "$current"
             ;;
         init)
             _gr_complete_words "--configure-auth --config --help" "$current"

@@ -11,6 +11,7 @@ sh -n .codex/setup.sh
 sh -n libexec/gr-update
 bash -n completions/gr.bash
 python3 tests/test_audit.py
+python3 tests/test_config.py
 python3 tests/test_self_update.py
 
 test -f AGENTS.md
