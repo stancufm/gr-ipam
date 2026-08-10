@@ -15,5 +15,6 @@ python3 tests/test_self_update.py
 test -f AGENTS.md
 test -f examples/config.json
 test -f phpipam/SETUP.md
+test -f release/project-release-key.asc
 
 echo "gr-ipam development checks passed"

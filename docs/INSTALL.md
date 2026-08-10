@@ -34,11 +34,10 @@ sudo sh install.sh \
 Use `--ca-file ./organization-ca.pem` for a private CA. A complete prepared
 configuration can instead be installed with `--config PATH`.
 
-To enable signed application updates, also provide the project's public release key:
+The official package includes and installs the project's public release key. To override the repository for a maintained fork:
 
 ```bash
 sudo sh install.sh --config /etc/gr/config.json \
-  --release-key ./project-release-key.asc \
   --update-repository https://github.com/stancufm/gr-ipam.git
 ```
 

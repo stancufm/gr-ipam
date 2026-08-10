@@ -28,3 +28,5 @@ jobs:
           "$RUNNER_TEMP/gr-root/usr/local/bin/gr" --version
           test -x "$RUNNER_TEMP/gr-root/usr/local/libexec/gr/gr-update"
           test -f "$RUNNER_TEMP/gr-root/etc/gr/update.json"
+          test -f "$RUNNER_TEMP/gr-root/etc/gr/release-key.asc"
+          gpg --batch --show-keys "$RUNNER_TEMP/gr-root/etc/gr/release-key.asc"
