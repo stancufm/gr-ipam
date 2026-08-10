@@ -42,6 +42,26 @@ class FindDetailsTests(unittest.TestCase):
         self.assertNotIn("STATUS", header)
         self.assertNotIn("LASTSEEN", header)
 
+    def test_brief_table_allows_wider_ssh_column(self):
+        long_profile = "profile-" + ("x" * 35)
+        row = {
+            "_ip": ipaddress.ip_address("192.0.2.10"),
+            "_hostname": "core-switch",
+            "description": "Core device",
+            "custom_fields": {
+                "ssh_enabled": "1",
+                "ssh_user": "administrator",
+                "ssh_port": "2222",
+                "ssh_profile": long_profile,
+                "device_driver": "cisco-ios",
+            },
+        }
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            GR.print_table([row], brief=True)
+        self.assertIn(long_profile, output.getvalue())
+        self.assertNotIn("…", output.getvalue())
+
     def test_details_prints_all_phpipam_fields_and_hides_internal_keys(self):
         row = {
             "ip": "3221225994",
