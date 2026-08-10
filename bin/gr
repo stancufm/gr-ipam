@@ -1935,8 +1935,10 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     collect_target = collect_version.add_mutually_exclusive_group(required=True)
     collect_target.add_argument("--all", action="store_true", help="collect from every matching vendor device")
     collect_target.add_argument("--ip", action="append", dest="ips", help="limit to an IP (repeatable)")
-    collect_version.add_argument("--vendor", default="cisco")
-    collect_version.add_argument("--workers", type=int, default=4)
+    collect_version.add_argument("--vendor", default="cisco",
+                                 help="require this phpIPAM device_vendor value (default: cisco)")
+    collect_version.add_argument("--workers", type=int, default=4,
+                                 help="parallel SSH sessions (default: 4; effective range: 1-12)")
     find = sub.add_parser("find", aliases=["search"], help="find addresses by IP, hostname, description, owner, MAC or port")
     find.add_argument("terms", nargs="+")
     find.add_argument("--details", action="store_true",

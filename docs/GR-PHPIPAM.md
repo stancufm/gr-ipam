@@ -89,6 +89,40 @@ gr collect version --ip IP
 
 The shared IEEE database is replaced atomically. Synchronization, validation and collection reports are private and must not be committed.
 
+### Collect device version inventory
+
+```bash
+gr collect version --all [--vendor VENDOR] [--workers N]
+gr collect version --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
+```
+
+The command reads the phpIPAM address inventory, selects records whose
+`device_vendor` matches the requested vendor, requires enabled SSH metadata and
+an SSH vault profile, then runs `show version` through the normal or isolated
+legacy client selected for each device. It does not modify phpIPAM or device
+configuration.
+
+Options:
+
+- `--all` selects every eligible address matching `--vendor`;
+- `--ip IP` restricts collection to one address and can be repeated; the vendor,
+  SSH-enabled and profile requirements still apply;
+- `--vendor VENDOR` matches the phpIPAM `device_vendor` value
+  case-insensitively; the default is `cisco`;
+- `--workers N` controls parallel SSH sessions; the default is `4` and the
+  effective value is constrained to `1..12`.
+
+Each run creates a private timestamped directory under
+`~/.local/state/gr/device-version/`. It contains one raw `show version` text
+file per device, private temporary host-key files and
+`cisco-show-version-report.json` with parsed model, firmware, OS family,
+uptime, serial, system image, ROM, stderr and result status. The parser is
+primarily designed for Cisco output; a different vendor is useful only when
+its devices support `show version` and compatible output.
+
+Exit status is `0` when every selected device succeeds, `1` when no eligible
+device matches and `2` when at least one connection fails or times out.
+
 ## Diagnostics and documentation
 
 `gr doctor --api` checks configuration, permissions, executables, IEEE data and API access. `gr docs --language en` shows this guide; `gr docs --language ro` shows Romanian documentation. Inventory writes remain dry-run until `--apply`.

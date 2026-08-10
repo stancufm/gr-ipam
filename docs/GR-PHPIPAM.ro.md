@@ -82,6 +82,40 @@ gr collect version --ip IP
 
 Baza IEEE comună este actualizată atomic. Sincronizările și colectările produc rapoarte private. Nu comiteți rapoarte, inventare sau audituri.
 
+### Colectarea inventarului de versiuni
+
+```bash
+gr collect version --all [--vendor VENDOR] [--workers N]
+gr collect version --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
+```
+
+Comanda citește adresele din phpIPAM, selectează înregistrările al căror
+`device_vendor` corespunde producătorului cerut, necesită metadate SSH active și
+un profil în seiful SSH, apoi rulează `show version` prin clientul normal sau
+clientul legacy izolat ales pentru fiecare dispozitiv. Nu modifică phpIPAM sau
+configurația echipamentelor.
+
+Opțiuni:
+
+- `--all` selectează toate adresele eligibile care corespund lui `--vendor`;
+- `--ip IP` limitează colectarea la o adresă și poate fi repetat; filtrul de
+  producător și cerințele SSH/profil se aplică în continuare;
+- `--vendor VENDOR` compară fără diferență între litere mari și mici câmpul
+  phpIPAM `device_vendor`; valoarea implicită este `cisco`;
+- `--workers N` stabilește numărul de sesiuni SSH paralele; implicit este `4`,
+  iar valoarea efectivă este limitată la intervalul `1..12`.
+
+Fiecare rulare creează un director privat cu timestamp în
+`~/.local/state/gr/device-version/`. Acesta conține outputul brut `show version`
+pentru fiecare dispozitiv, fișiere private temporare pentru cheile host și
+`cisco-show-version-report.json` cu modelul, firmware-ul, familia OS, uptime,
+seria, imaginea de sistem, ROM-ul, stderr și rezultatul. Parserul este destinat
+în principal outputului Cisco; alt producător este util numai dacă suportă
+`show version` și un format compatibil.
+
+Codul de ieșire este `0` dacă toate dispozitivele reușesc, `1` dacă nu există
+niciun dispozitiv eligibil și `2` dacă cel puțin o conexiune eșuează sau expiră.
+
 ## Diagnostic și documentație
 
 `gr doctor --api` verifică fișierele, permisiunile, dependențele, baza IEEE și API-ul. `gr docs --language en` afișează ghidul englez, iar `gr docs --language ro` ghidul român. Toate scrierile de inventar rămân dry-run până la `--apply`.
