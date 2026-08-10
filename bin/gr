@@ -41,24 +41,39 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.0.0"
+GR_VERSION = "2.1.0"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 DEVICE_DRIVER_SPECS = {
     "generic": {
         "interactive_cli": False,
         "version_commands": ("show version",),
+        "cleanup_commands": (),
     },
     "cisco-ios": {
         "interactive_cli": False,
         "version_commands": ("show version",),
+        "cleanup_commands": (),
     },
     "cisco-small-business": {
         "interactive_cli": True,
         "version_commands": ("terminal datadump", "show version", "show system"),
+        "cleanup_commands": ("exit", "exit"),
     },
     "dell-os10": {
         "interactive_cli": False,
         "version_commands": ("show version",),
+        "cleanup_commands": (),
+    },
+    "hpe-arubaos-switch": {
+        "interactive_cli": True,
+        "version_commands": ("no page", "show version", "show system"),
+        "cleanup_commands": ("exit", "exit"),
+    },
+    "hpe-comware7": {
+        "interactive_cli": True,
+        "version_commands": ("screen-length disable", "display version",
+                             "display device manuinfo"),
+        "cleanup_commands": ("quit",),
     },
 }
 DEVICE_DRIVERS = tuple(DEVICE_DRIVER_SPECS)
@@ -584,6 +599,15 @@ def profile_name(value):
     return value
 
 
+def device_vendor(value):
+    value = str(value or "").strip().lower()
+    if not re.match(r"^[a-z0-9][a-z0-9._-]{0,63}$", value):
+        raise argparse.ArgumentTypeError(
+            "device vendor may contain only lowercase letters, digits, dot, underscore and hyphen"
+        )
+    return value
+
+
 def normalized_addresses(rows):
     output = []
     for row in rows:
@@ -686,11 +710,13 @@ def ssh_display(row, legacy_fallback=True, override_user=None, override_port=Non
 
 
 def print_table(rows, numbered=False, legacy_fallback=True, override_user=None, override_port=None,
-                override_profile=None, override_client=None):
-    columns = (("#",) if numbered else ()) + ("IP", "HOSTNAME", "STATUS", "LASTSEEN", "SSH", "DESCRIPTION")
+                override_profile=None, override_client=None, brief=False):
+    base_columns = ("IP", "HOSTNAME", "SSH", "DESCRIPTION") if brief else (
+        "IP", "HOSTNAME", "STATUS", "LASTSEEN", "SSH", "DESCRIPTION")
+    columns = (("#",) if numbered else ()) + base_columns
     values = []
     for index, row in enumerate(rows, 1):
-        value = (
+        full_value = (
             str(row["_ip"]),
             row.get("_hostname") or "-",
             tag_label(row),
@@ -698,6 +724,7 @@ def print_table(rows, numbered=False, legacy_fallback=True, override_user=None, 
             ssh_display(row, legacy_fallback, override_user, override_port, override_profile, override_client),
             clean_comment(row.get("description") or row.get("note") or "-"),
         )
+        value = (full_value[0], full_value[1], full_value[4], full_value[5]) if brief else full_value
         if numbered:
             value = (str(index),) + value
         values.append(value)
@@ -762,12 +789,12 @@ def ssh_effective(target):
 
 
 def choose_ssh_target(rows, legacy_fallback=True, override_user=None, override_port=None,
-                      override_profile=None, override_client=None):
+                      override_profile=None, override_client=None, brief=False):
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise GrError("--ssh requires an interactive terminal")
     print_table(rows, numbered=True, legacy_fallback=legacy_fallback,
                 override_user=override_user, override_port=override_port,
-                override_profile=override_profile, override_client=override_client)
+                override_profile=override_profile, override_client=override_client, brief=brief)
     print()
     while True:
         answer = input("Select SSH target [1-{}, q]: ".format(len(rows))).strip().lower()
@@ -873,6 +900,73 @@ class CiscoSmallBusinessLogin:
             self.buffer = b""
             return [("prompt", b"")]
         return []
+
+
+class HpeArubaOsSwitchLogin:
+    """Pass the ArubaOS-Switch legal banner and recognize its CLI prompt."""
+
+    CONTINUE_RE = re.compile(br"press any key to continue", re.I)
+    LOGOUT_RE = re.compile(br"do you want to log out\s*[\[(]y/n[\])]\?", re.I)
+    PROMPT_RE = re.compile(br"(?:^|[\r\n])[^\r\n]{1,128}[>#]\s*$")
+    ANSI_RE = re.compile(br"\x1b\[[0-?]*[ -/]*[@-~]")
+
+    def __init__(self, _username, _password):
+        self.state = "continue"
+        self.buffer = b""
+
+    def feed(self, data):
+        self.buffer = (self.buffer + data)[-4096:]
+        visible = self.ANSI_RE.sub(b"", self.buffer)
+        if self.state == "continue" and self.CONTINUE_RE.search(visible):
+            self.state = "prompt"
+            self.buffer = b""
+            return [("credential", b" ")]
+        if self.state == "prompt" and self.PROMPT_RE.search(visible):
+            self.state = "ready"
+            self.buffer = b""
+            return [("ready", b"")]
+        if self.state == "ready" and self.LOGOUT_RE.search(visible):
+            self.buffer = b""
+            return [("credential", b"y\n")]
+        if self.state == "ready" and self.PROMPT_RE.search(visible):
+            self.buffer = b""
+            return [("prompt", b"")]
+        return []
+
+
+class HpeComwareLogin:
+    """Recognize the HPE Comware angle-bracket command prompt."""
+
+    PROMPT_RE = re.compile(br"(?:^|[\r\n])<[^>\r\n]{1,128}>\s*$")
+    ANSI_RE = re.compile(br"\x1b\[[0-?]*[ -/]*[@-~]")
+
+    def __init__(self, _username, _password):
+        self.state = "prompt"
+        self.buffer = b""
+
+    def feed(self, data):
+        self.buffer = (self.buffer + data)[-4096:]
+        visible = self.ANSI_RE.sub(b"", self.buffer)
+        if self.state == "prompt" and self.PROMPT_RE.search(visible):
+            self.state = "ready"
+            self.buffer = b""
+            return [("ready", b"")]
+        if self.state == "ready" and self.PROMPT_RE.search(visible):
+            self.buffer = b""
+            return [("prompt", b"")]
+        return []
+
+
+def device_login_driver(driver):
+    mapping = {
+        "cisco-small-business": CiscoSmallBusinessLogin,
+        "hpe-arubaos-switch": HpeArubaOsSwitchLogin,
+        "hpe-comware7": HpeComwareLogin,
+    }
+    normalized = normalize_device_driver(driver)
+    if normalized not in mapping:
+        raise GrError("Device driver {} has no interactive login handler".format(driver))
+    return mapping[normalized]
 
 
 
@@ -1491,7 +1585,7 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
     login_driver = None
     if driver_spec["interactive_cli"]:
         print("Using device driver: {}".format(device_driver))
-        login_driver = CiscoSmallBusinessLogin(user, vault_password)
+        login_driver = device_login_driver(device_driver)(user, vault_password)
     audit_enabled = cfg.get("ssh_audit_enabled", False) if audit is None else audit
     if audit_enabled:
         recorder = SshSessionAudit(cfg, row, command)
@@ -1504,7 +1598,7 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
 
 def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
                    ssh_profile=None, ssh_client=None, device_driver=None, no_vault=False, audit=None,
-                   details=False):
+                   details=False, brief=False):
     needle = " ".join(terms).strip().lower()
     if not needle:
         raise GrError("Search text is required")
@@ -1526,7 +1620,7 @@ def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
             matches.append(row)
     if matches:
         if details:
-            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True))
+            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True), brief=brief)
             print_address_details(matches)
             print()
         if use_ssh:
@@ -1537,18 +1631,19 @@ def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
                     print_table(matches, numbered=False,
                                 legacy_fallback=cfg.get("ssh_legacy_fallback", True),
                                 override_user=ssh_user, override_port=ssh_port,
-                                override_profile=ssh_profile, override_client=ssh_client)
+                                override_profile=ssh_profile, override_client=ssh_client,
+                                brief=brief)
                 print()
             else:
                 selected = choose_ssh_target(matches, cfg.get("ssh_legacy_fallback", True), ssh_user, ssh_port,
-                                             ssh_profile, ssh_client)
+                                             ssh_profile, ssh_client, brief=brief)
                 if selected is None:
                     print("SSH connection cancelled.")
                     return 0
             return connect_ssh(cfg, selected, ssh_user, ssh_port, ssh_profile, ssh_client,
                                device_driver, no_vault, audit)
         if not details:
-            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True))
+            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True), brief=brief)
         print("\n{} result(s)".format(len(matches)))
         return 0
     print("No phpIPAM results for: {}".format(needle), file=sys.stderr)
@@ -1967,6 +2062,7 @@ def ssh_custom_snapshot(row):
         "custom_ssh_jump": custom_value(row, "ssh_jump"),
         "custom_ssh_client": custom_value(row, "ssh_client"),
         "custom_device_driver": custom_value(row, "device_driver"),
+        "custom_device_vendor": custom_value(row, "device_vendor"),
     }
 
 
@@ -2077,6 +2173,10 @@ def command_update(cfg, args):
         desired["custom_device_driver"] = args.device_driver
     if args.clear_device_driver:
         desired["custom_device_driver"] = ""
+    if args.device_vendor is not None:
+        desired["custom_device_vendor"] = args.device_vendor
+    if args.clear_device_vendor:
+        desired["custom_device_vendor"] = ""
     if not desired:
         raise GrError("No changes requested")
 
@@ -2320,8 +2420,11 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                                  help="write report directly instead of using the automatic pager")
     find = sub.add_parser("find", aliases=["search"], help="find addresses by IP, hostname, description, owner, MAC or port")
     find.add_argument("terms", nargs="+")
-    find.add_argument("--details", action="store_true",
-                      help="show every phpIPAM field returned for each matching address")
+    output_group = find.add_mutually_exclusive_group()
+    output_group.add_argument("--details", action="store_true",
+                              help="show every phpIPAM field returned for each matching address")
+    output_group.add_argument("--brief", action="store_true",
+                              help="show only IP, hostname, SSH and description columns")
     find.add_argument("--ssh", action="store_true", help="interactively select a result and start SSH")
     find.add_argument("--user", type=ssh_user, help="override the SSH user for this connection only")
     find.add_argument("--port", type=ssh_port, help="override the SSH port for this connection only")
@@ -2376,6 +2479,9 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     driver_group = update.add_mutually_exclusive_group()
     driver_group.add_argument("--device-driver", choices=DEVICE_DRIVERS)
     driver_group.add_argument("--clear-device-driver", action="store_true")
+    vendor_group = update.add_mutually_exclusive_group()
+    vendor_group.add_argument("--device-vendor", type=device_vendor)
+    vendor_group.add_argument("--clear-device-vendor", action="store_true")
     self_update = sub.add_parser("self-update", help="check for and install a signed gr release")
     self_update.add_argument("update_action", nargs="?", choices=("check",),
                              help="check for a newer release without installing it")
@@ -2496,7 +2602,7 @@ def main(argv=None):
         return command_search(cfg, args.terms, use_ssh=args.ssh, ssh_user=args.user, ssh_port=args.port,
                               ssh_profile=args.profile, ssh_client=args.client,
                               device_driver=args.driver, no_vault=args.no_vault,
-                              audit=args.audit, details=args.details)
+                              audit=args.audit, details=args.details, brief=args.brief)
     if args.command == "subnet":
         return command_subnet(cfg, args.cidr)
     if args.command == "local":

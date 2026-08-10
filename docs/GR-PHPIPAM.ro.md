@@ -57,6 +57,20 @@ Echipamentele Dell SmartFabric OS10 folosesc `device_driver=dell-os10`.
 Driverul rulează `show version` și extrage versiunea OS și `System Type`,
 independent de profilul de credențiale SSH selectat.
 
+Echipamentele HPE ArubaOS-Switch/ProVision folosesc
+`device_driver=hpe-arubaos-switch`. Driverul interactiv confirmă ecranul
+`Press any key to continue`, dezactivează paginarea cu `no page`, rulează
+`show version` și `show system` și extrage identificatorul de
+produs HP, modelul și revizia software. Userul SSH și profilul parolei rămân
+metadate independente.
+
+Echipamentele HPE Comware 7 folosesc `device_driver=hpe-comware7`. Driverul
+interactiv recunoaște promptul `<hostname>`, dezactivează paginarea cu
+`screen-length disable`, rulează `display version` și `display device
+manuinfo` și închide sesiunea cu `quit`. El extrage release-ul Comware,
+produsul/modelul, imaginea de sistem, BootROM și serialul de fabricație când
+sunt disponibile.
+
 `--details` păstrează sumarul compact și apoi afișează toate câmpurile returnate
 de phpIPAM pentru fiecare adresă găsită. Câmpurile sunt sortate, valorile pe mai
 multe linii sunt indentate, iar structurile JSON rămân lizibile. Afișarea este
@@ -103,7 +117,18 @@ Credențiala API are modul `0600`. Parolele SSH sunt criptate de pass/GPG și tr
 
 ## Sincronizare și actualizări
 
-`gr sync` și `gr export` generează configurație SSH și, numai dacă este activat explicit, `/etc/hosts`. `gr update <ip>` afișează schimbarea; scrierea necesită `--apply` și verificare GET. `gr migrate-ssh` migrează metadatele vechi, dry-run implicit.
+Rezultatele căutării folosesc tabelul standard de inventar. Adăugați `--brief`
+la `gr TERMEN` sau `gr find TERMEN` pentru a afișa numai `IP`, `HOSTNAME`, `SSH`
+și `DESCRIPTION`; `--brief` și `--details` se exclud reciproc.
+
+`gr sync` și `gr export` generează configurație SSH și, numai dacă este activat explicit, `/etc/hosts`. `gr update <ip>` afișează schimbarea, inclusiv pentru `--device-driver` și `--device-vendor`; scrierea necesită `--apply` și verificare GET. `gr migrate-ssh` migrează metadatele vechi, dry-run implicit.
+
+```bash
+gr update 10.22.10.76 --hostname sw76 --ssh-enabled yes --ssh-user admin \
+  --ssh-profile admin --device-driver hpe-comware7 --device-vendor hpe-comware
+gr update 10.22.10.76 --hostname sw76 --ssh-enabled yes --ssh-user admin \
+  --ssh-profile admin --device-driver hpe-comware7 --device-vendor hpe-comware --apply
+```
 
 ## Producători și operații
 

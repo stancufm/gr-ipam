@@ -72,6 +72,46 @@ class CollectVersionCliTests(unittest.TestCase):
         self.assertEqual(parsed["model"], "S5224F-ON")
         self.assertEqual(parsed["os_family"], "dell-os10")
 
+    def test_hpe_arubaos_switch_banner_and_version_are_parsed(self):
+        parsed = COLLECTOR.parse_version(
+            "HP J9726A 2920-24G Switch\n"
+            "Software revision WB.16.10.0025\n")
+        self.assertEqual(parsed["firmware"], "WB.16.10.0025")
+        self.assertEqual(parsed["model"], "J9726A 2920-24G")
+        self.assertEqual(parsed["os_family"], "hpe-arubaos-switch")
+
+    def test_hpe_login_passes_continue_banner_and_detects_prompts(self):
+        driver = GR.HpeArubaOsSwitchLogin("manager", "unused")
+        self.assertEqual(driver.feed(b"Press any key to continue\x1b[13;1H\x1b[?25h"),
+                         [("credential", b" ")])
+        self.assertEqual(driver.feed(b"\r\nSw-11# \x1b[24;8H"), [("ready", b"")])
+        self.assertEqual(driver.feed(b"output\r\nSw-11# \x1b[?25h"), [("prompt", b"")])
+        self.assertEqual(driver.feed(b"Do you want to log out (y/n)? \x1b[24;31H"),
+                         [("credential", b"y\n")])
+        self.assertEqual(driver.feed(b"Do you want to log out [y/n]? \x1b[24;31H"),
+                         [("credential", b"y\n")])
+
+    def test_hpe_comware_version_and_prompt_are_supported(self):
+        parsed = COLLECTOR.parse_version(
+            "HPE Comware Software, Version 7.1.070, Release 6628P47\n"
+            "HPE 5520 48G 4SFP+ HI Swch R8M26A uptime is 109 weeks\n"
+            "System image: flash:/5520hi-cmw710-system-r6628p47.bin\n"
+            "Bootrom Version: 121\n"
+            "DEVICE_SERIAL_NUMBER : CN00000000\n")
+        self.assertEqual(parsed["firmware"], "7.1.070, Release 6628P47")
+        self.assertEqual(parsed["model"], "5520 48G 4SFP+ HI Swch R8M26A")
+        self.assertEqual(parsed["serial"], "CN00000000")
+        self.assertEqual(parsed["system_image"],
+                         "flash:/5520hi-cmw710-system-r6628p47.bin")
+        self.assertEqual(parsed["rom"], "121")
+        self.assertEqual(parsed["os_family"], "hpe-comware7")
+
+        driver = GR.HpeComwareLogin("admin", "unused")
+        self.assertEqual(driver.feed(b"banner\r\n<Sw-76-HP-GE_Centricity>"),
+                         [("ready", b"")])
+        self.assertEqual(driver.feed(b"output\r\n<Sw-76-HP-GE_Centricity>"),
+                         [("prompt", b"")])
+
     def test_all_uses_documented_defaults(self):
         args = GR.build_parser().parse_args(["collect", "version", "--all"])
         self.assertTrue(args.all)
