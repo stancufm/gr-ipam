@@ -6,6 +6,7 @@ import importlib.machinery
 import ipaddress
 import json
 import os
+import sys
 import tempfile
 import unittest
 
@@ -33,6 +34,31 @@ class AuditTests(unittest.TestCase):
                              [b"secret\x00\n", b"output\xff", b"warning\r\n"])
             self.assertEqual(records[-1]["exit_status"], 23)
 
+            class BinaryCapture:
+                def __init__(self):
+                    self.buffer = io.BytesIO()
+
+                def isatty(self):
+                    return False
+
+            old_stdout, old_stderr = sys.stdout, sys.stderr
+            stdout, stderr = BinaryCapture(), BinaryCapture()
+            try:
+                sys.stdout, sys.stderr = stdout, stderr
+                GR.command_audit_replay(path, GR.audit_replay_streams())
+            finally:
+                sys.stdout, sys.stderr = old_stdout, old_stderr
+            self.assertEqual(stdout.buffer.getvalue(), b"output\xff")
+            self.assertEqual(stderr.buffer.getvalue(), b"warning\r\n")
+
+            stdout, stderr = BinaryCapture(), BinaryCapture()
+            try:
+                sys.stdout, sys.stderr = stdout, stderr
+                GR.command_audit_replay(path, GR.audit_replay_streams(include_stdin=True))
+            finally:
+                sys.stdout, sys.stderr = old_stdout, old_stderr
+            self.assertEqual(stdout.buffer.getvalue(), b"secret\x00\noutput\xff")
+
     def test_cli_audit_overrides(self):
         parser = GR.build_parser()
         self.assertIs(parser.parse_args(["find", "switch", "--ssh", "--audit"]).audit, True)
@@ -42,6 +68,14 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(direct.target, "x.ses")
         browse = parser.parse_args(["audit", "show", "sw50", "latest"])
         self.assertEqual((browse.target, browse.session), ("sw50", "latest"))
+        self.assertEqual(GR.audit_replay_streams(), {"stdout", "stderr"})
+        self.assertEqual(GR.audit_replay_streams(include_stdin=True),
+                         {"stdin", "stdout", "stderr"})
+        self.assertEqual(GR.audit_replay_streams(stream="stdin"), {"stdin"})
+        stream = parser.parse_args(["audit", "show", "sw50", "latest", "--stream", "stderr"])
+        self.assertEqual(stream.stream, "stderr")
+        direct = parser.parse_args(["audit", "show", "sw50", "latest", "--no-more"])
+        self.assertTrue(direct.no_more)
 
     def test_audit_browse_by_hostname_and_ip(self):
         with tempfile.TemporaryDirectory() as root:

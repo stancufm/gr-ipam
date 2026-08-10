@@ -50,6 +50,26 @@ ultima sesiune. Calea directă rămâne compatibilă:
 gr audit show ~/.local/state/gr/audit/core-switch/core-switch-20260806T120000.000000Z.ses
 ```
 
+Redarea implicită include stdout și stderr. Stdin rămâne integral în fișierul
+`.ses`, dar este omis din vizualizarea normală deoarece majoritatea
+echipamentelor retransmit caracterele tastate pe stdout; combinarea celor două
+copii ar dubla vizual comenzile. Pentru analiză completă sau un singur flux:
+
+```bash
+gr audit show core-switch latest --include-stdin
+gr audit show core-switch latest --stream stdin
+gr audit show core-switch latest --stream stderr
+```
+
+Redarea interactivă folosește automat `less`, iar în lipsa lui `more`. Pipe-urile
+și redirectările nu pornesc pagerul. Pagerul poate fi ales prin `GR_PAGER` sau
+`PAGER`, ori dezactivat pentru o redare:
+
+```bash
+gr audit show core-switch latest --no-more
+GR_PAGER="less -R" gr audit show core-switch latest
+```
+
 ## Autocomplete Bash
 
 Installerul global salvează completarea în `/etc/bash_completion.d/gr`.

@@ -28,9 +28,15 @@ gr --ssh --no-audit <țintă>
 gr audit show
 gr audit show <hostname-sau-ip>
 gr audit show <hostname-sau-ip> latest
+gr audit show <hostname-sau-ip> latest --no-more
 ```
 
 `ssh_audit_enabled` stabilește politica globală, iar `ssh_audit_dir` directorul rădăcină. Fișierele se salvează în `<director>/<hostname-sau-ip>/<hostname-sau-ip>-<UTC>.ses`, cu `0700/0600`. Sunt capturate fără pierderi stdin, stdout și stderr, inclusiv parolele tastate. Consultați [ghidul de audit](AUDIT.ro.md).
+
+Redarea normală afișează stdout/stderr printr-un pager automat și omite stdin
+pentru a evita dublarea ecoului de terminal. `--include-stdin` reactivează
+vizualizarea completă, `--stream` izolează un canal, iar `--no-more` dezactivează
+paginarea.
 
 ## Autocomplete Bash
 
