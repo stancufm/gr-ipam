@@ -41,7 +41,7 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.1.0"
+GR_VERSION = "2.1.1"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 DEVICE_DRIVER_SPECS = {
     "generic": {
@@ -729,9 +729,12 @@ def print_table(rows, numbered=False, legacy_fallback=True, override_user=None, 
             value = (str(index),) + value
         values.append(value)
     widths = [len(col) for col in columns]
+    max_widths = [60] * len(columns)
+    if brief:
+        max_widths[columns.index("SSH")] = 100
     for value in values:
         for idx, cell in enumerate(value):
-            widths[idx] = min(60, max(widths[idx], len(cell)))
+            widths[idx] = min(max_widths[idx], max(widths[idx], len(cell)))
     fmt = "  ".join("{{:<{}}}".format(width) for width in widths)
     print(fmt.format(*columns))
     print(fmt.format(*("-" * width for width in widths)))
