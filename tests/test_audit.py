@@ -24,6 +24,12 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(driver.state, "ready")
         self.assertEqual(driver.feed(b"show version\r\noutput\r\nsw36#"), [("prompt", b"")])
 
+    def test_cisco_small_business_login_accepts_direct_cli_prompt(self):
+        driver = GR.CiscoSmallBusinessLogin("cisco", "vault-secret")
+        self.assertEqual(driver.feed(b"\r\n\r\nSw-25#"), [("ready", b"")])
+        self.assertEqual(driver.state, "ready")
+        self.assertEqual(driver.feed(b"show version\r\noutput\r\nSw-25#"), [("prompt", b"")])
+
     def test_lossless_records_and_private_permissions(self):
         with tempfile.TemporaryDirectory() as root:
             row = {"_hostname": "switch/example", "_ip": ipaddress.ip_address("192.0.2.10")}
