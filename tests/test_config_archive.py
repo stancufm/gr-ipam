@@ -3,6 +3,7 @@ import contextlib
 import importlib.machinery
 import io
 import os
+import subprocess
 import tempfile
 import unittest
 
@@ -31,6 +32,10 @@ class ConfigurationArchiveTests(unittest.TestCase):
             self.assertEqual(commit2, "")
             self.assertEqual(changed2, 0)
             self.assertEqual(second["archive_status"], "unchanged")
+            self.assertEqual(subprocess.check_output(
+                ["git", "--git-dir=" + os.path.join(archive, ".git"),
+                 "--work-tree=" + archive, "config", "user.name"],
+                universal_newlines=True).strip(), "gr configuration collector")
 
     def test_archive_browsing_lists_history_and_latest(self):
         with tempfile.TemporaryDirectory() as archive:
@@ -50,6 +55,23 @@ class ConfigurationArchiveTests(unittest.TestCase):
                 self.assertIn("hostname sw1", shown.getvalue())
             finally:
                 GR.GLOBAL_CONFIG_ARCHIVE = old_archive
+
+    def test_archive_recovers_staged_files_after_interrupted_commit(self):
+        with tempfile.TemporaryDirectory() as archive:
+            COLLECTOR.git_call(archive, ["init", "--quiet"])
+            COLLECTOR.git_call(archive, ["config", "user.name", "collector"])
+            COLLECTOR.git_call(archive, ["config", "user.email", "gr@localhost"])
+            devices = os.path.join(archive, "devices")
+            os.makedirs(devices)
+            target = os.path.join(devices, "sw1--192.0.2.1.cfg")
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write("hostname sw1\n")
+            COLLECTOR.git_call(archive, ["add", "--", "devices/sw1--192.0.2.1.cfg"])
+            item = {"hostname": "sw1", "ip": "192.0.2.1", "result": "success",
+                    "configuration": "hostname sw1\n"}
+            commit, changed = COLLECTOR.archive_configurations(archive, [item], "recovery")
+            self.assertTrue(commit)
+            self.assertEqual(changed, 1)
 
     def test_parser_accepts_collection_and_archive_navigation(self):
         parser = GR.build_parser()

@@ -43,7 +43,7 @@ VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.3.0"
+GR_VERSION = "2.3.1"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -996,12 +996,17 @@ class CiscoSmallBusinessLogin:
 class PlanetSgsLogin(CiscoSmallBusinessLogin):
     """Handle PLANET's optional enable-password prompt after initial login."""
 
+    PAGER_RE = re.compile(br"(?:--\s*more\s*--|more\s*[:>])", re.I)
+
     def feed(self, data):
-        self.buffer = (self.buffer + data)[-4096:]
-        if self.state == "ready" and self.PASSWORD_RE.search(self.buffer):
+        visible = (self.buffer + data)[-4096:]
+        if self.state == "ready" and self.PAGER_RE.search(visible):
+            self.buffer = b""
+            return [("credential", b" ")]
+        if self.state == "ready" and self.PASSWORD_RE.search(visible):
             self.buffer = b""
             return [("credential", self.password + b"\n")]
-        return super().feed(b"")
+        return super().feed(data)
 
 
 class HpeArubaOsSwitchLogin:
@@ -1622,8 +1627,8 @@ def config_archive_target(value):
 def git_archive_output(arguments):
     try:
         return subprocess.check_output([
-            "git", "-c", "safe.directory={}".format(GLOBAL_CONFIG_ARCHIVE),
-            "-C", GLOBAL_CONFIG_ARCHIVE] + list(arguments),
+            "git", "--git-dir={}".format(os.path.join(GLOBAL_CONFIG_ARCHIVE, ".git")),
+            "--work-tree={}".format(GLOBAL_CONFIG_ARCHIVE)] + list(arguments),
                                        universal_newlines=True, stderr=subprocess.STDOUT)
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "output", "") or str(exc)
