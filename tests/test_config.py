@@ -12,6 +12,19 @@ GR = importlib.machinery.SourceFileLoader("gr_config_test_module", "bin/gr").loa
 
 
 class ConfigShowTests(unittest.TestCase):
+    def test_required_phpipam_custom_fields_are_validated(self):
+        complete = {name: None for name in GR.REQUIRED_ADDRESS_CUSTOM_FIELDS}
+        self.assertEqual(GR.missing_address_custom_fields([complete]), [])
+        del complete["custom_device_driver"]
+        self.assertEqual(GR.missing_address_custom_fields([complete]),
+                         ["custom_device_driver"])
+
+    def test_nested_phpipam_custom_fields_are_validated(self):
+        nested = {"custom_fields": {
+            name[len("custom_"):]: None for name in GR.REQUIRED_ADDRESS_CUSTOM_FIELDS
+        }}
+        self.assertEqual(GR.missing_address_custom_fields([nested]), [])
+
     def test_device_driver_is_independent_from_credential_profile(self):
         row = {"custom_ssh_profile": "shared-credential",
                "custom_device_driver": "cisco-small-business"}
@@ -21,9 +34,9 @@ class ConfigShowTests(unittest.TestCase):
         with self.assertRaises(GR.GrError):
             GR.normalize_device_driver("unknown")
 
-    def test_device_driver_fallback_uses_vendor_not_profile(self):
+    def test_device_driver_fallback_is_always_generic(self):
         row = {"custom_ssh_profile": "cisco", "custom_device_vendor": "cisco"}
-        self.assertEqual(GR.resolve_device_driver(row), "cisco-ios")
+        self.assertEqual(GR.resolve_device_driver(row), "generic")
         row["custom_device_vendor"] = "dell"
         self.assertEqual(GR.resolve_device_driver(row), "generic")
 

@@ -19,6 +19,10 @@ class CollectVersionCliTests(unittest.TestCase):
         self.assertEqual(COLLECTOR.host_key_status(
             "REMOTE HOST IDENTIFICATION HAS CHANGED!"), "changed")
         self.assertEqual(COLLECTOR.host_key_status(""), "verified")
+
+    def test_utc_timestamps_are_displayed_in_bucharest_local_time(self):
+        self.assertEqual(GR.format_local_timestamp("20260810T100000Z"),
+                         "2026-08-10 13:00:00")
     def test_collector_redacts_vault_password(self):
         self.assertEqual(COLLECTOR.redact_secret(
             b"User Name: cisco\r\nPassword: super-secret\r\nsw36#", "super-secret"),
@@ -112,16 +116,29 @@ class CollectVersionCliTests(unittest.TestCase):
         self.assertEqual(driver.feed(b"output\r\n<Sw-76-HP-GE_Centricity>"),
                          [("prompt", b"")])
 
-    def test_all_uses_documented_defaults(self):
+    def test_all_has_no_implicit_vendor(self):
         args = GR.build_parser().parse_args(["collect", "version", "--all"])
         self.assertTrue(args.all)
-        self.assertEqual(args.vendor, "cisco")
+        self.assertIsNone(args.vendor)
         self.assertEqual(args.workers, 4)
 
     def test_all_drivers_is_vendor_independent(self):
         args = GR.build_parser().parse_args(["collect", "version", "--all-drivers"])
         self.assertTrue(args.all_drivers)
         self.assertFalse(args.all)
+
+    def test_ip_does_not_require_or_assume_vendor(self):
+        args = GR.build_parser().parse_args(["collect", "version", "--ip", "192.0.2.10"])
+        self.assertIsNone(args.vendor)
+
+    def test_vendor_counts_are_case_insensitive_and_sorted(self):
+        rows = [
+            {"custom_fields": {"device_vendor": "Cisco"}},
+            {"custom_fields": {"device_vendor": "cisco"}},
+            {"custom_fields": {"device_vendor": "dell"}},
+            {"custom_fields": {"device_vendor": ""}},
+        ]
+        self.assertEqual(GR.vendor_counts(rows), [("Cisco", 2), ("dell", 1)])
 
     def test_ip_is_repeatable_and_accepts_overrides(self):
         args = GR.build_parser().parse_args([
@@ -141,7 +158,7 @@ class CollectVersionCliTests(unittest.TestCase):
                 "generated_utc": report_id,
                 "command": "show version",
                 "results": [
-                    {"hostname": "sw1", "ip": "192.0.2.1", "result": "success",
+                    {"hostname": "sw1", "ip": "192.0.2.1", "vendor": "cisco", "result": "success",
                      "model": "C1000", "uptime": "3 weeks",
                      "system_image": "flash:image.bin", "rom": "ROM1"},
                     {"hostname": "sw2", "ip": "192.0.2.2", "result": "failed",
@@ -168,6 +185,8 @@ class CollectVersionCliTests(unittest.TestCase):
             self.assertIn("HOSTNAME", shown.getvalue())
             self.assertIn("sw1", shown.getvalue())
             self.assertIn("C1000", shown.getvalue())
+            self.assertIn("VENDOR", shown.getvalue())
+            self.assertIn("cisco", shown.getvalue())
             self.assertNotIn("STDERR", shown.getvalue())
             self.assertNotIn("denied", shown.getvalue())
             self.assertNotIn("RAW_REPORT", shown.getvalue())

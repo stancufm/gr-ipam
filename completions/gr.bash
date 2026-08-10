@@ -49,6 +49,10 @@ _gr_completion() {
             _gr_complete_dynamic drivers "$current"
             return
             ;;
+        --vendor|--device-vendor)
+            _gr_complete_dynamic vendors "$current"
+            return
+            ;;
         --client|--ssh-client)
             _gr_complete_words "normal legacy" "$current"
             return
@@ -96,7 +100,7 @@ _gr_completion() {
             ;;
         completion)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "bash profiles drivers audit-targets audit-sessions collect-reports" "$current"
+                _gr_complete_words "bash profiles drivers vendors audit-targets audit-sessions collect-reports" "$current"
             elif [[ $subcommand == audit-sessions && $COMP_CWORD -eq 3 ]]; then
                 _gr_complete_dynamic audit-targets "$current"
             fi
@@ -112,7 +116,7 @@ _gr_completion() {
             ;;
         find|search|--ssh)
             if [[ $current == -* ]]; then
-                _gr_complete_words "--brief --details --ssh --user --port --profile --client --driver --no-vault --audit --no-audit --config --help" "$current"
+                _gr_complete_words "--brief --details --show-vendor --ssh --user --port --profile --client --driver --no-vault --audit --no-audit --config --help" "$current"
             fi
             ;;
         ssh)
@@ -181,7 +185,7 @@ _gr_completion() {
             ;;
         vendor)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "update-db lookup sync" "$current"
+                _gr_complete_words "list update-db lookup sync" "$current"
             elif [[ $subcommand == sync ]]; then
                 _gr_complete_words "--apply --overwrite --config --help" "$current"
             fi

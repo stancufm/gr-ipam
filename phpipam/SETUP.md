@@ -29,6 +29,20 @@ phpIPAM returns these through the API as `custom_ssh_enabled`,
 `custom_ssh_user`, and so on. No schema fork or source-code modification is
 required: these are standard phpIPAM custom fields and survive normal upgrades.
 
+For a new installation, the package provides an idempotent helper that performs
+the same standard column creation from the phpIPAM application server. Back up
+the database, then run it locally with the path to `config.php` if different:
+
+```bash
+sudo /usr/local/share/gr/phpipam/ensure-custom-fields.php \
+  /var/www/html/phpipam/config.php
+```
+
+It creates only missing fields, validates the SQL family of existing fields,
+uses a database advisory lock, and aborts on incompatible definitions. It does
+not store or print database credentials. Afterwards, `gr doctor --api` on the
+jump server validates that all eight fields are visible through the API.
+
 Recommended first validation:
 
 ```bash

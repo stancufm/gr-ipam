@@ -3,6 +3,7 @@
 
 import argparse
 import base64
+import calendar
 import contextlib
 import csv
 import datetime as dt
@@ -42,6 +43,11 @@ VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
 GR_VERSION = "2.2.0"
+DISPLAY_TIMEZONE = "Europe/Bucharest"
+DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+os.environ["TZ"] = DISPLAY_TIMEZONE
+if hasattr(time, "tzset"):
+    time.tzset()
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 DEVICE_DRIVER_SPECS = {
     "generic": {
@@ -77,6 +83,44 @@ DEVICE_DRIVER_SPECS = {
     },
 }
 DEVICE_DRIVERS = tuple(DEVICE_DRIVER_SPECS)
+REQUIRED_ADDRESS_CUSTOM_FIELDS = (
+    "custom_ssh_enabled", "custom_ssh_user", "custom_ssh_port", "custom_ssh_profile",
+    "custom_ssh_jump", "custom_ssh_client", "custom_device_driver", "custom_device_vendor",
+)
+
+
+def format_local_timestamp(value):
+    """Render UTC report/audit timestamps in the configured local display timezone."""
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    parsed = None
+    for pattern in ("%Y%m%dT%H%M%SZ", "%Y-%m-%dT%H:%M:%SZ",
+                    "%Y-%m-%dT%H:%M:%S.%fZ"):
+        try:
+            parsed = dt.datetime.strptime(text, pattern)
+            break
+        except ValueError:
+            pass
+    if parsed is None:
+        try:
+            return dt.datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S").strftime(
+                DISPLAY_TIME_FORMAT)
+        except ValueError:
+            return text
+    return time.strftime(DISPLAY_TIME_FORMAT, time.localtime(calendar.timegm(parsed.timetuple())))
+
+
+def missing_address_custom_fields(rows):
+    available = set()
+    for row in rows:
+        available.update(str(key) for key in row)
+        custom_fields = row.get("custom_fields")
+        if isinstance(custom_fields, dict):
+            for key in custom_fields:
+                key = str(key)
+                available.add(key if key.startswith("custom_") else "custom_{}".format(key))
+    return [field for field in REQUIRED_ADDRESS_CUSTOM_FIELDS if field not in available]
 
 CONFIG_OPTIONS = (
     ("base_url", None),
@@ -377,6 +421,30 @@ def command_vendor_lookup(cfg, macs):
         print("{}  status={} registry={} prefix={} vendor={} organization={}".format(
             result["mac"], result["status"], result["registry"] or "-",
             result["assignment"] or "-", result["vendor"] or "-", result["organization"] or "-"))
+    return 0
+
+
+def vendor_counts(rows):
+    counts = {}
+    names = {}
+    for row in rows:
+        vendor = str(custom_value(row, "device_vendor") or "").strip()
+        if not vendor:
+            continue
+        key = vendor.lower()
+        names.setdefault(key, vendor)
+        counts[key] = counts.get(key, 0) + 1
+    return [(names[key], counts[key]) for key in sorted(counts)]
+
+
+def command_vendor_list(cfg):
+    with api_session(cfg, prompt=False) as client:
+        values = vendor_counts(client.addresses())
+    if not values:
+        print("No device_vendor values are configured in phpIPAM.")
+        return 0
+    print_audit_table(("VENDOR", "ADDRESSES"),
+                      [(vendor, str(count)) for vendor, count in values])
     return 0
 
 
@@ -710,21 +778,23 @@ def ssh_display(row, legacy_fallback=True, override_user=None, override_port=Non
 
 
 def print_table(rows, numbered=False, legacy_fallback=True, override_user=None, override_port=None,
-                override_profile=None, override_client=None, brief=False):
-    base_columns = ("IP", "HOSTNAME", "SSH", "DESCRIPTION") if brief else (
-        "IP", "HOSTNAME", "STATUS", "LASTSEEN", "SSH", "DESCRIPTION")
+                override_profile=None, override_client=None, brief=False, show_vendor=False):
+    base_columns = (["IP", "HOSTNAME"] + (["VENDOR"] if show_vendor else []) +
+                    (["SSH", "DESCRIPTION"] if brief else
+                     ["STATUS", "LASTSEEN", "SSH", "DESCRIPTION"]))
+    base_columns = tuple(base_columns)
     columns = (("#",) if numbered else ()) + base_columns
     values = []
     for index, row in enumerate(rows, 1):
-        full_value = (
-            str(row["_ip"]),
-            row.get("_hostname") or "-",
-            tag_label(row),
-            str(row.get("lastSeen") or "-"),
-            ssh_display(row, legacy_fallback, override_user, override_port, override_profile, override_client),
-            clean_comment(row.get("description") or row.get("note") or "-"),
-        )
-        value = (full_value[0], full_value[1], full_value[4], full_value[5]) if brief else full_value
+        value = [str(row["_ip"]), row.get("_hostname") or "-"]
+        if show_vendor:
+            value.append(str(custom_value(row, "device_vendor") or "-"))
+        if not brief:
+            value.extend((tag_label(row), str(row.get("lastSeen") or "-")))
+        value.extend((ssh_display(row, legacy_fallback, override_user, override_port,
+                                  override_profile, override_client),
+                      clean_comment(row.get("description") or row.get("note") or "-")))
+        value = tuple(value)
         if numbered:
             value = (str(index),) + value
         values.append(value)
@@ -792,12 +862,13 @@ def ssh_effective(target):
 
 
 def choose_ssh_target(rows, legacy_fallback=True, override_user=None, override_port=None,
-                      override_profile=None, override_client=None, brief=False):
+                      override_profile=None, override_client=None, brief=False, show_vendor=False):
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise GrError("--ssh requires an interactive terminal")
     print_table(rows, numbered=True, legacy_fallback=legacy_fallback,
                 override_user=override_user, override_port=override_port,
-                override_profile=override_profile, override_client=override_client, brief=brief)
+                override_profile=override_profile, override_client=override_client, brief=brief,
+                show_vendor=show_vendor)
     print()
     while True:
         answer = input("Select SSH target [1-{}, q]: ".format(len(rows))).strip().lower()
@@ -857,8 +928,7 @@ def resolve_device_driver(row, override=None):
     explicit = str(custom_value(row, "device_driver") or "").strip()
     if explicit:
         return normalize_device_driver(explicit)
-    vendor = str(custom_value(row, "device_vendor") or "").strip().lower()
-    return "cisco-ios" if vendor == "cisco" else "generic"
+    return "generic"
 
 
 def legacy_profile_driver(cfg, profile):
@@ -1310,7 +1380,9 @@ def command_audit_show(cfg, target=None, session=None, streams=None, use_pager=T
         if not rows:
             print("No SSH audit sessions found in {}.".format(cfg["ssh_audit_dir"]))
             return 0
-        print_audit_table(("TARGET", "IP", "SESSIONS", "LATEST UTC"), rows)
+        rows = [(target_name, ip, sessions_count, format_local_timestamp(latest))
+                for target_name, ip, sessions_count, latest in rows]
+        print_audit_table(("TARGET", "IP", "SESSIONS", "LATEST (EUROPE/BUCHAREST)"), rows)
         print("\nNext: gr audit show <hostname-or-ip>")
         return 0
 
@@ -1322,7 +1394,9 @@ def command_audit_show(cfg, target=None, session=None, streams=None, use_pager=T
     if not matches:
         rows = audit_target_rows(sessions, target)
         if rows and session is None:
-            print_audit_table(("TARGET", "IP", "SESSIONS", "LATEST UTC"), rows)
+            rows = [(target_name, ip, sessions_count, format_local_timestamp(latest))
+                    for target_name, ip, sessions_count, latest in rows]
+            print_audit_table(("TARGET", "IP", "SESSIONS", "LATEST (EUROPE/BUCHAREST)"), rows)
             print("\nUse a complete hostname or IP to list its sessions.")
             return 0
         raise GrError("No audit target matches: {}".format(target))
@@ -1331,9 +1405,11 @@ def command_audit_show(cfg, target=None, session=None, streams=None, use_pager=T
     if session is None:
         rows = []
         for item in matches:
-            rows.append((item["session"], item["started"] or "-", item["ended"] or "incomplete",
+            rows.append((item["session"], format_local_timestamp(item["started"]),
+                         format_local_timestamp(item["ended"]) if item["ended"] else "incomplete",
                          str(item["exit_status"])))
-        print_audit_table(("SESSION", "STARTED UTC", "ENDED UTC", "EXIT"), rows)
+        print_audit_table(("SESSION", "STARTED (EUROPE/BUCHAREST)",
+                           "ENDED (EUROPE/BUCHAREST)", "EXIT"), rows)
         print("\nReplay: gr audit show {} <session-or-latest>".format(target))
         return 0
 
@@ -1399,6 +1475,8 @@ def collect_report_inventory(cfg):
                     "id": directory.name,
                     "path": item.path,
                     "generated": str(data.get("generated_utc") or directory.name),
+                    "generated_local": format_local_timestamp(
+                        data.get("generated_utc") or directory.name),
                     "devices": len(results),
                     "success": counts["success"],
                     "failed": counts["failed"],
@@ -1423,7 +1501,8 @@ def collect_report_table(data, report_id):
     columns = [key for key in preferred if key in available]
     columns.extend(sorted(available - set(columns), key=str.lower))
     lines = ["Report: {}".format(report_id),
-             "Generated UTC: {}".format(data.get("generated_utc") or "-"), ""]
+             "Generated (Europe/Bucharest): {}".format(
+                 format_local_timestamp(data.get("generated_utc"))), ""]
     if not results:
         lines.append("No device results in this report.")
         return "\n".join(lines) + "\n"
@@ -1463,10 +1542,10 @@ def command_collect_reports(cfg, report=None, use_pager=True, raw=False):
         if not reports:
             print("No collect reports found in {}.".format(cfg["device_version_dir"]))
             return 0
-        rows = [(item["id"], item["generated"], item["criteria"], str(item["devices"]),
+        rows = [(item["id"], item["generated_local"], item["criteria"], str(item["devices"]),
                  str(item["success"]), str(item["failed"]), str(item["timeout"]))
                 for item in reports]
-        print_audit_table(("REPORT", "GENERATED UTC", "CRITERIA", "DEVICES",
+        print_audit_table(("REPORT", "GENERATED (EUROPE/BUCHAREST)", "CRITERIA", "DEVICES",
                            "SUCCESS", "FAILED", "TIMEOUT"), rows)
         print("\nShow: gr collect reports <report-or-latest>")
         return 0
@@ -1671,6 +1750,11 @@ def command_completion(cfg, action, value=None):
         for driver in DEVICE_DRIVERS:
             print(driver)
         return 0
+    if action == "vendors":
+        with api_session(cfg, prompt=False) as client:
+            for vendor, _count in vendor_counts(client.addresses()):
+                print(vendor)
+        return 0
     if action == "audit-targets":
         values = set()
         for summary in audit_inventory(cfg):
@@ -1786,7 +1870,7 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
 
 def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
                    ssh_profile=None, ssh_client=None, device_driver=None, no_vault=False, audit=None,
-                   details=False, brief=False):
+                   details=False, brief=False, show_vendor=False):
     needle = " ".join(terms).strip().lower()
     if not needle:
         raise GrError("Search text is required")
@@ -1808,7 +1892,8 @@ def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
             matches.append(row)
     if matches:
         if details:
-            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True), brief=brief)
+            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True), brief=brief,
+                        show_vendor=show_vendor)
             print_address_details(matches)
             print()
         if use_ssh:
@@ -1820,18 +1905,20 @@ def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,
                                 legacy_fallback=cfg.get("ssh_legacy_fallback", True),
                                 override_user=ssh_user, override_port=ssh_port,
                                 override_profile=ssh_profile, override_client=ssh_client,
-                                brief=brief)
+                                brief=brief, show_vendor=show_vendor)
                 print()
             else:
                 selected = choose_ssh_target(matches, cfg.get("ssh_legacy_fallback", True), ssh_user, ssh_port,
-                                             ssh_profile, ssh_client, brief=brief)
+                                             ssh_profile, ssh_client, brief=brief,
+                                             show_vendor=show_vendor)
                 if selected is None:
                     print("SSH connection cancelled.")
                     return 0
             return connect_ssh(cfg, selected, ssh_user, ssh_port, ssh_profile, ssh_client,
                                device_driver, no_vault, audit)
         if not details:
-            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True), brief=brief)
+            print_table(matches, legacy_fallback=cfg.get("ssh_legacy_fallback", True), brief=brief,
+                        show_vendor=show_vendor)
         print("\n{} result(s)".format(len(matches)))
         return 0
     print("No phpIPAM results for: {}".format(needle), file=sys.stderr)
@@ -2121,6 +2208,14 @@ def command_doctor(cfg, test_api=False, system_only=False):
           "/etc/gr/release-key.asc or install with --release-key")
     check("Bash completion", os.path.isfile(BASH_COMPLETION),
           "{} or run: eval \"$(gr completion bash)\"".format(BASH_COMPLETION), essential=True)
+    timezone_path = "/etc/timezone"
+    try:
+        with open(timezone_path, encoding="utf-8") as handle:
+            system_timezone = handle.read().strip()
+    except OSError:
+        system_timezone = "unknown"
+    check("system timezone", system_timezone == DISPLAY_TIMEZONE,
+          "{} (required: {})".format(system_timezone, DISPLAY_TIMEZONE), essential=True)
     legacy_driver_profiles = sorted(
         profile for profile, value in cfg.get("ssh_profiles", {}).items()
         if isinstance(value, dict) and value.get("session_driver"))
@@ -2145,7 +2240,13 @@ def command_doctor(cfg, test_api=False, system_only=False):
         try:
             with api_session(cfg, prompt=False) as client:
                 permissions = client.permissions()
+                api_addresses = client.addresses()
             check("phpIPAM API", True, "permissions={}".format(permissions.get("permissions", "unknown")), essential=True)
+            missing_fields = missing_address_custom_fields(api_addresses)
+            check("phpIPAM custom fields", not missing_fields,
+                  "all required fields present" if not missing_fields else
+                  "missing {}; run phpipam/ensure-custom-fields.php on the phpIPAM server".format(
+                      ", ".join(missing_fields)), essential=True)
         except GrError as exc:
             check("phpIPAM API", False, str(exc), essential=True)
     for name, ok, detail, _essential in results:
@@ -2594,12 +2695,13 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     collect_sub = collect.add_subparsers(dest="collect_action")
     collect_version = collect_sub.add_parser("version", help="run and parse show version")
     collect_target = collect_version.add_mutually_exclusive_group(required=True)
-    collect_target.add_argument("--all", action="store_true", help="collect from every matching vendor device")
+    collect_target.add_argument(
+        "--all", action="store_true",
+        help="collect all explicit non-generic drivers, optionally filtered by --vendor")
     collect_target.add_argument("--all-drivers", action="store_true",
                                 help="collect every device with an explicit non-generic driver")
     collect_target.add_argument("--ip", action="append", dest="ips", help="limit to an IP (repeatable)")
-    collect_version.add_argument("--vendor", default="cisco",
-                                 help="require this phpIPAM device_vendor value (default: cisco)")
+    collect_version.add_argument("--vendor", help="optionally require this phpIPAM device_vendor value")
     collect_version.add_argument("--workers", type=int, default=4,
                                  help="parallel SSH sessions (default: 4; effective range: 1-12)")
     collect_reports = collect_sub.add_parser("reports", help="list or display collected version reports")
@@ -2615,6 +2717,8 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                               help="show every phpIPAM field returned for each matching address")
     output_group.add_argument("--brief", action="store_true",
                               help="show only IP, hostname, SSH and description columns")
+    find.add_argument("--show-vendor", action="store_true",
+                      help="include the phpIPAM device_vendor column")
     find.add_argument("--ssh", action="store_true", help="interactively select a result and start SSH")
     find.add_argument("--user", type=ssh_user, help="override the SSH user for this connection only")
     find.add_argument("--port", type=ssh_port, help="override the SSH port for this connection only")
@@ -2705,6 +2809,7 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                                help="write and GET-verify custom_device_driver")
     vendor = sub.add_parser("vendor", help="manage the local IEEE vendor database and phpIPAM vendor fields")
     vendor_sub = vendor.add_subparsers(dest="vendor_action")
+    vendor_sub.add_parser("list", help="list device_vendor values configured in phpIPAM")
     vendor_sub.add_parser("update-db", help="download current IEEE MA-L, MA-M and MA-S registries")
     vendor_lookup_parser = vendor_sub.add_parser("lookup", help="look up one or more MAC addresses")
     vendor_lookup_parser.add_argument("macs", nargs="+")
@@ -2725,7 +2830,7 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                             help="write directly instead of using the automatic terminal pager")
     completion = sub.add_parser("completion", help="print shell completion or dynamic candidates")
     completion.add_argument("completion_action",
-                            choices=("bash", "profiles", "drivers", "audit-targets", "audit-sessions",
+                            choices=("bash", "profiles", "drivers", "vendors", "audit-targets", "audit-sessions",
                                      "collect-reports"))
     completion.add_argument("value", nargs="?", help="target required by audit-sessions")
     docs_parser = sub.add_parser("docs", aliases=["help"], help="display the complete installed documentation")
@@ -2793,9 +2898,11 @@ def main(argv=None):
             parser.parse_args(["collect", "--help"])
             return 0
         helper_args = ["--workers", str(args.workers)]
+        if args.all_drivers and args.vendor:
+            raise GrError("--vendor cannot be combined with --all-drivers")
         if args.all_drivers:
             helper_args.append("--all-drivers")
-        else:
+        elif args.vendor:
             helper_args.extend(["--vendor", args.vendor])
         if args.all:
             helper_args.append("--all")
@@ -2810,7 +2917,8 @@ def main(argv=None):
         return command_search(cfg, args.terms, use_ssh=args.ssh, ssh_user=args.user, ssh_port=args.port,
                               ssh_profile=args.profile, ssh_client=args.client,
                               device_driver=args.driver, no_vault=args.no_vault,
-                              audit=args.audit, details=args.details, brief=args.brief)
+                              audit=args.audit, details=args.details, brief=args.brief,
+                              show_vendor=args.show_vendor)
     if args.command == "subnet":
         return command_subnet(cfg, args.cidr)
     if args.command == "local":
@@ -2846,6 +2954,8 @@ def main(argv=None):
             return 0
         if args.vendor_action == "update-db":
             return command_vendor_update_db(cfg)
+        if args.vendor_action == "list":
+            return command_vendor_list(cfg)
         if args.vendor_action == "lookup":
             return command_vendor_lookup(cfg, args.macs)
         if args.vendor_action == "sync":

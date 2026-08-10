@@ -2,6 +2,12 @@
 
 [English](INSTALL.md)
 
+Într-un mediu nou, copiați `phpipam/ensure-custom-fields.php` pe serverul
+aplicației phpIPAM și rulați-l acolo după backupul bazei. API-ul de adrese nu
+poate crea schema, iar credențialele SQL nu sunt copiate pe jump server.
+Validarea post-instalare `gr doctor --api` este obligatorie și eșuează dacă
+lipsește oricare dintre cele opt câmpuri necesare.
+
 ## Cerințe
 
 Debian 10+, Python 3.7+ și acces HTTPS la phpIPAM. Toate dependențele sunt

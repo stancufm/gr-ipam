@@ -120,7 +120,8 @@ The API credential requires mode `0600`. SSH passwords are encrypted through pas
 
 Search results use the standard inventory table. Add `--brief` to either
 `gr TERM` or `gr find TERM` to display only `IP`, `HOSTNAME`, `SSH` and
-`DESCRIPTION`; `--brief` and `--details` are mutually exclusive.
+`DESCRIPTION`; `--brief` and `--details` are mutually exclusive. Add
+`--show-vendor` to either table format to include the phpIPAM `device_vendor`.
 
 `gr sync` previews generated SSH configuration and optionally `/etc/hosts`; writing requires `--apply`. `gr update IP` previews standard and custom-field changes, including `--device-driver` and `--device-vendor`, then uses the separate write application and GET-verifies applied values. `gr migrate-ssh` imports legacy `[port][user]` metadata and is also dry-run by default.
 
@@ -139,6 +140,7 @@ gr update 10.22.10.76 --hostname sw76 --ssh-enabled yes --ssh-user admin \
 
 ```bash
 sudo gr vendor update-db
+gr vendor list
 gr vendor lookup <mac>
 gr vendor sync [--apply]
 gr ssh validate [--run] [--ip IP]
@@ -146,6 +148,9 @@ gr collect version --ip IP
 ```
 
 The shared IEEE database is replaced atomically. Synchronization, validation and collection reports are private and must not be committed.
+`gr vendor list` reads the distinct phpIPAM `device_vendor` values and shows
+their address counts. The same live values drive Bash completion for
+`--vendor` and `--device-vendor`.
 
 ### Collect device version inventory
 
@@ -163,18 +168,20 @@ configuration.
 
 The device driver comes from phpIPAM `device_driver`, not from the credential
 profile. An explicit `--driver` overrides it for one interactive connection.
-When `device_driver` is blank, Cisco vendor records fall back to `cisco-ios` and
-other vendors to `generic`.
+When `device_driver` is blank, the driver is always `generic`; vendor metadata
+never selects a device driver implicitly.
 
 Options:
 
-- `--all` selects every eligible address matching `--vendor`;
+- `--all` without `--vendor` selects every address with an explicit non-generic
+  driver; when supplied, `--vendor` additionally filters the selection;
 - `--all-drivers` ignores vendor and hostname and selects every address with an
   explicit phpIPAM `device_driver` value other than `generic`;
-- `--ip IP` restricts collection to one address and can be repeated; the vendor,
-  SSH-enabled and profile requirements still apply;
+- `--ip IP` restricts collection to one address and can be repeated; vendor is
+  not filtered unless `--vendor` is supplied. A target whose effective driver
+  is `generic` is rejected before SSH with guidance for `gr driver detect`;
 - `--vendor VENDOR` matches the phpIPAM `device_vendor` value
-  case-insensitively; the default is `cisco`;
+  case-insensitively; there is no implicit vendor;
 - `--workers N` controls parallel SSH sessions; the default is `4` and the
   effective value is constrained to `1..12`.
 
@@ -183,13 +190,15 @@ Each run creates a private timestamped directory under
 file per device, a persistent per-user host-key store and
 `<vendor>-show-version-report.json` (or `all-drivers-show-version-report.json`)
 with generation criteria plus parsed model, firmware, OS family,
-uptime, serial, system image, ROM, stderr and result status. The parser is
+uptime, serial, system image, ROM, vendor, stderr and result status. The parser is
 driven by each selected device driver and supports the implemented Cisco, Dell
 OS10, HPE ArubaOS-Switch and HPE Comware command/output families.
 
 `gr collect reports` lists one report per row. Its `CRITERIA` column shows how
 the report was generated (`vendor=... all`, selected IPs, or
 `driver!=generic`). Older reports without saved criteria are labeled `legacy`.
+Displayed timestamps are converted from stored UTC to `Europe/Bucharest` and
+formatted as `YYYY-MM-DD HH:MM:SS`; stable report IDs and JSON timestamps remain UTC.
 
 ### Driver migration from gr 1.x
 
