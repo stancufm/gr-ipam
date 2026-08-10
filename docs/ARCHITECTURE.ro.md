@@ -11,7 +11,10 @@
 Registrul de drivere include în prezent comportamente generic, Cisco IOS,
 Cisco Small Business adaptiv, Dell SmartFabric OS10, HPE
 ArubaOS-Switch/ProVision și HPE Comware 7. Profilurile de credențiale nu sunt
-folosite pentru deducerea driverului de echipament.
+folosite pentru deducerea driverului de echipament. Autodetecția folosește mai
+întâi cea mai nouă dovadă de inventar reușită, apoi vendorul neambiguu, iar
+echipamentele necunoscute devin `generic`. Schimbările aplicate folosesc API-ul
+dedicat de scriere și verificare GET.
 
 Configurația comună este `/etc/gr/config.json`; `~/.config/gr/config.json`
 suprascrie valorile utilizatorului și combină profilurile de credențiale.

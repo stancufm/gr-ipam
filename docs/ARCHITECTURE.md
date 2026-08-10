@@ -44,6 +44,10 @@ The device-driver registry currently includes generic, Cisco IOS, adaptive
 Cisco Small Business, Dell SmartFabric OS10, HPE ArubaOS-Switch/ProVision and
 HPE Comware 7 behaviors. Credential profiles are never used to infer the
 device driver.
+Driver autodetection is report-driven: the newest successful inventory evidence
+is preferred, unambiguous vendor metadata is a secondary source, and unknown
+devices resolve to `generic`. Applied changes use the dedicated write API and
+GET verification.
 
 `libexec/gr-update` is a root-only transaction helper reached through `gr self-update`. It verifies a signed release tag against a pinned public key, performs an isolated install, backs up system files and rolls back a failed live installation.
 

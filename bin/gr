@@ -41,7 +41,7 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.1.2"
+GR_VERSION = "2.2.0"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 DEVICE_DRIVER_SPECS = {
     "generic": {
@@ -1466,6 +1466,168 @@ def command_collect_reports(cfg, report=None, use_pager=True, raw=False):
     return write_paged_text(content, use_pager)
 
 
+def latest_successful_inventory(cfg):
+    """Return the newest successful collected inventory record for every IP."""
+    inventory = {}
+    for report in collect_report_inventory(cfg):
+        for result in report["data"].get("results", []):
+            ip = str(normalize_ip(result.get("ip")) or "")
+            if ip and ip not in inventory and result.get("result") == "success":
+                inventory[ip] = result
+    return inventory
+
+
+def detect_device_driver(row, collected=None):
+    """Classify a device from successful inventory and unambiguous metadata."""
+    collected = collected or {}
+    model = str(collected.get("model") or "").strip()
+    firmware = str(collected.get("firmware") or "").strip()
+    os_family = str(collected.get("os_family") or "").strip().lower()
+    collected_driver = str(collected.get("device_driver") or "").strip().lower()
+    vendor = str(custom_value(row, "device_vendor") or collected.get("vendor") or "").strip().lower()
+    combined = "{} {} {}".format(model, firmware, os_family).lower()
+
+    if "comware" in combined or re.search(r"\b5520\b", model, re.I):
+        return "hpe-comware7", "inventory:model/os-family"
+    if ("arubaos-switch" in combined or "provision" in combined or
+            re.search(r"\b(?:j9726a|2920-)\b", model, re.I) or firmware.upper().startswith("WB.")):
+        return "hpe-arubaos-switch", "inventory:model/firmware"
+    if "os10" in combined or re.search(r"\b(?:s|z)\d{4}[a-z-]*\b", model, re.I) and "dell" in vendor:
+        return "dell-os10", "inventory:model/os-family"
+    if re.match(r"^(?:SG|SF|CBS|SX|SRW)\d", model, re.I):
+        return "cisco-small-business", "inventory:model"
+    if re.match(r"^(?:WS-C|C\d{3,4}|ISR|ASR|IE\d|N[3579]K)", model, re.I):
+        return "cisco-ios", "inventory:model"
+    if os_family in DEVICE_DRIVER_SPECS and os_family != "generic":
+        return os_family, "inventory:os-family"
+    if collected_driver in DEVICE_DRIVER_SPECS and collected_driver != "generic":
+        return collected_driver, "inventory:successful-driver"
+
+    vendor_map = {
+        "hpe-comware": "hpe-comware7",
+        "hpe-aruba": "hpe-arubaos-switch",
+        "aruba": "hpe-arubaos-switch",
+        "dell": "dell-os10",
+        "dell-os10": "dell-os10",
+    }
+    if vendor in vendor_map:
+        return vendor_map[vendor], "phpipam:vendor"
+    return "generic", "fallback:unidentified"
+
+
+def driver_detection_range(value):
+    raw = str(value or "").strip()
+    start_text, separator, end_text = raw.partition("-")
+    if not separator:
+        raise argparse.ArgumentTypeError("range must be START-END")
+    try:
+        start = ipaddress.ip_address(start_text.strip())
+        if "." not in end_text and start.version == 4:
+            end = ipaddress.ip_address("{}.{}".format(
+                ".".join(start_text.strip().split(".")[:-1]), end_text.strip()))
+        else:
+            end = ipaddress.ip_address(end_text.strip())
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc))
+    if start.version != end.version or int(start) > int(end):
+        raise argparse.ArgumentTypeError("range end must be after start in the same IP family")
+    return start, end
+
+
+def select_driver_detection_rows(rows, args):
+    normalized = normalized_addresses(rows)
+    if args.all:
+        return normalized
+    if args.ips:
+        try:
+            wanted = {ipaddress.ip_address(value) for value in args.ips}
+        except ValueError as exc:
+            raise GrError(str(exc))
+        return [row for row in normalized if row["_ip"] in wanted]
+    if args.subnet:
+        try:
+            network = ipaddress.ip_network(args.subnet, strict=False)
+        except ValueError as exc:
+            raise GrError(str(exc))
+        return [row for row in normalized if row["_ip"] in network]
+    if args.ip_range:
+        start, end = args.ip_range
+        return [row for row in normalized
+                if row["_ip"].version == start.version and int(start) <= int(row["_ip"]) <= int(end)]
+    needle = str(args.find or "").strip().lower()
+    return [row for row in normalized if needle in " ".join(
+        str(row.get(key) or "") for key in
+        ("ip", "hostname", "description", "note", "owner", "mac", "port")
+    ).lower()]
+
+
+def command_driver_detect(cfg, args):
+    api_cfg = dict(cfg)
+    if args.apply:
+        api_cfg["app_id"] = cfg.get("migration_app_id", "gr-migrate")
+    inventory = latest_successful_inventory(cfg)
+    counts = {"selected": 0, "same": 0, "candidate": 0, "updated": 0, "failed": 0}
+    entries = []
+    with api_session(api_cfg) as client:
+        selected = select_driver_detection_rows(client.addresses(), args)
+        if not selected:
+            raise GrError("No phpIPAM addresses matched the driver detection selector")
+        counts["selected"] = len(selected)
+        for row in selected:
+            ip = str(row["_ip"])
+            detected, evidence = detect_device_driver(row, inventory.get(ip))
+            current = str(custom_value(row, "device_driver") or "").strip().lower() or "-"
+            entry = {"id": row.get("id"), "ip": ip, "hostname": row.get("_hostname") or "-",
+                     "current": current, "detected": detected, "evidence": evidence}
+            if current == detected:
+                entry["status"] = "same"
+                counts["same"] += 1
+            else:
+                entry["status"] = "candidate"
+                counts["candidate"] += 1
+                if args.apply:
+                    before = "" if current == "-" else current
+                    try:
+                        client.request("PATCH", "addresses/{}/".format(row.get("id")),
+                                       payload={"custom_device_driver": detected})
+                        after = client.request("GET", "addresses/{}/".format(row.get("id")))
+                        if isinstance(after, list):
+                            after = after[0] if after else {}
+                        actual = str(custom_value(after or {}, "device_driver") or "").strip().lower()
+                        if actual != detected:
+                            raise GrError("verification returned {!r}".format(actual))
+                        entry["status"] = "updated"
+                        counts["updated"] += 1
+                    except Exception as exc:
+                        entry["status"] = "failed"
+                        entry["error"] = str(exc)
+                        counts["failed"] += 1
+                        try:
+                            client.request("PATCH", "addresses/{}/".format(row.get("id")),
+                                           payload={"custom_device_driver": before})
+                            entry["rollback"] = "attempted"
+                        except Exception as rollback_exc:
+                            entry["rollback"] = "failed: {}".format(rollback_exc)
+            entries.append(entry)
+
+    rows = [(entry["ip"], entry["hostname"], entry["current"], entry["detected"],
+             entry["evidence"], entry["status"]) for entry in entries]
+    print_audit_table(("IP", "HOSTNAME", "CURRENT", "DETECTED", "EVIDENCE", "STATUS"), rows)
+    stamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    report_path = expand("~/.local/state/gr/driver-detection/driver-detect-{}-{}.json".format(
+        "apply" if args.apply else "preview", stamp))
+    os.makedirs(os.path.dirname(report_path), mode=0o700, exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as handle:
+        json.dump({"created_utc": stamp, "apply": args.apply, "counts": counts,
+                   "entries": entries}, handle, ensure_ascii=False, indent=2)
+    os.chmod(report_path, 0o600)
+    print("\nSUMMARY={}".format(json.dumps(counts, sort_keys=True)))
+    print("REPORT={}".format(report_path))
+    if not args.apply:
+        print("Dry-run only. Re-run with the same selector and --apply to write and verify.")
+    return 2 if counts["failed"] else 0
+
+
 def completion_source_path():
     candidates = [
         BASH_COMPLETION,
@@ -2506,6 +2668,20 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     migrate_drivers.add_argument("--limit", type=int, help="limit writes for a pilot run")
     migrate_drivers.add_argument("--overwrite", action="store_true",
                                  help="replace an existing different device_driver")
+    driver = sub.add_parser("driver", help="detect and manage device drivers")
+    driver_sub = driver.add_subparsers(dest="driver_action")
+    driver_detect = driver_sub.add_parser(
+        "detect", help="detect drivers from inventory and phpIPAM metadata")
+    driver_selector = driver_detect.add_mutually_exclusive_group(required=True)
+    driver_selector.add_argument("--all", action="store_true", help="select every phpIPAM address")
+    driver_selector.add_argument("--ip", action="append", dest="ips",
+                                 help="select an exact IP (repeatable)")
+    driver_selector.add_argument("--subnet", help="select addresses inside a CIDR")
+    driver_selector.add_argument("--range", dest="ip_range", type=driver_detection_range,
+                                 metavar="START-END", help="select an inclusive IP range")
+    driver_selector.add_argument("--find", help="select using the normal gr search fields")
+    driver_detect.add_argument("--apply", action="store_true",
+                               help="write and GET-verify custom_device_driver")
     vendor = sub.add_parser("vendor", help="manage the local IEEE vendor database and phpIPAM vendor fields")
     vendor_sub = vendor.add_subparsers(dest="vendor_action")
     vendor_sub.add_parser("update-db", help="download current IEEE MA-L, MA-M and MA-S registries")
@@ -2538,7 +2714,7 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    known_commands = {"init", "doctor", "config", "ssh", "collect", "find", "search", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "migrate-drivers", "vendor", "audit", "completion", "docs", "help"}
+    known_commands = {"init", "doctor", "config", "ssh", "collect", "find", "search", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "migrate-drivers", "driver", "vendor", "audit", "completion", "docs", "help"}
     ssh_requested = "--ssh" in argv
     if ssh_requested:
         argv = [value for value in argv if value != "--ssh"]
@@ -2634,6 +2810,11 @@ def main(argv=None):
         if args.overwrite and not args.apply:
             raise GrError("--overwrite requires --apply")
         return command_migrate_drivers(cfg, args.apply, args.limit, args.overwrite)
+    if args.command == "driver":
+        if args.driver_action != "detect":
+            parser.parse_args(["driver", "--help"])
+            return 0
+        return command_driver_detect(cfg, args)
     if args.command == "vendor":
         if not args.vendor_action:
             parser.parse_args(["vendor", "--help"])

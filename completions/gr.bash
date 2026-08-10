@@ -31,7 +31,7 @@ _gr_completion() {
     COMPREPLY=()
 
     if (( COMP_CWORD == 1 )); then
-        _gr_complete_words "init doctor config ssh collect find search subnet local sync export auth vault update self-update migrate-ssh migrate-drivers vendor audit completion docs help --ssh --config --version" "$current"
+        _gr_complete_words "init doctor config ssh collect find search subnet local sync export auth vault update self-update migrate-ssh migrate-drivers driver vendor audit completion docs help --ssh --config --version" "$current"
         return
     fi
 
@@ -171,6 +171,13 @@ _gr_completion() {
             ;;
         migrate-drivers)
             _gr_complete_words "--apply --limit --overwrite --config --help" "$current"
+            ;;
+        driver)
+            if (( COMP_CWORD == 2 )); then
+                _gr_complete_words "detect" "$current"
+            elif [[ $subcommand == detect ]]; then
+                _gr_complete_words "--all --ip --subnet --range --find --apply --config --help" "$current"
+            fi
             ;;
         vendor)
             if (( COMP_CWORD == 2 )); then

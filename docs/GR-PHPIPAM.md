@@ -193,6 +193,35 @@ gr migrate-drivers
 gr migrate-drivers --apply
 ```
 
+### Automatic device-driver detection
+
+`gr driver detect` classifies devices from the newest successful collected
+inventory record and from unambiguous phpIPAM vendor metadata. Model and OS
+evidence takes precedence over vendor metadata. When no reliable evidence is
+available, the detected driver is deliberately `generic`. Credential profiles,
+SSH users and ports are never used as driver evidence and are never modified.
+
+Selection supports exact IPs, CIDR subnets, inclusive ranges, normal search
+fields, or every phpIPAM address:
+
+```bash
+gr driver detect --ip 10.22.10.25 --ip 10.22.10.53
+gr driver detect --subnet 10.22.10.0/24
+gr driver detect --range 10.22.10.10-69
+gr driver detect --find sw
+gr driver detect --all
+```
+
+The command is a dry-run by default and displays the current driver, detected
+driver, evidence and planned status. Add `--apply` to PATCH each changed
+`custom_device_driver`, GET-verify it, and attempt rollback on failure. Every run
+creates a private JSON report under `~/.local/state/gr/driver-detection/`.
+
+```bash
+gr driver detect --range 10.22.10.10-69 --apply
+gr driver detect --find "Linux Jump" --apply
+```
+
 The migration copies legacy associations into phpIPAM `device_driver`, writes a
 private report and GET-verifies every applied value. `--limit` supports a pilot;
 `--overwrite` requires `--apply`.

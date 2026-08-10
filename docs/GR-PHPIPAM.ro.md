@@ -190,6 +190,36 @@ gr migrate-drivers
 gr migrate-drivers --apply
 ```
 
+### Detectarea automată a driverului
+
+`gr driver detect` clasifică echipamentele folosind cea mai nouă înregistrare
+reușită din rapoartele de inventar și metadatele vendor neambigue din phpIPAM.
+Dovada de model și familie OS are prioritate față de vendor. Dacă nu există o
+dovadă sigură, driverul detectat este intenționat `generic`. Profilurile de
+credențiale, userii și porturile SSH nu sunt folosite ca dovezi și nu sunt
+modificate.
+
+Selecția acceptă IP-uri exacte, subnet CIDR, range inclusiv, câmpurile normale
+de căutare sau toate adresele phpIPAM:
+
+```bash
+gr driver detect --ip 10.22.10.25 --ip 10.22.10.53
+gr driver detect --subnet 10.22.10.0/24
+gr driver detect --range 10.22.10.10-69
+gr driver detect --find sw
+gr driver detect --all
+```
+
+Comanda este dry-run implicit și afișează driverul curent, cel detectat, dovada
+și starea planificată. `--apply` scrie fiecare `custom_device_driver` schimbat,
+îl verifică prin GET și încearcă rollback la eșec. Fiecare rulare creează un
+raport JSON privat în `~/.local/state/gr/driver-detection/`.
+
+```bash
+gr driver detect --range 10.22.10.10-69 --apply
+gr driver detect --find "Linux Jump" --apply
+```
+
 Migrarea copiază asocierile vechi în câmpul phpIPAM `device_driver`, generează
 un raport privat și verifică GET fiecare scriere. `--limit` permite un pilot,
 iar `--overwrite` necesită `--apply`.
