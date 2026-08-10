@@ -178,7 +178,7 @@ _gr_completion() {
             ;;
         driver)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "detect" "$current"
+                _gr_complete_words "list detect" "$current"
             elif [[ $subcommand == detect ]]; then
                 _gr_complete_words "--all --ip --subnet --range --find --apply --config --help" "$current"
             fi

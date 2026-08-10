@@ -86,6 +86,15 @@ class ConfigShowTests(unittest.TestCase):
         self.assertEqual(parser.parse_args(
             ["driver", "detect", "--find", "sw", "--apply"]).find, "sw")
 
+    def test_driver_list_is_available_and_describes_commands(self):
+        args = GR.build_parser().parse_args(["driver", "list"])
+        self.assertEqual(args.driver_action, "list")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            GR.command_driver_list()
+        self.assertIn("cisco-small-business", output.getvalue())
+        self.assertIn("show system", output.getvalue())
+
     def test_show_compares_default_global_user_and_effective_values(self):
         with tempfile.TemporaryDirectory() as root:
             system_path = os.path.join(root, "system.json")

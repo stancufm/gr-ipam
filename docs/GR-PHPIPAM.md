@@ -102,6 +102,13 @@ The global installer provides command, option and dynamic audit completion for
 Bash. Open a new shell or run `source /etc/bash_completion.d/gr`. Set
 `GR_COMPLETION_CISCO_STYLE=1` before loading completion to display ambiguous
 choices on the first Tab. `gr completion bash` prints the installed script.
+An upgrade replaces the completion file but cannot alter functions already
+loaded by a running shell. If `gr driver<Tab>` does not propose `list` and
+`detect`, reload it explicitly:
+
+```bash
+source /etc/bash_completion.d/gr
+```
 
 ## Authentication vault
 
@@ -218,6 +225,12 @@ evidence takes precedence over vendor metadata. When no reliable evidence is
 available, the detected driver is deliberately `generic`. Credential profiles,
 SSH users and ports are never used as driver evidence and are never modified.
 
+List the implemented drivers and the operational commands owned by each driver:
+
+```bash
+gr driver list
+```
+
 Selection supports exact IPs, CIDR subnets, inclusive ranges, normal search
 fields, or every phpIPAM address:
 
@@ -228,6 +241,45 @@ gr driver detect --range 10.22.10.10-69
 gr driver detect --find sw
 gr driver detect --all
 ```
+
+Every selector accepts `--apply`. Without it, detection is always a read-only
+preview. With it, gr PATCHes only changed `custom_device_driver` values,
+GET-verifies every write and attempts rollback on failure:
+
+```bash
+gr driver detect --ip 10.22.10.25 --apply
+gr driver detect --subnet 10.22.10.0/24 --apply
+gr driver detect --range 10.22.10.10-69 --apply
+gr driver detect --find sw --apply
+gr driver detect --all --apply
+```
+
+Vendor discovery is a separate input and never implicitly chooses a driver.
+The complete vendor preparation workflow is:
+
+```bash
+sudo gr vendor update-db
+gr vendor list
+gr vendor lookup 00:11:22:33:44:55
+gr vendor sync
+gr vendor sync --apply
+gr vendor sync --apply --overwrite
+```
+
+Use `--overwrite` only after reviewing conflicts. Manual driver correction is
+also dry-run first:
+
+```bash
+gr update 10.22.10.50 --device-driver cisco-small-business
+gr update 10.22.10.50 --device-driver cisco-small-business --apply
+gr update 10.22.10.50 --clear-device-driver --apply
+gr 10.22.10.50 --details
+gr 10.22.10.50 --show-vendor
+```
+
+Bash completion covers `gr driver`, its subcommands, every detection selector,
+driver names, and live phpIPAM vendor values. `gr completion drivers` and
+`gr completion vendors` expose the machine-readable candidate lists.
 
 The command is a dry-run by default and displays the current driver, detected
 driver, evidence and planned status. Add `--apply` to PATCH each changed

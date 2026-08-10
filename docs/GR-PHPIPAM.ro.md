@@ -102,6 +102,12 @@ dinamică în audit. Deschideți un shell nou sau rulați
 `source /etc/bash_completion.d/gr`. Dacă setați
 `GR_COMPLETION_CISCO_STYLE=1` înainte de încărcare, opțiunile ambigue sunt
 afișate de la prima apăsare Tab. `gr completion bash` afișează scriptul instalat.
+Un upgrade înlocuiește fișierul, dar nu poate modifica funcțiile deja încărcate
+în shell-ul curent. Dacă `gr driver<Tab>` nu propune `list` și `detect`, rulați:
+
+```bash
+source /etc/bash_completion.d/gr
+```
 
 ## Autentificare și seif
 
@@ -217,6 +223,12 @@ dovadă sigură, driverul detectat este intenționat `generic`. Profilurile de
 credențiale, userii și porturile SSH nu sunt folosite ca dovezi și nu sunt
 modificate.
 
+Lista driverelor implementate și comenzile operaționale deținute de fiecare:
+
+```bash
+gr driver list
+```
+
 Selecția acceptă IP-uri exacte, subnet CIDR, range inclusiv, câmpurile normale
 de căutare sau toate adresele phpIPAM:
 
@@ -227,6 +239,45 @@ gr driver detect --range 10.22.10.10-69
 gr driver detect --find sw
 gr driver detect --all
 ```
+
+Fiecare selector acceptă `--apply`. Fără acesta, detecția este întotdeauna
+preview read-only. Cu `--apply`, gr modifică numai `custom_device_driver`,
+verifică fiecare scriere prin GET și încearcă rollback la eșec:
+
+```bash
+gr driver detect --ip 10.22.10.25 --apply
+gr driver detect --subnet 10.22.10.0/24 --apply
+gr driver detect --range 10.22.10.10-69 --apply
+gr driver detect --find sw --apply
+gr driver detect --all --apply
+```
+
+Vendorul este o dovadă separată și nu selectează implicit driverul. Fluxul
+complet pentru vendor este:
+
+```bash
+sudo gr vendor update-db
+gr vendor list
+gr vendor lookup 00:11:22:33:44:55
+gr vendor sync
+gr vendor sync --apply
+gr vendor sync --apply --overwrite
+```
+
+Folosiți `--overwrite` numai după analiza conflictelor. Corecția manuală a
+driverului se previzualizează înainte de aplicare:
+
+```bash
+gr update 10.22.10.50 --device-driver cisco-small-business
+gr update 10.22.10.50 --device-driver cisco-small-business --apply
+gr update 10.22.10.50 --clear-device-driver --apply
+gr 10.22.10.50 --details
+gr 10.22.10.50 --show-vendor
+```
+
+Autocomplete-ul Bash acoperă `gr driver`, subcomenzile, selectorii, numele
+driverelor și vendorii reali din phpIPAM. `gr completion drivers` și
+`gr completion vendors` afișează listele de candidați pentru automatizări.
 
 Comanda este dry-run implicit și afișează driverul curent, cel detectat, dovada
 și starea planificată. `--apply` scrie fiecare `custom_device_driver` schimbat,

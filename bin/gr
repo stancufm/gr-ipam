@@ -42,7 +42,7 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.2.0"
+GR_VERSION = "2.2.1"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -1726,6 +1726,16 @@ def command_driver_detect(cfg, args):
     return 2 if counts["failed"] else 0
 
 
+def command_driver_list():
+    rows = []
+    for driver in DEVICE_DRIVERS:
+        spec = device_driver_spec(driver)
+        rows.append((driver, "yes" if spec["interactive_cli"] else "no",
+                     "; ".join(spec["version_commands"])))
+    print_audit_table(("DRIVER", "INTERACTIVE LOGIN", "VERSION COMMANDS"), rows)
+    return 0
+
+
 def completion_source_path():
     candidates = [
         BASH_COMPLETION,
@@ -2795,6 +2805,7 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                                  help="replace an existing different device_driver")
     driver = sub.add_parser("driver", help="detect and manage device drivers")
     driver_sub = driver.add_subparsers(dest="driver_action")
+    driver_sub.add_parser("list", help="list implemented drivers and version commands")
     driver_detect = driver_sub.add_parser(
         "detect", help="detect drivers from inventory and phpIPAM metadata")
     driver_selector = driver_detect.add_mutually_exclusive_group(required=True)
@@ -2944,6 +2955,8 @@ def main(argv=None):
             raise GrError("--overwrite requires --apply")
         return command_migrate_drivers(cfg, args.apply, args.limit, args.overwrite)
     if args.command == "driver":
+        if args.driver_action == "list":
+            return command_driver_list()
         if args.driver_action != "detect":
             parser.parse_args(["driver", "--help"])
             return 0

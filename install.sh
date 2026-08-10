@@ -189,3 +189,4 @@ fi
 
 echo "Installed gr. Each user should run: gr init --configure-auth"
 echo "Then validate with: gr doctor --api"
+echo "Reload Bash completion in existing shells with: source /etc/bash_completion.d/gr"
