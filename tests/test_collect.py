@@ -18,6 +18,17 @@ class CollectVersionCliTests(unittest.TestCase):
             b"User Name: cisco\r\nPassword: super-secret\r\nsw36#", "super-secret"),
             b"User Name: cisco\r\nPassword: [REDACTED]\r\nsw36#")
 
+    def test_small_business_show_system_fields_are_parsed(self):
+        parsed = COLLECTOR.parse_version(
+            "Active-image: flash://image.bin\n  Version: 2.4.0.94\n"
+            "\rSystem Description: SG350-28 28-Port Gigabit Managed Switch\n"
+            "\rSystem Up Time (days,hour:min:sec): 51,12:05:36\n"
+            "System Serial Number: DNI12345678\n")
+        self.assertEqual(parsed["firmware"], "2.4.0.94")
+        self.assertEqual(parsed["model"], "SG350-28")
+        self.assertEqual(parsed["uptime"], "51,12:05:36")
+        self.assertEqual(parsed["serial"], "DNI12345678")
+
     def test_all_uses_documented_defaults(self):
         args = GR.build_parser().parse_args(["collect", "version", "--all"])
         self.assertTrue(args.all)

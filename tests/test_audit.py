@@ -22,7 +22,7 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(driver.feed(b"word: "), [("credential", b"vault-secret\n")])
         self.assertEqual(driver.feed(b"\r\nsw36#"), [("ready", b"")])
         self.assertEqual(driver.state, "ready")
-        self.assertEqual(driver.feed(b"\r\nsw36#"), [])
+        self.assertEqual(driver.feed(b"show version\r\noutput\r\nsw36#"), [("prompt", b"")])
 
     def test_lossless_records_and_private_permissions(self):
         with tempfile.TemporaryDirectory() as root:

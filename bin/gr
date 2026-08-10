@@ -41,7 +41,7 @@ SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "1.5.0"
+GR_VERSION = "1.5.1"
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 
 CONFIG_OPTIONS = (
@@ -819,6 +819,9 @@ class CiscoSmallBusinessLogin:
             self.state = "ready"
             self.buffer = b""
             return [("ready", b"")]
+        if self.state == "ready" and self.PROMPT_RE.search(self.buffer):
+            self.buffer = b""
+            return [("prompt", b"")]
         return []
 
 
