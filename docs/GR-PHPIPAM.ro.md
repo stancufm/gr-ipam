@@ -116,6 +116,22 @@ seria, imaginea de sistem, ROM-ul, stderr și rezultatul. Parserul este destinat
 Codul de ieșire este `0` dacă toate dispozitivele reușesc, `1` dacă nu există
 niciun dispozitiv eligibil și `2` dacă cel puțin o conexiune eșuează sau expiră.
 
+Rulările complete pot fi navigate fără memorarea căilor rapoartelor:
+
+```bash
+gr collect reports
+gr collect reports latest
+gr collect reports <timestamp-raport>
+gr collect reports <timestamp-raport> --no-more
+```
+
+Prima comandă afișează câte un rând pentru fiecare rulare, cu timestampul,
+numărul de dispozitive și totalurile `success`/`failed`/`timeout`. Selectarea lui
+`latest` sau a unui ID afișează raportul JSON integral prin pagerul automat;
+`--no-more` scrie direct în terminal. Autocomplete-ul Bash propune `latest` și
+toate ID-urile disponibile. Rapoartele sunt căutate în `device_version_dir`,
+implicit `~/.local/state/gr/device-version`, configurabil global sau per user.
+
 ## Diagnostic și documentație
 
 `gr doctor --api` verifică fișierele, permisiunile, dependențele, baza IEEE și API-ul. `gr docs --language en` afișează ghidul englez, iar `gr docs --language ro` ghidul român. Toate scrierile de inventar rămân dry-run până la `--apply`.

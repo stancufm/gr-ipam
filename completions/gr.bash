@@ -92,7 +92,7 @@ _gr_completion() {
             ;;
         completion)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "bash profiles audit-targets audit-sessions" "$current"
+                _gr_complete_words "bash profiles audit-targets audit-sessions collect-reports" "$current"
             elif [[ $subcommand == audit-sessions && $COMP_CWORD -eq 3 ]]; then
                 _gr_complete_dynamic audit-targets "$current"
             fi
@@ -120,9 +120,17 @@ _gr_completion() {
             ;;
         collect)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "version" "$current"
+                _gr_complete_words "version reports" "$current"
             elif [[ $subcommand == version ]]; then
                 _gr_complete_words "--all --ip --vendor --workers --config --help" "$current"
+            elif [[ $subcommand == reports && $COMP_CWORD -eq 3 ]]; then
+                if [[ $current == -* ]]; then
+                    _gr_complete_words "--no-more --config --help" "$current"
+                else
+                    _gr_complete_dynamic collect-reports "$current"
+                fi
+            elif [[ $subcommand == reports && $current == -* ]]; then
+                _gr_complete_words "--no-more --config --help" "$current"
             fi
             ;;
         subnet|local)

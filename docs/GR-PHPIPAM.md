@@ -123,6 +123,23 @@ its devices support `show version` and compatible output.
 Exit status is `0` when every selected device succeeds, `1` when no eligible
 device matches and `2` when at least one connection fails or times out.
 
+Browse complete collection runs without remembering report paths:
+
+```bash
+gr collect reports
+gr collect reports latest
+gr collect reports <report-timestamp>
+gr collect reports <report-timestamp> --no-more
+```
+
+The first command lists one row per collection run with its timestamp, device
+count and `success`/`failed`/`timeout` totals. Selecting `latest` or a report ID
+prints the complete JSON report through the automatic pager; `--no-more`
+writes it directly. Bash completion proposes `latest` and every available
+report ID. Reports are discovered under `device_version_dir`, whose default is
+`~/.local/state/gr/device-version` and which can be overridden globally or per
+user.
+
 ## Diagnostics and documentation
 
 `gr doctor --api` checks configuration, permissions, executables, IEEE data and API access. `gr docs --language en` shows this guide; `gr docs --language ro` shows Romanian documentation. Inventory writes remain dry-run until `--apply`.

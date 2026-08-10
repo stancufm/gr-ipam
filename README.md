@@ -70,6 +70,7 @@ gr vendor sync
 gr ssh validate
 gr ssh validate --run --ip 192.0.2.10
 gr collect version --ip 192.0.2.10
+gr collect reports latest
 gr self-update check
 ```
 

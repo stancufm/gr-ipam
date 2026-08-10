@@ -59,6 +59,7 @@ CONFIG_OPTIONS = (
     ("ssh_audit_enabled", False),
     ("ssh_audit_dir", "~/.local/state/gr/audit"),
     ("ssh_profiles", {}),
+    ("device_version_dir", "~/.local/state/gr/device-version"),
     ("vendor_db_dir", "/var/lib/gr/ieee-vendors"),
 )
 
@@ -125,6 +126,7 @@ def load_config(path=None):
     cfg["ssh_audit_dir"] = expand(cfg.get("ssh_audit_dir", "~/.local/state/gr/audit"))
     cfg["hosts_sync_enabled"] = bool(cfg.get("hosts_sync_enabled", False))
     cfg["ssh_profiles"] = cfg.get("ssh_profiles", {})
+    cfg["device_version_dir"] = expand(cfg.get("device_version_dir", "~/.local/state/gr/device-version"))
     cfg["vendor_db_dir"] = expand(cfg.get("vendor_db_dir", "/var/lib/gr/ieee-vendors"))
     cfg["_config_sources"] = sources
     return cfg
@@ -935,6 +937,34 @@ def audit_pager_command():
     return []
 
 
+def write_paged_text(content, use_pager=True):
+    pager = None
+    pager_input = None
+    if use_pager and getattr(sys.stdout, "isatty", lambda: False)():
+        command = audit_pager_command()
+        if command:
+            try:
+                pager = subprocess.Popen(command, stdin=subprocess.PIPE, universal_newlines=True)
+                pager_input = pager.stdin
+            except OSError as exc:
+                raise GrError("Cannot start pager {}: {}".format(command[0], exc))
+    try:
+        destination = pager_input or sys.stdout
+        destination.write(content)
+        destination.flush()
+    except BrokenPipeError:
+        pass
+    finally:
+        if pager_input is not None:
+            try:
+                pager_input.close()
+            except BrokenPipeError:
+                pass
+        if pager is not None:
+            pager.wait()
+    return 0
+
+
 def command_audit_replay(path, streams=None, use_pager=True):
     path = expand(path)
     streams = set(streams or ("stdout", "stderr"))
@@ -1117,6 +1147,72 @@ def command_audit_show(cfg, target=None, session=None, streams=None, use_pager=T
     return command_audit_replay(selected["path"], streams, use_pager)
 
 
+def collect_report_inventory(cfg):
+    root = cfg["device_version_dir"]
+    if not os.path.isdir(root):
+        return []
+    reports = []
+    try:
+        directories = sorted(os.scandir(root), key=lambda item: item.name, reverse=True)
+        for directory in directories:
+            if not directory.is_dir(follow_symlinks=False):
+                continue
+            candidates = [item for item in os.scandir(directory.path)
+                          if item.is_file(follow_symlinks=False)
+                          and item.name.endswith("-show-version-report.json")]
+            for item in sorted(candidates, key=lambda entry: entry.name):
+                try:
+                    with open(item.path, encoding="utf-8") as handle:
+                        data = json.load(handle)
+                except (OSError, ValueError) as exc:
+                    raise GrError("Cannot read collect report {}: {}".format(item.path, exc))
+                if not isinstance(data, dict):
+                    raise GrError("Invalid collect report {}: top-level JSON must be an object".format(
+                        item.path))
+                results = data.get("results", [])
+                if not isinstance(results, list):
+                    raise GrError("Invalid collect report {}: results must be a list".format(item.path))
+                if not all(isinstance(result, dict) for result in results):
+                    raise GrError("Invalid collect report {}: every result must be an object".format(
+                        item.path))
+                counts = {status: sum(1 for result in results if result.get("result") == status)
+                          for status in ("success", "failed", "timeout")}
+                reports.append({
+                    "id": directory.name,
+                    "path": item.path,
+                    "generated": str(data.get("generated_utc") or directory.name),
+                    "devices": len(results),
+                    "success": counts["success"],
+                    "failed": counts["failed"],
+                    "timeout": counts["timeout"],
+                    "data": data,
+                })
+    except OSError as exc:
+        raise GrError("Cannot list collect reports in {}: {}".format(root, exc))
+    reports.sort(key=lambda item: (item["generated"], item["id"]), reverse=True)
+    return reports
+
+
+def command_collect_reports(cfg, report=None, use_pager=True):
+    reports = collect_report_inventory(cfg)
+    if not report:
+        if not reports:
+            print("No collect reports found in {}.".format(cfg["device_version_dir"]))
+            return 0
+        rows = [(item["id"], item["generated"], str(item["devices"]),
+                 str(item["success"]), str(item["failed"]), str(item["timeout"]))
+                for item in reports]
+        print_audit_table(("REPORT", "GENERATED UTC", "DEVICES", "SUCCESS", "FAILED", "TIMEOUT"), rows)
+        print("\nShow: gr collect reports <report-or-latest>")
+        return 0
+    selected = reports[0] if report == "latest" and reports else next(
+        (item for item in reports if item["id"] == report), None)
+    if selected is None:
+        raise GrError("No collect report matches: {}".format(report))
+    content = json.dumps(selected["data"], ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    return write_paged_text(content, use_pager)
+
+
 def completion_source_path():
     candidates = [
         BASH_COMPLETION,
@@ -1152,6 +1248,13 @@ def command_completion(cfg, action, value=None):
             print("latest")
         for summary in sorted(matches, key=lambda item: item["started"], reverse=True):
             print(summary["session"])
+        return 0
+    if action == "collect-reports":
+        reports = collect_report_inventory(cfg)
+        if reports:
+            print("latest")
+        for report in reports:
+            print(report["id"])
         return 0
     raise GrError("Unsupported completion action: {}".format(action))
 
@@ -1939,6 +2042,10 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                                  help="require this phpIPAM device_vendor value (default: cisco)")
     collect_version.add_argument("--workers", type=int, default=4,
                                  help="parallel SSH sessions (default: 4; effective range: 1-12)")
+    collect_reports = collect_sub.add_parser("reports", help="list or display collected version reports")
+    collect_reports.add_argument("report", nargs="?", help="report timestamp/ID or latest")
+    collect_reports.add_argument("--no-more", action="store_true",
+                                 help="write report directly instead of using the automatic pager")
     find = sub.add_parser("find", aliases=["search"], help="find addresses by IP, hostname, description, owner, MAC or port")
     find.add_argument("terms", nargs="+")
     find.add_argument("--details", action="store_true",
@@ -2024,7 +2131,8 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                             help="write directly instead of using the automatic terminal pager")
     completion = sub.add_parser("completion", help="print shell completion or dynamic candidates")
     completion.add_argument("completion_action",
-                            choices=("bash", "profiles", "audit-targets", "audit-sessions"))
+                            choices=("bash", "profiles", "audit-targets", "audit-sessions",
+                                     "collect-reports"))
     completion.add_argument("value", nargs="?", help="target required by audit-sessions")
     docs_parser = sub.add_parser("docs", aliases=["help"], help="display the complete installed documentation")
     docs_parser.add_argument("--language", choices=("en", "ro"), default="en")
@@ -2085,6 +2193,8 @@ def main(argv=None):
             helper_args.extend(["--ip", ip])
         return command_helper(SSH_VALIDATOR, helper_args)
     if args.command == "collect":
+        if args.collect_action == "reports":
+            return command_collect_reports(cfg, args.report, use_pager=not args.no_more)
         if args.collect_action != "version":
             parser.parse_args(["collect", "--help"])
             return 0
