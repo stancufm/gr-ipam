@@ -36,6 +36,8 @@ documentation and vault management.
   audit report.
 - `libexec/collect-version` runs `show version`, preserves raw output and emits
   parsed JSON inventory.
+- `libexec/collect-config` runs the driver's configuration commands and commits
+  changed normalized configurations to the global private Git archive.
 
 Both helpers load the installed `gr` module so API, metadata, credential
 profiles, device drivers, vault and legacy-client behavior remain consistent.
@@ -64,6 +66,8 @@ layering.
 - SSH passwords: `~/.password-store/gr/`, encrypted by the user's GPG key;
 - SSH keys and persistent gr known hosts: owned and managed by the Linux user;
 - reports: `~/.local/state/gr/`, directory mode `0700`, files mode `0600`.
+- device configuration history: `/var/lib/gr/config-archive`, mode `2770`,
+  shared only with authorized members of `gr-config`.
 
 No credential is stored in phpIPAM. phpIPAM contains only the profile name that
 selects a secret in the current user's vault. The independent `device_driver`
@@ -88,6 +92,14 @@ separate `ssh1` wrapper, keeping weak algorithms isolated per device.
 IEEE MA-L, MA-M and MA-S registries are downloaded atomically into a root-owned,
 world-readable cache. Lookup uses longest-prefix matching. The weekly systemd
 timer updates the shared database once for all users.
+
+### Global configuration archive
+
+Drivers own both version and running-configuration commands. Authentication
+uses the initiating operator's private vault, while normalized configurations
+are written under a global lock to `/var/lib/gr/config-archive/devices/`. Git
+creates one collection commit only when staged content differs from HEAD.
+Browsing uses `gr config devices/history/view`; gr configures no archive remote.
 
 ## Data flows
 

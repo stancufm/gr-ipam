@@ -40,9 +40,10 @@ DEFAULT_DOCUMENTATION = "/usr/local/share/doc/gr/GR-PHPIPAM.md"
 DEFAULT_DOCUMENTATION_RO = "/usr/local/share/doc/gr/GR-PHPIPAM.ro.md"
 SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
+CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.2.1"
+GR_VERSION = "2.3.0"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -54,35 +55,48 @@ DEVICE_DRIVER_SPECS = {
         "interactive_cli": False,
         "version_commands": ("show version",),
         "cleanup_commands": (),
+        "config_commands": (),
     },
     "cisco-ios": {
         "interactive_cli": False,
         "version_commands": ("show version",),
         "cleanup_commands": (),
+        "config_commands": ("terminal length 0", "show running-config"),
     },
     "cisco-small-business": {
         "interactive_cli": True,
         "version_commands": ("terminal datadump", "show version", "show system"),
         "cleanup_commands": ("exit", "exit"),
+        "config_commands": ("terminal datadump", "show running-config"),
+    },
+    "planet-sgs": {
+        "interactive_cli": True,
+        "version_commands": ("enable", "show version"),
+        "cleanup_commands": ("exit", "exit"),
+        "config_commands": ("enable", "show running-config"),
     },
     "dell-os10": {
         "interactive_cli": False,
         "version_commands": ("show version",),
         "cleanup_commands": (),
+        "config_commands": ("terminal length 0", "show running-configuration"),
     },
     "hpe-arubaos-switch": {
         "interactive_cli": True,
         "version_commands": ("no page", "show version", "show system"),
         "cleanup_commands": ("exit", "exit"),
+        "config_commands": ("no page", "show running-config"),
     },
     "hpe-comware7": {
         "interactive_cli": True,
         "version_commands": ("screen-length disable", "display version",
                              "display device manuinfo"),
         "cleanup_commands": ("quit",),
+        "config_commands": ("screen-length disable", "display current-configuration"),
     },
 }
 DEVICE_DRIVERS = tuple(DEVICE_DRIVER_SPECS)
+GLOBAL_CONFIG_ARCHIVE = os.environ.get("GR_CONFIG_ARCHIVE", "/var/lib/gr/config-archive")
 REQUIRED_ADDRESS_CUSTOM_FIELDS = (
     "custom_ssh_enabled", "custom_ssh_user", "custom_ssh_port", "custom_ssh_profile",
     "custom_ssh_jump", "custom_ssh_client", "custom_device_driver", "custom_device_vendor",
@@ -979,6 +993,17 @@ class CiscoSmallBusinessLogin:
         return []
 
 
+class PlanetSgsLogin(CiscoSmallBusinessLogin):
+    """Handle PLANET's optional enable-password prompt after initial login."""
+
+    def feed(self, data):
+        self.buffer = (self.buffer + data)[-4096:]
+        if self.state == "ready" and self.PASSWORD_RE.search(self.buffer):
+            self.buffer = b""
+            return [("credential", self.password + b"\n")]
+        return super().feed(b"")
+
+
 class HpeArubaOsSwitchLogin:
     """Pass the ArubaOS-Switch legal banner and recognize its CLI prompt."""
 
@@ -1037,6 +1062,7 @@ class HpeComwareLogin:
 def device_login_driver(driver):
     mapping = {
         "cisco-small-business": CiscoSmallBusinessLogin,
+        "planet-sgs": PlanetSgsLogin,
         "hpe-arubaos-switch": HpeArubaOsSwitchLogin,
         "hpe-comware7": HpeComwareLogin,
     }
@@ -1564,6 +1590,94 @@ def command_collect_reports(cfg, report=None, use_pager=True, raw=False):
     return write_paged_text(content, use_pager)
 
 
+def config_archive_files():
+    devices = os.path.join(GLOBAL_CONFIG_ARCHIVE, "devices")
+    if not os.path.isdir(os.path.join(GLOBAL_CONFIG_ARCHIVE, ".git")):
+        return []
+    files = []
+    try:
+        entries = os.scandir(devices)
+    except OSError as exc:
+        raise GrError("Cannot read global configuration archive: {}".format(exc))
+    with entries:
+        for entry in entries:
+            match = re.match(r"^(.*?)--([0-9a-fA-F:.]+)\.cfg$", entry.name)
+            if entry.is_file(follow_symlinks=False) and match:
+                files.append({"hostname": match.group(1), "ip": match.group(2),
+                              "path": "devices/{}".format(entry.name)})
+    return sorted(files, key=lambda item: (item["hostname"].lower(), item["ip"]))
+
+
+def config_archive_target(value):
+    needle = str(value or "").lower()
+    matches = [item for item in config_archive_files()
+               if needle in (item["hostname"].lower(), item["ip"].lower())]
+    if not matches:
+        raise GrError("No archived configuration matches: {}".format(value))
+    if len(matches) > 1:
+        raise GrError("Multiple archived configurations match {}; use the exact IP".format(value))
+    return matches[0]
+
+
+def git_archive_output(arguments):
+    try:
+        return subprocess.check_output([
+            "git", "-c", "safe.directory={}".format(GLOBAL_CONFIG_ARCHIVE),
+            "-C", GLOBAL_CONFIG_ARCHIVE] + list(arguments),
+                                       universal_newlines=True, stderr=subprocess.STDOUT)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "output", "") or str(exc)
+        raise GrError("Cannot read configuration archive: {}".format(detail.strip()))
+
+
+def config_archive_history(item):
+    output = git_archive_output([
+        "log", "--follow", "--date=format-local:{}".format(DISPLAY_TIME_FORMAT),
+        "--format=%H%x1f%ad%x1f%s", "--", item["path"]])
+    rows = []
+    for line in output.splitlines():
+        fields = line.split("\x1f", 2)
+        if len(fields) == 3:
+            rows.append(tuple(fields))
+    return rows
+
+
+def command_config_devices(filter_value=None):
+    items = config_archive_files()
+    if filter_value:
+        needle = filter_value.lower()
+        items = [item for item in items if needle in item["hostname"].lower() or needle in item["ip"]]
+    rows = []
+    for item in items:
+        history = config_archive_history(item)
+        rows.append((item["hostname"], item["ip"], str(len(history)),
+                     history[0][1] if history else "-"))
+    if not rows:
+        print("No archived device configurations found.")
+        return 0
+    print_audit_table(("HOSTNAME", "IP", "VERSIONS", "LATEST (EUROPE/BUCHAREST)"), rows)
+    print("\nHistory: gr config history <hostname-or-ip>")
+    return 0
+
+
+def command_config_history(target):
+    item = config_archive_target(target)
+    history = config_archive_history(item)
+    rows = [(commit[:12], date, subject) for commit, date, subject in history]
+    print_audit_table(("REVISION", "COLLECTED (EUROPE/BUCHAREST)", "SUBJECT"), rows)
+    print("\nView: gr config view {} <revision-or-latest>".format(target))
+    return 0
+
+
+def command_config_view(target, revision="latest", use_pager=True):
+    item = config_archive_target(target)
+    selected = "HEAD" if revision in (None, "latest") else revision
+    content = git_archive_output(["show", "{}:{}".format(selected, item["path"])])
+    heading = "Configuration: {} ({}) revision={}\n\n".format(
+        item["hostname"], item["ip"], revision or "latest")
+    return write_paged_text(heading + content, use_pager)
+
+
 def latest_successful_inventory(cfg):
     """Return the newest successful collected inventory record for every IP."""
     inventory = {}
@@ -1592,6 +1706,8 @@ def detect_device_driver(row, collected=None):
         return "hpe-arubaos-switch", "inventory:model/firmware"
     if "os10" in combined or re.search(r"\b(?:s|z)\d{4}[a-z-]*\b", model, re.I) and "dell" in vendor:
         return "dell-os10", "inventory:model/os-family"
+    if os_family == "planet-sgs" or re.match(r"^SGS-\d", model, re.I):
+        return "planet-sgs", "inventory:model/os-family"
     if re.match(r"^(?:SG|SF|CBS|SX|SRW)\d", model, re.I):
         return "cisco-small-business", "inventory:model"
     if re.match(r"^(?:WS-C|C\d{3,4}|ISR|ASR|IE\d|N[3579]K)", model, re.I):
@@ -1602,6 +1718,7 @@ def detect_device_driver(row, collected=None):
         return collected_driver, "inventory:successful-driver"
 
     vendor_map = {
+        "planet-technology": "planet-sgs",
         "hpe-comware": "hpe-comware7",
         "hpe-aruba": "hpe-arubaos-switch",
         "aruba": "hpe-arubaos-switch",
@@ -1610,6 +1727,8 @@ def detect_device_driver(row, collected=None):
     }
     if vendor in vendor_map:
         return vendor_map[vendor], "phpipam:vendor"
+    if "planet" in vendor:
+        return "planet-sgs", "phpipam:vendor"
     return "generic", "fallback:unidentified"
 
 
@@ -1731,8 +1850,9 @@ def command_driver_list():
     for driver in DEVICE_DRIVERS:
         spec = device_driver_spec(driver)
         rows.append((driver, "yes" if spec["interactive_cli"] else "no",
-                     "; ".join(spec["version_commands"])))
-    print_audit_table(("DRIVER", "INTERACTIVE LOGIN", "VERSION COMMANDS"), rows)
+                     "; ".join(spec["version_commands"]),
+                     "; ".join(spec["config_commands"]) or "-"))
+    print_audit_table(("DRIVER", "INTERACTIVE LOGIN", "VERSION COMMANDS", "CONFIG COMMANDS"), rows)
     return 0
 
 
@@ -1787,6 +1907,21 @@ def command_completion(cfg, action, value=None):
             print("latest")
         for report in reports:
             print(report["id"])
+        return 0
+    if action == "config-targets":
+        values = set()
+        for item in config_archive_files():
+            values.update((item["hostname"], item["ip"]))
+        for candidate in sorted(values, key=str.lower):
+            print(candidate)
+        return 0
+    if action == "config-revisions":
+        if not value:
+            raise GrError("config-revisions requires a hostname or IP")
+        item = config_archive_target(value)
+        print("latest")
+        for commit, _date, _subject in config_archive_history(item):
+            print(commit[:12])
         return 0
     raise GrError("Unsupported completion action: {}".format(action))
 
@@ -2218,6 +2353,12 @@ def command_doctor(cfg, test_api=False, system_only=False):
           "/etc/gr/release-key.asc or install with --release-key")
     check("Bash completion", os.path.isfile(BASH_COMPLETION),
           "{} or run: eval \"$(gr completion bash)\"".format(BASH_COMPLETION), essential=True)
+    archive_exists = os.path.isdir(GLOBAL_CONFIG_ARCHIVE)
+    archive_access = archive_exists and os.access(GLOBAL_CONFIG_ARCHIVE, os.R_OK | os.X_OK)
+    check("global config archive", archive_access,
+          "{}{}".format(GLOBAL_CONFIG_ARCHIVE,
+                        "" if archive_access else "; membership in gr-config required"),
+          essential=True)
     timezone_path = "/etc/timezone"
     try:
         with open(timezone_path, encoding="utf-8") as handle:
@@ -2693,8 +2834,12 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     doctor.add_argument("--api", action="store_true", help="also test phpIPAM without prompting for a password")
     doctor.add_argument("--system", action="store_true",
                         help="validate only the shared installation, without per-user credentials")
-    config_parser = sub.add_parser("config", help="inspect default, global, user and effective configuration")
-    config_parser.add_argument("config_action", nargs="?", choices=("show",), default="show")
+    config_parser = sub.add_parser("config", help="inspect gr settings or archived device configurations")
+    config_parser.add_argument("config_action", nargs="?",
+                               choices=("show", "devices", "history", "view"), default="show")
+    config_parser.add_argument("config_values", nargs="*")
+    config_parser.add_argument("--no-more", action="store_true",
+                               help="write configuration directly instead of using the pager")
     ssh_command = sub.add_parser("ssh", help="validate SSH metadata and connectivity in bulk")
     ssh_sub = ssh_command.add_subparsers(dest="ssh_action")
     ssh_validate = ssh_sub.add_parser("validate", help="list or validate SSH access to sw* devices")
@@ -2712,8 +2857,19 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                                 help="collect every device with an explicit non-generic driver")
     collect_target.add_argument("--ip", action="append", dest="ips", help="limit to an IP (repeatable)")
     collect_version.add_argument("--vendor", help="optionally require this phpIPAM device_vendor value")
+    collect_version.add_argument("--driver", choices=DEVICE_DRIVERS,
+                                 help="probe selected --ip targets with an explicit driver")
     collect_version.add_argument("--workers", type=int, default=4,
                                  help="parallel SSH sessions (default: 4; effective range: 1-12)")
+    collect_config = collect_sub.add_parser(
+        "config", help="collect running configurations into the global Git archive")
+    collect_config_target = collect_config.add_mutually_exclusive_group(required=True)
+    collect_config_target.add_argument("--all", action="store_true")
+    collect_config_target.add_argument("--ip", action="append", dest="ips")
+    collect_config.add_argument("--vendor")
+    collect_config.add_argument("--driver", choices=DEVICE_DRIVERS,
+                                help="probe selected --ip targets with an explicit driver")
+    collect_config.add_argument("--workers", type=int, default=4)
     collect_reports = collect_sub.add_parser("reports", help="list or display collected version reports")
     collect_reports.add_argument("report", nargs="?", help="report timestamp/ID or latest")
     collect_reports.add_argument("--raw", action="store_true",
@@ -2842,7 +2998,7 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     completion = sub.add_parser("completion", help="print shell completion or dynamic candidates")
     completion.add_argument("completion_action",
                             choices=("bash", "profiles", "drivers", "vendors", "audit-targets", "audit-sessions",
-                                     "collect-reports"))
+                                     "collect-reports", "config-targets", "config-revisions"))
     completion.add_argument("value", nargs="?", help="target required by audit-sessions")
     docs_parser = sub.add_parser("docs", aliases=["help"], help="display the complete installed documentation")
     docs_parser.add_argument("--language", choices=("en", "ro"), default="en")
@@ -2876,7 +3032,24 @@ def main(argv=None):
         return command_completion({}, "bash")
     cfg = load_config(args.config)
     if args.command == "config":
-        return command_config_show(cfg, args.config)
+        if args.config_action == "show":
+            if args.config_values:
+                raise GrError("gr config show does not accept a target")
+            return command_config_show(cfg, args.config)
+        if args.config_action == "devices":
+            if len(args.config_values) > 1:
+                raise GrError("Usage: gr config devices [filter]")
+            return command_config_devices(args.config_values[0] if args.config_values else None)
+        if args.config_action == "history":
+            if len(args.config_values) != 1:
+                raise GrError("Usage: gr config history <hostname-or-ip>")
+            return command_config_history(args.config_values[0])
+        if args.config_action == "view":
+            if not 1 <= len(args.config_values) <= 2:
+                raise GrError("Usage: gr config view <hostname-or-ip> [revision-or-latest]")
+            return command_config_view(args.config_values[0],
+                                       args.config_values[1] if len(args.config_values) == 2 else "latest",
+                                       use_pager=not args.no_more)
     if args.command == "audit":
         if args.audit_action != "show":
             parser.parse_args(["audit", "--help"])
@@ -2905,16 +3078,33 @@ def main(argv=None):
     if args.command == "collect":
         if args.collect_action == "reports":
             return command_collect_reports(cfg, args.report, use_pager=not args.no_more, raw=args.raw)
+        if args.collect_action == "config":
+            helper_args = ["--workers", str(args.workers)]
+            if args.driver and not args.ips:
+                raise GrError("--driver requires --ip and is intended for controlled probing")
+            if args.vendor:
+                helper_args.extend(["--vendor", args.vendor])
+            if args.driver:
+                helper_args.extend(["--driver", args.driver])
+            if args.all:
+                helper_args.append("--all")
+            for ip in args.ips or []:
+                helper_args.extend(["--ip", ip])
+            return command_helper(CONFIG_COLLECTOR, helper_args)
         if args.collect_action != "version":
             parser.parse_args(["collect", "--help"])
             return 0
         helper_args = ["--workers", str(args.workers)]
         if args.all_drivers and args.vendor:
             raise GrError("--vendor cannot be combined with --all-drivers")
+        if args.driver and not args.ips:
+            raise GrError("--driver requires --ip and is intended for controlled probing")
         if args.all_drivers:
             helper_args.append("--all-drivers")
         elif args.vendor:
             helper_args.extend(["--vendor", args.vendor])
+        if args.driver:
+            helper_args.extend(["--driver", args.driver])
         if args.all:
             helper_args.append("--all")
         for ip in args.ips or []:

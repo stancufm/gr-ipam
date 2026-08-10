@@ -100,7 +100,7 @@ _gr_completion() {
             ;;
         completion)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "bash profiles drivers vendors audit-targets audit-sessions collect-reports" "$current"
+                _gr_complete_words "bash profiles drivers vendors audit-targets audit-sessions collect-reports config-targets config-revisions" "$current"
             elif [[ $subcommand == audit-sessions && $COMP_CWORD -eq 3 ]]; then
                 _gr_complete_dynamic audit-targets "$current"
             fi
@@ -109,7 +109,19 @@ _gr_completion() {
             _gr_complete_words "--api --system --config --help" "$current"
             ;;
         config)
-            (( COMP_CWORD == 2 )) && _gr_complete_words "show --config --help" "$current"
+            if (( COMP_CWORD == 2 )); then
+                _gr_complete_words "show devices history view --config --help" "$current"
+            elif [[ $subcommand == devices && $COMP_CWORD -eq 3 ]]; then
+                _gr_complete_dynamic config-targets "$current"
+            elif [[ $subcommand == history && $COMP_CWORD -eq 3 ]]; then
+                _gr_complete_dynamic config-targets "$current"
+            elif [[ $subcommand == view && $COMP_CWORD -eq 3 ]]; then
+                _gr_complete_dynamic config-targets "$current"
+            elif [[ $subcommand == view && $COMP_CWORD -eq 4 ]]; then
+                _gr_complete_dynamic config-revisions "$current" "${COMP_WORDS[3]}"
+            elif [[ $current == -* ]]; then
+                _gr_complete_words "--no-more --config --help" "$current"
+            fi
             ;;
         init)
             _gr_complete_words "--configure-auth --config --help" "$current"
@@ -128,9 +140,11 @@ _gr_completion() {
             ;;
         collect)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "version reports" "$current"
+                _gr_complete_words "version config reports" "$current"
             elif [[ $subcommand == version ]]; then
-                _gr_complete_words "--all --all-drivers --ip --vendor --workers --config --help" "$current"
+                _gr_complete_words "--all --all-drivers --ip --vendor --driver --workers --config --help" "$current"
+            elif [[ $subcommand == config ]]; then
+                _gr_complete_words "--all --ip --vendor --driver --workers --config --help" "$current"
             elif [[ $subcommand == reports && $COMP_CWORD -eq 3 ]]; then
                 if [[ $current == -* ]]; then
                     _gr_complete_words "--raw --no-more --config --help" "$current"

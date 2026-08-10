@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+"""Collect device configurations and commit only content changes to the global archive."""
+
+import argparse
+import concurrent.futures
+import datetime
+import fcntl
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+
+GR_PATH = os.environ.get("GR_PATH", "/usr/local/bin/gr")
+VERSION_HELPER_PATH = os.environ.get(
+    "GR_VERSION_HELPER_PATH", "/usr/local/libexec/gr/collect-version")
+
+
+def load_module(name, path):
+    loader = importlib.machinery.SourceFileLoader(name, path)
+    spec = importlib.util.spec_from_loader(name, loader)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def normalize_configuration(text, command):
+    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", str(text or ""))
+    text = text.replace("\r", "").replace("\x00", "")
+    lower = text.lower()
+    marker = command.lower()
+    position = lower.rfind(marker)
+    if position >= 0:
+        newline = text.find("\n", position)
+        text = text[newline + 1:] if newline >= 0 else ""
+    cleaned = []
+    prompt = re.compile(r"^\s*(?:<[^>]+>|[^\s]+[>#])\s*$")
+    for line in text.splitlines():
+        if prompt.match(line):
+            continue
+        if line.startswith("Connection to ") and line.endswith(" closed."):
+            continue
+        if line.strip() == "--- STDERR ---":
+            break
+        cleaned.append(line.rstrip())
+    while cleaned and not cleaned[0].strip():
+        cleaned.pop(0)
+    while cleaned and not cleaned[-1].strip():
+        cleaned.pop()
+    return "\n".join(cleaned) + ("\n" if cleaned else "")
+
+
+def run_one(gr, version_helper, item, password, known_hosts):
+    commands = list(item.pop("_config_commands"))
+    configuration_command = commands[-1]
+    cleanup = item.pop("_cleanup_commands")
+    login_driver = item.pop("_login_driver", None)
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, (password + "\n").encode("utf-8"))
+        os.close(write_fd)
+        client = "/usr/bin/ssh1" if item["client"] == "legacy" else "ssh"
+        strict = "no" if item["client"] == "legacy" else "accept-new"
+        remote_command = commands[0] if login_driver is not None else configuration_command
+        command = ["sshpass", "-d", str(read_fd), client, "-F", "/dev/null",
+                   "-o", "StrictHostKeyChecking={}".format(strict),
+                   "-o", "UserKnownHostsFile={}".format(known_hosts),
+                   "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
+                   "-p", str(item["port"]), "{}@{}".format(item["user"], item["ip"]),
+                   remote_command]
+        if login_driver is not None:
+            returncode, stdout, stderr, timed_out, complete = version_helper.run_interactive_device(
+                item, password, command, read_fd, login_driver, commands, cleanup)
+            read_fd = None
+            success = complete and bool(normalize_configuration(stdout, configuration_command))
+        else:
+            completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       universal_newlines=True, timeout=60, pass_fds=(read_fd,))
+            returncode, stdout, stderr, timed_out = (
+                completed.returncode, completed.stdout, completed.stderr, False)
+            success = returncode == 0
+        item["returncode"] = returncode
+        item["stderr"] = stderr.strip()
+        item["host_key_status"] = version_helper.host_key_status(stderr)
+        item["configuration"] = normalize_configuration(stdout, configuration_command)
+        item["result"] = "timeout" if timed_out else (
+            "success" if success and item["configuration"] else "failed")
+    except subprocess.TimeoutExpired:
+        item["result"] = "timeout"
+        item["stderr"] = "configuration command timed out"
+        item["configuration"] = ""
+    finally:
+        try:
+            if read_fd is not None:
+                os.close(read_fd)
+        except OSError:
+            pass
+    return item
+
+
+def archive_name(item):
+    hostname = re.sub(r"[^A-Za-z0-9_.-]+", "-", item["hostname"]).strip("-") or "device"
+    return "{}--{}.cfg".format(hostname, item["ip"])
+
+
+def git_call(archive, args, check=True, capture=False):
+    return subprocess.run(["git", "-c", "safe.directory={}".format(archive),
+                           "-C", archive] + list(args), check=check,
+                          stdout=subprocess.PIPE if capture else None,
+                          stderr=subprocess.PIPE if capture else None,
+                          universal_newlines=True)
+
+
+def archive_configurations(archive, results, stamp):
+    os.umask(0o007)
+    if not os.path.isdir(archive) or not os.access(archive, os.W_OK | os.X_OK):
+        raise RuntimeError("Global archive is not writable: {} (membership in gr-config required)".format(
+            archive))
+    lock_path = os.path.join(archive, ".collect.lock")
+    with open(lock_path, "a+") as lock_handle:
+        os.chmod(lock_path, 0o660)
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        if not os.path.isdir(os.path.join(archive, ".git")):
+            git_call(archive, ["init", "--quiet"])
+            git_call(archive, ["config", "user.name", "gr configuration collector"])
+            git_call(archive, ["config", "user.email", "gr@localhost"])
+        devices = os.path.join(archive, "devices")
+        os.makedirs(devices, mode=0o2770, exist_ok=True)
+        changed_candidates = []
+        for item in results:
+            if item["result"] != "success":
+                continue
+            relative = os.path.join("devices", archive_name(item)).replace(os.sep, "/")
+            target = os.path.join(archive, relative)
+            previous = ""
+            try:
+                with open(target, encoding="utf-8") as handle:
+                    previous = handle.read()
+            except OSError:
+                pass
+            if previous == item["configuration"]:
+                item["archive_status"] = "unchanged"
+                continue
+            temporary = target + ".tmp-{}".format(os.getpid())
+            with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(item["configuration"])
+            os.chmod(temporary, 0o660)
+            os.replace(temporary, target)
+            item["archive_status"] = "changed" if previous else "new"
+            item["archive_path"] = relative
+            changed_candidates.append(relative)
+        if not changed_candidates:
+            return "", 0
+        git_call(archive, ["add", "--"] + changed_candidates)
+        diff = git_call(archive, ["diff", "--cached", "--quiet"], check=False)
+        if diff.returncode == 0:
+            return "", 0
+        message = "Collect device configurations {} ({} changed)".format(
+            stamp, len(changed_candidates))
+        git_call(archive, ["commit", "--quiet", "-m", message])
+        commit = git_call(archive, ["rev-parse", "HEAD"], capture=True).stdout.strip()
+        return commit, len(changed_candidates)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Collect configurations into the global Git archive")
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--all", action="store_true")
+    target.add_argument("--ip", action="append", dest="ips")
+    parser.add_argument("--vendor")
+    parser.add_argument("--driver")
+    parser.add_argument("--workers", type=int, default=4)
+    args = parser.parse_args()
+    gr = load_module("gr_config_collector", GR_PATH)
+    if args.driver and not args.ips:
+        parser.error("--driver requires --ip")
+    if args.driver:
+        args.driver = gr.normalize_device_driver(args.driver)
+    version_helper = load_module("gr_version_helper", VERSION_HELPER_PATH)
+    cfg = gr.load_config(None)
+    with gr.api_session(cfg, prompt=False) as client:
+        rows = client.addresses()
+    items, rejected = [], []
+    for row in rows:
+        ip = str(gr.normalize_ip(row.get("ip")) or row.get("ip") or "")
+        if args.ips and ip not in args.ips:
+            continue
+        vendor = str(gr.custom_value(row, "device_vendor") or "").strip()
+        if args.vendor and vendor.lower() != args.vendor.lower():
+            continue
+        driver = args.driver or gr.resolve_device_driver(row)
+        if driver == "generic":
+            if args.ips:
+                rejected.append(ip)
+            continue
+        meta = gr.phpipam_ssh_metadata(row)
+        if not meta["enabled"] or not meta["profile"]:
+            continue
+        spec = gr.device_driver_spec(driver)
+        if not spec["config_commands"]:
+            rejected.append(ip)
+            continue
+        items.append({"ip": ip, "hostname": str(row.get("hostname") or ip),
+                      "vendor": vendor, "user": meta["user"],
+                      "port": int(meta["port"] or 22), "profile": meta["profile"],
+                      "client": meta.get("client", "normal"), "device_driver": driver,
+                      "_config_commands": spec["config_commands"],
+                      "_cleanup_commands": spec["cleanup_commands"],
+                      "_login_driver": (gr.device_login_driver(driver)
+                                        if spec["interactive_cli"] else None)})
+    if rejected:
+        print("Rejected: {} (generic or no configuration command)".format(", ".join(rejected)),
+              file=sys.stderr)
+        return 2
+    if not items:
+        print("No eligible devices matched.")
+        return 1
+    profiles = sorted(set(item["profile"] for item in items))
+    passwords = {profile: gr.read_vault_password(gr.vault_secret_name(cfg, profile))
+                 for profile in profiles}
+    known_hosts = gr.ensure_known_hosts(cfg)
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(args.workers, 12))) as pool:
+        futures = [pool.submit(run_one, gr, version_helper, dict(item),
+                               passwords[item["profile"]], known_hosts) for item in items]
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            results.append(result)
+            print("RESULT {} {} {}".format(result["hostname"], result["ip"], result["result"]))
+    results.sort(key=lambda item: tuple(int(part) for part in item["ip"].split(".")))
+    stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    try:
+        commit, changed = archive_configurations(gr.GLOBAL_CONFIG_ARCHIVE, results, stamp)
+    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
+        print("Archive failed: {}".format(exc), file=sys.stderr)
+        return 2
+    summary = {key: sum(1 for item in results if item["result"] == key)
+               for key in ("success", "failed", "timeout")}
+    summary.update({"changed": changed, "unchanged": sum(
+        1 for item in results if item.get("archive_status") == "unchanged")})
+    print("SUMMARY={}".format(json.dumps(summary, sort_keys=True)))
+    print("ARCHIVE={}".format(gr.GLOBAL_CONFIG_ARCHIVE))
+    print("COMMIT={}".format(commit or "unchanged"))
+    return 0 if all(item["result"] == "success" for item in results) else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

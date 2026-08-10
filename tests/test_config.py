@@ -43,12 +43,16 @@ class ConfigShowTests(unittest.TestCase):
     def test_driver_registry_owns_commands_and_cli_behavior(self):
         ios = GR.device_driver_spec("cisco-ios")
         smb = GR.device_driver_spec("cisco-small-business")
+        planet = GR.device_driver_spec("planet-sgs")
         hpe = GR.device_driver_spec("hpe-arubaos-switch")
         comware = GR.device_driver_spec("hpe-comware7")
         self.assertFalse(ios["interactive_cli"])
         self.assertEqual(ios["version_commands"], ("show version",))
         self.assertTrue(smb["interactive_cli"])
         self.assertIn("show system", smb["version_commands"])
+        self.assertTrue(planet["interactive_cli"])
+        self.assertEqual(planet["version_commands"], ("enable", "show version"))
+        self.assertIs(GR.device_login_driver("planet-sgs"), GR.PlanetSgsLogin)
         self.assertTrue(hpe["interactive_cli"])
         self.assertEqual(hpe["version_commands"],
                          ("no page", "show version", "show system"))
@@ -75,6 +79,11 @@ class ConfigShowTests(unittest.TestCase):
         self.assertEqual(GR.detect_device_driver(cisco, {})[0], "generic")
         self.assertEqual(GR.detect_device_driver(
             {"custom_device_vendor": "hpe-comware"}, {})[0], "hpe-comware7")
+        self.assertEqual(GR.detect_device_driver(
+            {"custom_device_vendor": "planet-technology"}, {})[0], "planet-sgs")
+        self.assertEqual(GR.detect_device_driver(
+            {}, {"model": "SGS-6310-16S8C4XR", "result": "success"})[0],
+            "planet-sgs")
 
     def test_driver_detection_range_and_parser_selectors(self):
         start, end = GR.driver_detection_range("10.22.10.10-69")

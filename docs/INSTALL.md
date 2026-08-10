@@ -80,6 +80,17 @@ gr doctor --api
 `gr init` also creates the private persistent host-key store at
 `~/.local/state/gr/known_hosts`.
 
+The installer creates the global configuration archive and its authorization
+group. Grant access explicitly, then start a new login session:
+
+```bash
+sudo usermod -aG gr-config OPERATOR
+```
+
+`/var/lib/gr/config-archive` is mode `2770`, owned by `root:gr-config`. Device
+configurations may contain secrets; do not grant this group broadly and do not
+add a Git remote without a reviewed secure destination.
+
 ### Upgrading from gr 1.x to 2.x
 
 Create the standard phpIPAM address custom field `device_driver`, install 2.x,

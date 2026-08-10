@@ -13,6 +13,16 @@ COLLECTOR = importlib.machinery.SourceFileLoader(
 
 
 class CollectVersionCliTests(unittest.TestCase):
+    def test_planet_sgs_version(self):
+        parsed = COLLECTOR.parse_version(
+            "PLANET Technology Corporation Internetwork Operating System Software\n"
+            "SGS-6310-16S8C4XR Series Software, Version 2.2.0E Build 97938, RELEASE SOFTWARE\n"
+            "Serial num:A9803122600060, ID num:20073010589\n")
+        self.assertEqual(parsed["model"], "SGS-6310-16S8C4XR")
+        self.assertEqual(parsed["firmware"], "2.2.0E Build 97938")
+        self.assertEqual(parsed["serial"], "A9803122600060")
+        self.assertEqual(parsed["os_family"], "planet-sgs")
+
     def test_host_key_status_is_classified(self):
         self.assertEqual(COLLECTOR.host_key_status(
             "Warning: Permanently added '192.0.2.1'"), "added")
@@ -130,6 +140,11 @@ class CollectVersionCliTests(unittest.TestCase):
     def test_ip_does_not_require_or_assume_vendor(self):
         args = GR.build_parser().parse_args(["collect", "version", "--ip", "192.0.2.10"])
         self.assertIsNone(args.vendor)
+
+    def test_ip_accepts_explicit_driver_for_controlled_probe(self):
+        args = GR.build_parser().parse_args([
+            "collect", "version", "--ip", "192.0.2.10", "--driver", "cisco-ios"])
+        self.assertEqual(args.driver, "cisco-ios")
 
     def test_vendor_counts_are_case_insensitive_and_sorted(self):
         rows = [

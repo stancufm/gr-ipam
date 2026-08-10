@@ -47,6 +47,17 @@ gr doctor --api
 `gr init` creează și depozitul privat persistent pentru cheile host în
 `~/.local/state/gr/known_hosts`.
 
+Installerul creează arhiva globală de configurații și grupul de autorizare.
+Accesul se acordă explicit, urmat de un login nou:
+
+```bash
+sudo usermod -aG gr-config OPERATOR
+```
+
+`/var/lib/gr/config-archive` are modul `2770` și proprietarul `root:gr-config`.
+Configurațiile pot conține secrete; nu acordați grupul inutil și nu configurați
+un remote Git fără o destinație securizată analizată.
+
 ### Upgrade de la gr 1.x la 2.x
 
 Creați câmpul custom standard phpIPAM `device_driver`, instalați 2.x, apoi

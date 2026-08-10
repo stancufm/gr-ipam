@@ -199,13 +199,52 @@ file per device, a persistent per-user host-key store and
 with generation criteria plus parsed model, firmware, OS family,
 uptime, serial, system image, ROM, vendor, stderr and result status. The parser is
 driven by each selected device driver and supports the implemented Cisco, Dell
-OS10, HPE ArubaOS-Switch and HPE Comware command/output families.
+OS10, HPE ArubaOS-Switch, HPE Comware and PLANET SGS command/output families.
 
 `gr collect reports` lists one report per row. Its `CRITERIA` column shows how
 the report was generated (`vendor=... all`, selected IPs, or
 `driver!=generic`). Older reports without saved criteria are labeled `legacy`.
 Displayed timestamps are converted from stored UTC to `Europe/Bucharest` and
 formatted as `YYYY-MM-DD HH:MM:SS`; stable report IDs and JSON timestamps remain UTC.
+
+### Global configuration archive
+
+`gr collect config` retrieves the running configuration with commands owned by
+the selected device driver and stores normalized text in the global private Git
+repository `/var/lib/gr/config-archive`. The archive belongs to group
+`gr-config`; only authorized group members can read or collect configurations.
+Credential profiles and vault secrets remain per user and are never committed.
+
+```bash
+gr collect config --all [--vendor VENDOR] [--workers N]
+gr collect config --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
+```
+
+The driver command mapping is visible through `gr driver list`. `generic`
+targets are rejected. Collection takes a global lock, normalizes terminal
+control output, writes one file per IP and creates one Git commit only when at
+least one configuration changed. Identical periodic collections create no
+commit and consume no new file copy. Git delta compression can subsequently be
+optimized with normal `git gc` maintenance.
+
+Browse the shared archive without remembering filesystem paths:
+
+```bash
+gr config devices
+gr config devices sw
+gr config history sw50
+gr config view sw50
+gr config view sw50 latest
+gr config view sw50 <revision>
+gr config view sw50 <revision> --no-more
+```
+
+`devices` lists each target, version count and newest collection time.
+`history` lists Git revisions for one exact hostname or IP. `view` uses the
+automatic pager and displays the latest or selected historical configuration.
+Bash completion proposes targets and revisions dynamically from the archive.
+The archive has no remote configured by gr; publishing device configurations
+requires a separate, explicit security decision.
 
 ### Driver migration from gr 1.x
 
