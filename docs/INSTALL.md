@@ -12,11 +12,14 @@ custom fields, and grant the API user access to the required sections. Follow
 
 ```bash
 sudo apt-get update
-sudo apt-get install openssh-client sshpass pass gnupg ca-certificates git
+sudo apt-get install python3 openssh-client sshpass pass gnupg ca-certificates git bash-completion less systemd
 ```
 
-`sshpass`, `pass`, and `gnupg` are optional if only interactive SSH or key-based
-authentication is used.
+All dependencies are mandatory so every documented feature is available. The
+separately packaged legacy client must also be installed as `/usr/bin/ssh1`.
+The installer verifies the complete list before modifying the system. If Debian
+packages are missing it aborts and prints the exact `apt-get` command. To let the
+installer install missing packages explicitly, add `--install-dependencies`.
 
 ## 3. Install from Git
 
@@ -28,6 +31,7 @@ sudo sh install.sh \
   --username gr-api \
   --app-id gr-app \
   --migration-app-id gr-migrate \
+  --install-dependencies \
   --enable-timer
 ```
 
@@ -98,6 +102,9 @@ gr doctor --api
 
 The installer includes English and Romanian documentation, and does not modify user credentials, password stores, GPG keys or
 SSH keys. Back up `/etc/gr/config.json` before major-version upgrades.
+
+`--destdir` installations deliberately skip host dependency checks because they
+are package/test staging operations and do not activate system services.
 
 Open a new Bash session after installation, or run
 `source /etc/bash_completion.d/gr`. Set `GR_COMPLETION_CISCO_STYLE=1` before

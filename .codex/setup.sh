@@ -14,6 +14,7 @@ python3 tests/test_audit.py
 python3 tests/test_config.py
 python3 tests/test_collect.py
 python3 tests/test_find.py
+python3 tests/test_install.py
 python3 tests/test_self_update.py
 
 test -f AGENTS.md

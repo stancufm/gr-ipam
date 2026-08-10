@@ -14,6 +14,7 @@ Options:
   --update-repository URL HTTPS Git repository used by gr self-update
   --destdir PATH          Package/test installation root (no systemd actions)
   --enable-timer          Enable the weekly IEEE update timer
+  --install-dependencies  Install missing Debian packages with apt-get
   --help
 
 No passwords, SSH keys or private GPG keys are copied by this installer.
@@ -28,6 +29,7 @@ ca_source=
 config_source=
 destdir=
 enable_timer=0
+install_dependencies=0
 release_key_source=
 update_repository=https://github.com/stancufm/gr-ipam.git
 update_repository_set=0
@@ -44,6 +46,7 @@ while [ "$#" -gt 0 ]; do
     --update-repository) update_repository=$2; update_repository_set=1; shift 2 ;;
     --destdir) destdir=$2; shift 2 ;;
     --enable-timer) enable_timer=1; shift ;;
+    --install-dependencies) install_dependencies=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -52,6 +55,48 @@ done
 if [ "$(id -u)" -ne 0 ] && [ -z "$destdir" ]; then
   echo "Run this installer with sudo/root (or use --destdir for a test install)." >&2
   exit 2
+fi
+
+required_packages="python3 openssh-client sshpass pass gnupg ca-certificates git bash-completion less systemd"
+
+check_dependencies() {
+  missing_packages=
+  for dependency_package in $required_packages; do
+    if ! dpkg-query -W -f='${Status}' "$dependency_package" 2>/dev/null | grep -q '^install ok installed$'; then
+      missing_packages="$missing_packages $dependency_package"
+    fi
+  done
+  missing_packages=${missing_packages# }
+}
+
+if [ -z "$destdir" ]; then
+  command -v dpkg-query >/dev/null 2>&1 || {
+    echo "Cannot verify dependencies: dpkg-query is not available (Debian is required)." >&2
+    exit 2
+  }
+  check_dependencies
+  if [ -n "$missing_packages" ] && [ "$install_dependencies" -eq 1 ]; then
+    command -v apt-get >/dev/null 2>&1 || {
+      echo "Cannot install dependencies: apt-get is not available." >&2
+      exit 2
+    }
+    echo "Installing required Debian packages: $missing_packages"
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y $missing_packages
+    check_dependencies
+  fi
+  if [ -n "$missing_packages" ]; then
+    echo "Missing required Debian packages: $missing_packages" >&2
+    echo "Install them with:" >&2
+    echo "  sudo apt-get update && sudo apt-get install $missing_packages" >&2
+    echo "Or re-run this installer with --install-dependencies." >&2
+    exit 2
+  fi
+  if ! command -v ssh1 >/dev/null 2>&1; then
+    echo "Missing required legacy SSH client: /usr/bin/ssh1" >&2
+    echo "Install the separately packaged gr legacy SSH client, then re-run this installer." >&2
+    exit 2
+  fi
 fi
 
 package_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -128,10 +173,6 @@ sh -n "$package_dir/libexec/gr-update"
 bash -n "$package_dir/completions/gr.bash"
 
 if [ -z "$destdir" ]; then
-  command -v ssh >/dev/null || { echo "Missing dependency: openssh-client" >&2; exit 2; }
-  command -v gpg >/dev/null || echo "WARNING: install gnupg to use the encrypted vault" >&2
-  command -v pass >/dev/null || echo "WARNING: install pass to use the encrypted vault" >&2
-  command -v sshpass >/dev/null || echo "WARNING: install sshpass for automatic password authentication" >&2
   systemctl daemon-reload
   if [ "$enable_timer" -eq 1 ]; then
     systemctl enable --now gr-vendor-update.timer
