@@ -26,6 +26,8 @@ gr --ssh --user operator --port 2222 --profile network-admin <target>
 
 One match connects automatically; multiple matches open an interactive selector. CLI overrides last only for that connection. `--no-vault` uses the OpenSSH prompt. A `legacy` client is isolated per device.
 
+The compact result table shows phpIPAM `lastSeen` immediately after `STATUS`.
+
 `--details` keeps the compact summary and then prints every field returned by
 phpIPAM for each matching address. Fields are sorted, multiline values are
 indented and nested JSON values remain readable. The detailed view is read-only
@@ -136,7 +138,7 @@ gr collect reports <report-timestamp> --no-more
 The first command lists one row per collection run with its timestamp, device
 count and `success`/`failed`/`timeout` totals. Selecting `latest` or a report ID
 shows a device table by default. Its columns are derived from every available
-result attribute except `stderr`, `raw_report`, `system_image` and `rom`.
+result attribute except `stderr`, `raw_report`, `system_image`, `rom` and `uptime`.
 `--raw` displays the original JSON file without transformation. Both formats
 use the automatic pager; `--no-more` writes directly. Bash completion proposes
 `latest`, every available report ID and the display options. Reports are

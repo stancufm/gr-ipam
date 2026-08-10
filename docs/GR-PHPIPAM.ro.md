@@ -21,6 +21,8 @@ gr --ssh --user operator --port 2222 --profile network-admin <țintă>
 
 Dacă există un singur rezultat, conectarea este automată; altfel se afișează selectorul. Override-urile CLI sunt valabile numai pentru sesiunea curentă. `--no-vault` forțează promptul OpenSSH. Clientul legacy este selectat numai prin metadata/CLI și nu slăbește clientul normal.
 
+Tabelul compact afișează câmpul phpIPAM `lastSeen` imediat după `STATUS`.
+
 `--details` păstrează sumarul compact și apoi afișează toate câmpurile returnate
 de phpIPAM pentru fiecare adresă găsită. Câmpurile sunt sortate, valorile pe mai
 multe linii sunt indentate, iar structurile JSON rămân lizibile. Afișarea este
@@ -130,7 +132,7 @@ Prima comandă afișează câte un rând pentru fiecare rulare, cu timestampul,
 numărul de dispozitive și totalurile `success`/`failed`/`timeout`. Selectarea lui
 `latest` sau a unui ID afișează implicit un tabel de echipamente. Coloanele sunt
 obținute din toate atributele disponibile, cu excepția `stderr`, `raw_report`,
-`system_image` și `rom`. `--raw` afișează fișierul JSON original fără
+`system_image`, `rom` și `uptime`. `--raw` afișează fișierul JSON original fără
 transformare. Ambele formate folosesc pagerul automat; `--no-more` scrie direct
 în terminal. Autocomplete-ul Bash propune `latest`, toate ID-urile și opțiunile
 de afișare. Rapoartele sunt căutate în `device_version_dir`, implicit

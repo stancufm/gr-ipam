@@ -9,6 +9,22 @@ GR = importlib.machinery.SourceFileLoader("gr_find_test_module", "bin/gr").load_
 
 
 class FindDetailsTests(unittest.TestCase):
+    def test_standard_table_places_last_seen_after_status(self):
+        row = {
+            "_ip": ipaddress.ip_address("192.0.2.10"),
+            "_hostname": "core-switch",
+            "lastSeen": "2026-08-10 12:00:00",
+            "tag": "2",
+            "description": "Core device",
+            "custom_fields": {},
+        }
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            GR.print_table([row])
+        lines = output.getvalue().splitlines()
+        self.assertRegex(lines[0], r"STATUS\s+LASTSEEN\s+SSH")
+        self.assertIn("2026-08-10 12:00:00", output.getvalue())
+
     def test_details_prints_all_phpipam_fields_and_hides_internal_keys(self):
         row = {
             "ip": "3221225994",
