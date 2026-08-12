@@ -16,6 +16,8 @@ Poate căuta adrese, deschide conexiuni SSH, păstra parolele dispozitivelor în
 - scrierile sunt dry-run implicit și necesită `--apply`;
 - algoritmii SSH vechi sunt izolați per dispozitiv;
 - auditul SSH este configurabil global sau per sesiune și produce fișiere private.
+- comenzile remote neinteractive pot reutiliza secretul SSH pentru sudo sau un
+  secret sudo separat în profilul de credențiale.
 - autocomplete-ul Bash acoperă comenzile, valorile valide și navigarea în audit.
 
 ## Cerințe și instalare
@@ -40,6 +42,8 @@ gr find core-switch
 gr find core-switch --details
 gr --ssh core-switch
 gr --ssh --audit core-switch
+gr exec linux-server --sudo -- systemctl status nginx
+gr config set ssh_audit_enabled true
 gr audit show core-switch latest
 gr config show
 gr update 192.0.2.10 --ssh-enabled yes --ssh-user operator --apply

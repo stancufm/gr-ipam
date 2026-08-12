@@ -43,7 +43,7 @@ VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.4.1"
+GR_VERSION = "2.5.0"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -107,6 +107,7 @@ GLOBAL_CONFIG_ARCHIVE = os.environ.get("GR_CONFIG_ARCHIVE", "/var/lib/gr/config-
 REQUIRED_ADDRESS_CUSTOM_FIELDS = (
     "custom_ssh_enabled", "custom_ssh_user", "custom_ssh_port", "custom_ssh_profile",
     "custom_ssh_jump", "custom_ssh_client", "custom_device_driver", "custom_device_vendor",
+    "custom_os_version",
 )
 
 
@@ -248,6 +249,96 @@ def profile_count(value):
         return "-"
     count = len(value) if isinstance(value, dict) else 0
     return "{} profile{}".format(count, "" if count == 1 else "s")
+
+
+PROFILE_CONFIG_KEYS = ("password_secret", "sudo_password_secret", "identity_file")
+
+
+def config_setting_path(scope):
+    if scope == "global":
+        if os.geteuid() != 0:
+            raise GrError("Global configuration requires: sudo gr config set/unset ... --scope global")
+        return SYSTEM_CONFIG, 0o644
+    return USER_CONFIG, 0o600
+
+
+def validate_config_setting_name(name):
+    parts = str(name or "").split(".")
+    top_level = {item[0] for item in CONFIG_OPTIONS}
+    if len(parts) == 1 and parts[0] in top_level and parts[0] != "ssh_profiles":
+        return parts
+    if (len(parts) == 3 and parts[0] == "ssh_profiles" and
+            re.match(r"^[A-Za-z0-9._-]+$", parts[1]) and parts[2] in PROFILE_CONFIG_KEYS):
+        return parts
+    raise GrError("Unsupported configuration setting: {}".format(name))
+
+
+def parse_config_setting(name, value):
+    parts = validate_config_setting_name(name)
+    defaults = dict(CONFIG_OPTIONS)
+    default = defaults.get(parts[0])
+    if isinstance(default, bool):
+        normalized = str(value).strip().lower()
+        if normalized in ("true", "yes", "on", "1"):
+            return True
+        if normalized in ("false", "no", "off", "0"):
+            return False
+        raise GrError("{} expects true or false".format(name))
+    if isinstance(default, list):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            raise GrError("{} expects a JSON list".format(name))
+        if not isinstance(parsed, list):
+            raise GrError("{} expects a JSON list".format(name))
+        return parsed
+    return str(value)
+
+
+def write_config_settings(path, data, mode):
+    directory = os.path.dirname(path)
+    os.makedirs(directory, mode=0o700 if mode == 0o600 else 0o755, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".gr-config-", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def command_config_change(action, name, value=None, scope="user"):
+    parts = validate_config_setting_name(name)
+    path, mode = config_setting_path(scope)
+    data = read_json_config(path, required=False)
+    if action == "set":
+        parsed = parse_config_setting(name, value)
+        if len(parts) == 1:
+            data[parts[0]] = parsed
+        else:
+            profiles = data.setdefault("ssh_profiles", {})
+            profile = profiles.setdefault(parts[1], {})
+            profile[parts[2]] = parsed
+    else:
+        if len(parts) == 1:
+            data.pop(parts[0], None)
+        else:
+            profiles = data.get("ssh_profiles", {})
+            profile = profiles.get(parts[1], {})
+            profile.pop(parts[2], None)
+            if not profile:
+                profiles.pop(parts[1], None)
+            if not profiles:
+                data.pop("ssh_profiles", None)
+    write_config_settings(path, data, mode)
+    print("{} {} configuration setting {} in {}".format(
+        "Set" if action == "set" else "Removed", scope, name, path))
+    return 0
 
 
 def print_config_table(columns, rows):
@@ -908,6 +999,13 @@ def choose_ssh_target(rows, legacy_fallback=True, override_user=None, override_p
 def vault_secret_name(cfg, profile):
     profile_cfg = cfg.get("ssh_profiles", {}).get(profile, {})
     return str(profile_cfg.get("password_secret") or "").strip()
+
+
+def sudo_vault_secret_name(cfg, profile):
+    """Use an explicit sudo secret when configured, otherwise reuse the SSH secret."""
+    profile_cfg = cfg.get("ssh_profiles", {}).get(profile, {})
+    return str(profile_cfg.get("sudo_password_secret") or
+               profile_cfg.get("password_secret") or "").strip()
 
 
 def read_vault_password(secret):
@@ -1899,6 +1997,14 @@ def command_completion(cfg, action, value=None):
         for profile in sorted(cfg.get("ssh_profiles", {}), key=str.lower):
             print(profile)
         return 0
+    if action == "config-settings":
+        for name, _default in CONFIG_OPTIONS:
+            if name != "ssh_profiles":
+                print(name)
+        for profile in sorted(cfg.get("ssh_profiles", {}), key=str.lower):
+            for key in PROFILE_CONFIG_KEYS:
+                print("ssh_profiles.{}.{}".format(profile, key))
+        return 0
     if action == "drivers":
         for driver in DEVICE_DRIVERS:
             print(driver)
@@ -1907,6 +2013,16 @@ def command_completion(cfg, action, value=None):
         with api_session(cfg, prompt=False) as client:
             for vendor, _count in vendor_counts(client.addresses()):
                 print(vendor)
+        return 0
+    if action == "inventory-targets":
+        values = set()
+        with api_session(cfg, prompt=False) as client:
+            for row in normalized_addresses(client.addresses()):
+                values.add(str(row["_ip"]))
+                if row.get("_hostname"):
+                    values.add(str(row["_hostname"]))
+        for target in sorted(values, key=str.lower):
+            print(target)
         return 0
     if action == "audit-targets":
         values = set()
@@ -1967,6 +2083,111 @@ def ensure_known_hosts(cfg):
     os.close(fd)
     os.chmod(path, 0o600)
     return path
+
+
+def exact_inventory_target(cfg, target):
+    wanted = str(target or "").strip().lower()
+    if not wanted:
+        raise GrError("An exact hostname or IP is required")
+    with api_session(cfg) as client:
+        rows = normalized_addresses(client.addresses())
+    matches = [row for row in rows if
+               str(row.get("_ip") or "").lower() == wanted or
+               str(row.get("_hostname") or "").lower() == wanted]
+    if not matches:
+        raise GrError("No exact phpIPAM target matches: {}".format(target))
+    if len(matches) != 1:
+        values = ", ".join(str(row.get("_ip")) for row in matches)
+        raise GrError("Target {} is ambiguous; use an exact IP ({})".format(target, values))
+    return matches[0]
+
+
+def command_exec(cfg, target, command_values, use_sudo=False, override_user=None,
+                 override_port=None, override_profile=None, override_client=None,
+                 no_vault=False, audit=None):
+    """Execute an explicit non-interactive command using phpIPAM and vault metadata."""
+    command_values = list(command_values or [])
+    if command_values and command_values[0] == "--":
+        command_values.pop(0)
+    if not command_values:
+        raise GrError("Remote command is required after --")
+    row = exact_inventory_target(cfg, target)
+    meta = phpipam_ssh_metadata(row)
+    if not meta["enabled"] and not cfg.get("ssh_legacy_fallback", True):
+        raise GrError("SSH metadata is not enabled for {}".format(row["_ip"]))
+    user = override_user or meta["user"] or getpass.getuser()
+    port = str(override_port or meta["port"] or "22")
+    selected_profile = override_profile or meta["profile"]
+    selected_client = override_client or meta["client"]
+    if selected_client not in ("normal", "legacy"):
+        raise GrError("Invalid SSH client metadata for {}: {}".format(row["_ip"], selected_client))
+    client_binary = "/usr/bin/ssh1" if selected_client == "legacy" else "ssh"
+    if not shutil.which(client_binary):
+        raise GrError("SSH client is not installed: {}".format(client_binary))
+
+    remote_text = " ".join(shlex.quote(value) for value in command_values)
+    if use_sudo:
+        remote_text = "sudo -S -p '' -- sh -c {}".format(shlex.quote(remote_text))
+    ssh_command = [client_binary, "-F", "/dev/null", "-p", port,
+                   "-o", "UserKnownHostsFile={}".format(ensure_known_hosts(cfg)),
+                   "-o", "StrictHostKeyChecking=ask"]
+    profile_cfg = cfg.get("ssh_profiles", {}).get(selected_profile, {}) if selected_profile else {}
+    identity = str(profile_cfg.get("identity_file") or "").strip()
+    if identity:
+        identity = expand(identity)
+        if not os.path.isfile(identity):
+            raise GrError("Identity file for profile {} is missing: {}".format(selected_profile, identity))
+        ssh_command.extend(["-i", identity])
+    if meta["jump"]:
+        ssh_command.extend(["-J", meta["jump"]])
+    ssh_command.extend(["{}@{}".format(user, row["_ip"]), remote_text])
+
+    inherited_fd = None
+    ssh_secret = vault_secret_name(cfg, selected_profile) if selected_profile and not no_vault else ""
+    if ssh_secret:
+        if not vault_secret_exists(ssh_secret):
+            raise GrError("Vault secret is not configured: {}".format(ssh_secret))
+        ssh_command, inherited_fd = ssh_with_password(ssh_command, read_vault_password(ssh_secret))
+    sudo_input = None
+    if use_sudo:
+        if no_vault or not selected_profile:
+            raise GrError("--sudo requires an encrypted credential profile")
+        sudo_secret = sudo_vault_secret_name(cfg, selected_profile)
+        if not sudo_secret or not vault_secret_exists(sudo_secret):
+            raise GrError("Sudo vault secret is not configured for profile {}".format(selected_profile))
+        sudo_input = (read_vault_password(sudo_secret) + "\n").encode("utf-8")
+
+    display_command = [client_binary, "-p", port, "{}@{}".format(user, row["_ip"]),
+                       "<sudo command>" if use_sudo else remote_text]
+    print("Executing on {}@{}:{} using profile {}{}".format(
+        user, row["_ip"], port, selected_profile or "-", " with sudo" if use_sudo else ""))
+    recorder = None
+    audit_enabled = cfg.get("ssh_audit_enabled", False) if audit is None else audit
+    if audit_enabled:
+        recorder = SshSessionAudit(cfg, row, display_command)
+        print("Recording remote stdout and stderr to: {}".format(recorder.path), file=sys.stderr)
+    try:
+        process = subprocess.Popen(ssh_command, stdin=subprocess.PIPE if use_sudo else None,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   pass_fds=(inherited_fd,) if inherited_fd is not None else ())
+        stdout_data, stderr_data = process.communicate(sudo_input)
+    finally:
+        if inherited_fd is not None:
+            os.close(inherited_fd)
+    if stdout_data:
+        sys.stdout.buffer.write(stdout_data)
+        sys.stdout.buffer.flush()
+        if recorder:
+            recorder.record("stdout", stdout_data)
+    if stderr_data:
+        sys.stderr.buffer.write(stderr_data)
+        sys.stderr.buffer.flush()
+        if recorder:
+            recorder.record("stderr", stderr_data)
+    if recorder:
+        recorder.close(process.returncode)
+        print("Remote command audit: {}".format(recorder.path), file=sys.stderr)
+    return process.returncode
 
 
 def connect_ssh(cfg, row, override_user=None, override_port=None, override_profile=None,
@@ -2859,8 +3080,10 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                         help="validate only the shared installation, without per-user credentials")
     config_parser = sub.add_parser("config", help="inspect gr settings or archived device configurations")
     config_parser.add_argument("config_action", nargs="?",
-                               choices=("show", "devices", "history", "view"), default="show")
+                               choices=("show", "set", "unset", "devices", "history", "view"), default="show")
     config_parser.add_argument("config_values", nargs="*")
+    config_parser.add_argument("--scope", choices=("user", "global"), default="user",
+                               help="configuration layer to modify (default: user)")
     config_parser.add_argument("--no-more", action="store_true",
                                help="write configuration directly instead of using the pager")
     ssh_command = sub.add_parser("ssh", help="validate SSH metadata and connectivity in bulk")
@@ -2921,6 +3144,21 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                              help="record complete stdin, stdout and stderr for this SSH session")
     audit_group.add_argument("--no-audit", dest="audit", action="store_false",
                              help="disable recording for this session even when globally enabled")
+    exec_parser = sub.add_parser(
+        "exec", help="run an explicit non-interactive command through phpIPAM SSH metadata")
+    exec_parser.add_argument("target", help="exact phpIPAM hostname or IP")
+    exec_parser.add_argument("--sudo", action="store_true",
+                             help="run through sudo; reuse the SSH secret unless a sudo secret is configured")
+    exec_parser.add_argument("--user", type=ssh_user, help="override the SSH user")
+    exec_parser.add_argument("--port", type=ssh_port, help="override the SSH port")
+    exec_parser.add_argument("--profile", type=profile_name, help="override the credential profile")
+    exec_parser.add_argument("--client", choices=("normal", "legacy"), help="override the SSH client")
+    exec_parser.add_argument("--no-vault", action="store_true", help="do not use the password vault")
+    exec_audit = exec_parser.add_mutually_exclusive_group()
+    exec_audit.add_argument("--audit", dest="audit", action="store_true", default=None,
+                            help="record remote stdout and stderr")
+    exec_audit.add_argument("--no-audit", dest="audit", action="store_false",
+                            help="disable recording even when globally enabled")
     subnet = sub.add_parser("subnet", help="list phpIPAM addresses in a CIDR")
     subnet.add_argument("cidr")
     local = sub.add_parser("local", help="search the local hosts file")
@@ -3020,7 +3258,7 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                             help="write directly instead of using the automatic terminal pager")
     completion = sub.add_parser("completion", help="print shell completion or dynamic candidates")
     completion.add_argument("completion_action",
-                            choices=("bash", "profiles", "drivers", "vendors", "audit-targets", "audit-sessions",
+                            choices=("bash", "profiles", "config-settings", "drivers", "vendors", "inventory-targets", "audit-targets", "audit-sessions",
                                      "collect-reports", "config-targets", "config-revisions"))
     completion.add_argument("value", nargs="?", help="target required by audit-sessions")
     docs_parser = sub.add_parser("docs", aliases=["help"], help="display the complete installed documentation")
@@ -3030,7 +3268,16 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    known_commands = {"init", "doctor", "config", "ssh", "collect", "find", "search", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "migrate-drivers", "driver", "vendor", "audit", "completion", "docs", "help"}
+    exec_remote_command = None
+    if argv and argv[0] == "exec":
+        if "--" not in argv:
+            raise GrError("gr exec requires -- before the remote command")
+        separator = argv.index("--")
+        exec_remote_command = argv[separator + 1:]
+        argv = argv[:separator]
+        if not exec_remote_command:
+            raise GrError("Remote command is required after --")
+    known_commands = {"init", "doctor", "config", "ssh", "collect", "find", "search", "exec", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "migrate-drivers", "driver", "vendor", "audit", "completion", "docs", "help"}
     ssh_requested = "--ssh" in argv
     if ssh_requested:
         argv = [value for value in argv if value != "--ssh"]
@@ -3044,6 +3291,8 @@ def main(argv=None):
         argv.append("--ssh")
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "exec":
+        args.remote_command = exec_remote_command
     if not args.command:
         parser.print_help()
         return 0
@@ -3053,6 +3302,17 @@ def main(argv=None):
         return command_self_update(args)
     if args.command == "completion" and args.completion_action == "bash":
         return command_completion({}, "bash")
+    if args.command == "config" and args.config_action in ("set", "unset"):
+        if args.config:
+            raise GrError("--config cannot be combined with config set/unset; use --scope")
+        expected = 2 if args.config_action == "set" else 1
+        if len(args.config_values) != expected:
+            usage = "gr config {} <setting>{} [--scope user|global]".format(
+                args.config_action, " <value>" if args.config_action == "set" else "")
+            raise GrError("Usage: {}".format(usage))
+        return command_config_change(args.config_action, args.config_values[0],
+                                     args.config_values[1] if expected == 2 else None,
+                                     args.scope)
     cfg = load_config(args.config)
     if args.command == "config":
         if args.config_action == "show":
@@ -3143,6 +3403,9 @@ def main(argv=None):
                               device_driver=args.driver, no_vault=args.no_vault,
                               audit=args.audit, details=args.details, brief=args.brief,
                               show_vendor=args.show_vendor)
+    if args.command == "exec":
+        return command_exec(cfg, args.target, args.remote_command, args.sudo, args.user,
+                            args.port, args.profile, args.client, args.no_vault, args.audit)
     if args.command == "subnet":
         return command_subnet(cfg, args.cidr)
     if args.command == "local":

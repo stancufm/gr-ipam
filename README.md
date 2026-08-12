@@ -22,6 +22,8 @@ version inventory.
 - `/etc/hosts` generation is disabled by default.
 - Legacy SSH is opt-in per device and never weakens the normal SSH client.
 - Complete SSH terminal auditing is configurable globally and per session.
+- Explicit non-interactive remote commands can reuse the encrypted SSH secret
+  for sudo, or select a separate sudo secret per credential profile.
 - Bash completion covers commands, valid values and dynamic audit navigation.
 
 ## Requirements
@@ -63,6 +65,8 @@ gr find core-switch
 gr find core-switch --details
 gr --ssh core-switch
 gr --ssh --audit core-switch
+gr exec linux-server --sudo -- systemctl status nginx
+gr config set ssh_audit_enabled true
 gr audit show core-switch latest
 gr config show
 gr update 192.0.2.10 --ssh-enabled yes --ssh-user operator --apply

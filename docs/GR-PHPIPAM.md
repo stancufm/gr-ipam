@@ -11,6 +11,25 @@ gr init --configure-auth
 gr doctor --api
 ```
 
+Configuration does not require manual JSON editing. `gr config show` compares
+defaults, global values, current-user overrides and the effective result.
+Settings are changed atomically:
+
+```console
+gr config set ssh_audit_enabled true
+gr config set include_tags '[2, 4]'
+gr config set ssh_profiles.linux-admin.sudo_password_secret gr/linux-admin-sudo
+gr config unset ssh_audit_enabled
+sudo gr config set ssh_audit_enabled true --scope global
+sudo gr config unset ssh_audit_enabled --scope global
+```
+
+The default scope is `user` (`~/.config/gr/config.json`, mode `0600`). Global
+changes target `/etc/gr/config.json` with `--scope global` and require root.
+`unset` removes only that layer, revealing the value inherited from the other
+layer or the built-in default. Bash completion lists valid settings, existing
+profiles, boolean values and scopes.
+
 phpIPAM standard custom address fields are `ssh_enabled`, `ssh_user`, `ssh_port`,
 `ssh_profile`, `ssh_jump`, `ssh_client`, `device_driver` and `device_vendor`.
 Passwords are never stored in phpIPAM. `ssh_profile` selects credentials only;
@@ -30,6 +49,31 @@ gr --ssh --user operator --port 2222 --profile network-admin --driver cisco-ios 
 One match connects automatically; multiple matches open an interactive selector. CLI overrides last only for that connection. `--no-vault` uses the OpenSSH prompt. A `legacy` client is isolated per device.
 
 The compact result table shows phpIPAM `lastSeen` immediately after `STATUS`.
+
+## Non-interactive commands and sudo
+
+`gr exec` resolves exactly one phpIPAM hostname or IP and runs an explicit
+command through the same SSH metadata and encrypted vault used by `gr --ssh`:
+
+```console
+gr exec mon.example.net -- uname -a
+gr exec mon.example.net --sudo -- systemctl status nginx
+```
+
+`--sudo` explicitly invokes `sudo -S`; it does not guess password prompts. The
+password is passed on standard input, never in process arguments or the audit.
+By default the SSH profile password is reused. To separate the secrets:
+
+```json
+"linux-admin": {
+  "password_secret": "gr/linux-admin",
+  "sudo_password_secret": "gr/linux-admin-sudo"
+}
+```
+
+`--user`, `--port`, `--profile` and `--client` are one-command overrides.
+Host-key checking remains enabled. When auditing is active, remote stdout and
+stderr are recorded; automatically injected SSH and sudo secrets are not.
 
 ### Cisco Small Business second-stage login
 

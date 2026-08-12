@@ -15,6 +15,19 @@ phpIPAM address API and database credentials are deliberately never copied to
 the jump server. `gr doctor --api` is the mandatory post-install validation and
 fails when any required field is absent.
 
+The idempotent preparation creates and validates all required address fields
+(`ssh_*`, `device_driver`, `device_vendor`, `os_version`),
+`devices.device_os`, and the native `Server` device type. On the phpIPAM
+application host, after a database backup, it can be integrated into install:
+
+```console
+sudo ./install.sh --config /etc/gr/config.json \
+  --phpipam-config /var/www/html/phpipam/config.php
+```
+
+Run the installer on a jump server without `--phpipam-config`; `gr doctor
+--api` then performs the remote address-field validation.
+
 ## 2. Prepare the jump server
 
 ```bash

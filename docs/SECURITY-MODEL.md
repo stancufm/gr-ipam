@@ -17,6 +17,8 @@
 - user state directories use mode `0700`;
 - vault secrets are encrypted using `pass` and GPG;
 - passwords are passed to `sshpass` through an anonymous file descriptor;
+- `gr exec --sudo` passes the sudo password only on remote standard input,
+  never in argv; an optional `sudo_password_secret` prevents credential reuse;
 - write commands require explicit `--apply`;
 - read and write API applications are separated;
 - legacy algorithms are delegated to a separate client on selected devices;
