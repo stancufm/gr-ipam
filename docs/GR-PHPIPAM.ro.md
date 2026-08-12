@@ -6,6 +6,25 @@
 
 `/etc/gr/config.json` conține URL-ul phpIPAM, aplicațiile API, utilizatorul, CA-ul, fișierul de credențiale, opțiunile SSH, profilurile și baza IEEE. `~/.config/gr/config.json` suprascrie valorile per utilizator. Inițializați cu `gr init --configure-auth` și verificați cu `gr doctor --api`.
 
+Configurarea nu necesită editarea manuală a fișierelor JSON. `gr config show`
+compară valorile implicite, globale, suprascrierile utilizatorului curent și
+rezultatul efectiv. Modificările sunt atomice:
+
+```console
+gr config set ssh_audit_enabled true
+gr config set include_tags '[2, 4]'
+gr config set ssh_profiles.linux-admin.sudo_password_secret gr/linux-admin-sudo
+gr config unset ssh_audit_enabled
+sudo gr config set ssh_audit_enabled true --scope global
+sudo gr config unset ssh_audit_enabled --scope global
+```
+
+Scope-ul implicit este `user` (`~/.config/gr/config.json`, mod `0600`). Scope-ul
+`global` scrie `/etc/gr/config.json` și necesită root. `unset` elimină numai
+valoarea din stratul ales, lăsând vizibilă valoarea moștenită sau implicită.
+Autocomplete listează setările valide, profilurile existente, valorile boolean
+și scope-urile.
+
 Metadatele provin din câmpurile custom standard `ssh_enabled`, `ssh_user`,
 `ssh_port`, `ssh_profile`, `ssh_jump`, `ssh_client`, `device_driver` și
 `device_vendor`. phpIPAM nu stochează parole. `ssh_profile` selectează numai
@@ -25,6 +44,31 @@ gr --ssh --user operator --port 2222 --profile network-admin --driver cisco-ios 
 Dacă există un singur rezultat, conectarea este automată; altfel se afișează selectorul. Override-urile CLI sunt valabile numai pentru sesiunea curentă. `--no-vault` forțează promptul OpenSSH. Clientul legacy este selectat numai prin metadata/CLI și nu slăbește clientul normal.
 
 Tabelul compact afișează câmpul phpIPAM `lastSeen` imediat după `STATUS`.
+
+## Comenzi neinteractive și sudo
+
+`gr exec` rezolvă exact un hostname sau IP din phpIPAM și rulează o comandă
+explicită prin aceleași metadate SSH și același seif criptat ca `gr --ssh`:
+
+```console
+gr exec mon.example.net -- uname -a
+gr exec mon.example.net --sudo -- systemctl status nginx
+```
+
+`--sudo` invocă explicit `sudo -S`; nu încearcă să ghicească prompturi. Parola
+este transmisă pe intrarea standard, niciodată în argumentele proceselor sau în
+audit. Implicit se reutilizează parola profilului SSH. Pentru secrete separate:
+
+```json
+"linux-admin": {
+  "password_secret": "gr/linux-admin",
+  "sudo_password_secret": "gr/linux-admin-sudo"
+}
+```
+
+`--user`, `--port`, `--profile` și `--client` sunt suprascrieri pentru o singură
+comandă. Verificarea cheii host rămâne activă. Auditul salvează stdout și stderr,
+nu secretele SSH/sudo injectate automat.
 
 ### Login secundar Cisco Small Business
 

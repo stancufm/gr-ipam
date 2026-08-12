@@ -16,6 +16,10 @@
   "ssh_profiles": {
     "network-admin": {"password_secret": "gr/network-admin"},
     "linux-admin": {"password_secret": "gr/linux-admin"},
+    "linux-separate-sudo": {
+      "password_secret": "gr/linux-separate-sudo",
+      "sudo_password_secret": "gr/linux-separate-sudo-sudo"
+    },
     "shared-network": {"password_secret": "gr/shared-network"}
   },
   "username": "gr-api",

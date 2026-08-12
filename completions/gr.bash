@@ -31,7 +31,7 @@ _gr_completion() {
     COMPREPLY=()
 
     if (( COMP_CWORD == 1 )); then
-        _gr_complete_words "init doctor config ssh collect find search subnet local sync export auth vault update self-update migrate-ssh migrate-drivers driver vendor audit completion docs help --ssh --config --version" "$current"
+        _gr_complete_words "init doctor config ssh exec collect find search subnet local sync export auth vault update self-update migrate-ssh migrate-drivers driver vendor audit completion docs help --ssh --config --version" "$current"
         return
     fi
 
@@ -69,6 +69,10 @@ _gr_completion() {
             _gr_complete_words "en ro" "$current"
             return
             ;;
+        --scope)
+            _gr_complete_words "user global" "$current"
+            return
+            ;;
         --stream)
             _gr_complete_words "stdin stdout stderr" "$current"
             return
@@ -100,7 +104,7 @@ _gr_completion() {
             ;;
         completion)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "bash profiles drivers vendors audit-targets audit-sessions collect-reports config-targets config-revisions" "$current"
+                _gr_complete_words "bash profiles config-settings drivers vendors inventory-targets audit-targets audit-sessions collect-reports config-targets config-revisions" "$current"
             elif [[ $subcommand == audit-sessions && $COMP_CWORD -eq 3 ]]; then
                 _gr_complete_dynamic audit-targets "$current"
             fi
@@ -110,7 +114,13 @@ _gr_completion() {
             ;;
         config)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "show devices history view --config --help" "$current"
+                _gr_complete_words "show set unset devices history view --config --help" "$current"
+            elif [[ $subcommand == set || $subcommand == unset ]] && (( COMP_CWORD == 3 )); then
+                _gr_complete_dynamic config-settings "$current"
+            elif [[ $subcommand == set && ${COMP_WORDS[3]-} == ssh_audit_enabled && $COMP_CWORD -eq 4 ]]; then
+                _gr_complete_words "true false" "$current"
+            elif [[ $subcommand == set || $subcommand == unset ]] && [[ $current == -* ]]; then
+                _gr_complete_words "--scope --help" "$current"
             elif [[ $subcommand == devices && $COMP_CWORD -eq 3 ]]; then
                 _gr_complete_dynamic config-targets "$current"
             elif [[ $subcommand == history && $COMP_CWORD -eq 3 ]]; then
@@ -129,6 +139,13 @@ _gr_completion() {
         find|search|--ssh)
             if [[ $current == -* ]]; then
                 _gr_complete_words "--brief --details --show-vendor --ssh --user --port --profile --client --driver --no-vault --audit --no-audit --config --help" "$current"
+            fi
+            ;;
+        exec)
+            if (( COMP_CWORD == 2 )); then
+                _gr_complete_dynamic inventory-targets "$current"
+            elif [[ $current == -* ]]; then
+                _gr_complete_words "--sudo --user --port --profile --client --no-vault --audit --no-audit --config --help --" "$current"
             fi
             ;;
         ssh)

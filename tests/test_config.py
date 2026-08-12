@@ -34,6 +34,21 @@ class ConfigShowTests(unittest.TestCase):
         with self.assertRaises(GR.GrError):
             GR.normalize_device_driver("unknown")
 
+    def test_sudo_secret_defaults_to_ssh_secret_and_can_be_separate(self):
+        cfg = {"ssh_profiles": {
+            "same": {"password_secret": "gr/same"},
+            "separate": {"password_secret": "gr/ssh", "sudo_password_secret": "gr/sudo"},
+        }}
+        self.assertEqual(GR.sudo_vault_secret_name(cfg, "same"), "gr/same")
+        self.assertEqual(GR.sudo_vault_secret_name(cfg, "separate"), "gr/sudo")
+
+    def test_exec_parser_requires_explicit_remote_command(self):
+        parser = GR.build_parser()
+        args = parser.parse_args(["exec", "server.example", "--sudo"])
+        self.assertTrue(args.sudo)
+        with self.assertRaises(GR.GrError):
+            GR.main(["exec", "server.example", "--sudo"])
+
     def test_device_driver_fallback_is_always_generic(self):
         row = {"custom_ssh_profile": "cisco", "custom_device_vendor": "cisco"}
         self.assertEqual(GR.resolve_device_driver(row), "generic")
@@ -171,6 +186,35 @@ class ConfigShowTests(unittest.TestCase):
         explicit = parser.parse_args(["config", "show"])
         self.assertEqual(implicit.config_action, "show")
         self.assertEqual(explicit.config_action, "show")
+
+    def test_config_set_and_unset_manage_user_json(self):
+        with tempfile.TemporaryDirectory() as root:
+            old_user = GR.USER_CONFIG
+            try:
+                GR.USER_CONFIG = os.path.join(root, "config.json")
+                GR.command_config_change("set", "ssh_audit_enabled", "true", scope="user")
+                GR.command_config_change(
+                    "set", "ssh_profiles.linux.sudo_password_secret", "gr/linux-sudo", scope="user")
+                with open(GR.USER_CONFIG, encoding="utf-8") as handle:
+                    saved = json.load(handle)
+                self.assertIs(saved["ssh_audit_enabled"], True)
+                self.assertEqual(saved["ssh_profiles"]["linux"]["sudo_password_secret"],
+                                 "gr/linux-sudo")
+                self.assertEqual(os.stat(GR.USER_CONFIG).st_mode & 0o777, 0o600)
+                GR.command_config_change(
+                    "unset", "ssh_profiles.linux.sudo_password_secret", scope="user")
+                with open(GR.USER_CONFIG, encoding="utf-8") as handle:
+                    saved = json.load(handle)
+                self.assertNotIn("ssh_profiles", saved)
+            finally:
+                GR.USER_CONFIG = old_user
+
+    def test_config_setting_validation_and_list_parsing(self):
+        self.assertEqual(GR.parse_config_setting("include_tags", '[2, 4]'), [2, 4])
+        with self.assertRaises(GR.GrError):
+            GR.parse_config_setting("ssh_audit_enabled", "perhaps")
+        with self.assertRaises(GR.GrError):
+            GR.validate_config_setting_name("unknown_setting")
 
 
 if __name__ == "__main__":

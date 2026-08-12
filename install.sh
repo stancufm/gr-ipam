@@ -15,6 +15,7 @@ Options:
   --destdir PATH          Package/test installation root (no systemd actions)
   --enable-timer          Enable the weekly IEEE update timer
   --install-dependencies  Install missing Debian packages with apt-get
+  --phpipam-config PATH   On the phpIPAM host, validate/create all required fields and Server type
   --help
 
 No passwords, SSH keys or private GPG keys are copied by this installer.
@@ -33,6 +34,7 @@ install_dependencies=0
 release_key_source=
 update_repository=https://github.com/stancufm/gr-ipam.git
 update_repository_set=0
+phpipam_config=
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -47,6 +49,7 @@ while [ "$#" -gt 0 ]; do
     --destdir) destdir=$2; shift 2 ;;
     --enable-timer) enable_timer=1; shift ;;
     --install-dependencies) install_dependencies=1; shift ;;
+    --phpipam-config) phpipam_config=$2; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -117,6 +120,10 @@ if [ -n "$release_key_source" ] && [ ! -r "$release_key_source" ]; then
   echo "Cannot read release key: $release_key_source" >&2
   exit 2
 fi
+if [ -n "$phpipam_config" ] && [ ! -r "$phpipam_config" ]; then
+  echo "Cannot read phpIPAM config: $phpipam_config" >&2
+  exit 2
+fi
 case "$update_repository" in
   https://*) ;;
   *) echo "--update-repository must use HTTPS." >&2; exit 2 ;;
@@ -181,6 +188,15 @@ python3 -c 'import ast,sys; [ast.parse(open(path, encoding="utf-8").read(), file
   "$package_dir/libexec/collect-config"
 sh -n "$package_dir/libexec/gr-update"
 bash -n "$package_dir/completions/gr.bash"
+
+if [ -n "$phpipam_config" ]; then
+  command -v php >/dev/null 2>&1 || {
+    echo "php CLI is required with --phpipam-config." >&2
+    exit 2
+  }
+  echo "Preparing and validating phpIPAM fields and native Server device type"
+  php "$package_dir/phpipam/ensure-custom-fields.php" "$phpipam_config"
+fi
 
 if [ -z "$destdir" ]; then
   if ! getent group gr-config >/dev/null 2>&1; then

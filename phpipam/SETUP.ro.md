@@ -11,7 +11,7 @@ sudo /usr/local/share/gr/phpipam/ensure-custom-fields.php \
   /var/www/html/phpipam/config.php
 ```
 
-Acesta creează numai cele opt câmpuri lipsă, validează tipurile existente și
+Acesta creează numai câmpurile lipsă, validează tipurile existente și
 nu salvează sau afișează credențialele SQL. `gr doctor --api` verifică apoi din
 jump server că întreaga schemă necesară este vizibilă prin API.
 
@@ -19,10 +19,15 @@ Creați două aplicații API separate: una read-only pentru căutare/inventar ș
 
 Adăugați câmpurile custom standard pentru adrese: `ssh_enabled`, `ssh_user`,
 `ssh_port`, `ssh_profile`, `ssh_jump`, `ssh_client`, `device_driver` și, dacă
-este folosită sincronizarea IEEE, `device_vendor`. Profilul selectează numai
+este folosită sincronizarea IEEE, `device_vendor`, plus `os_version` pentru
+versiunea OS/firmware asociată adresei. Profilul selectează numai
 secretul criptat local. `ssh_client` acceptă `normal` sau `legacy`, iar
 `device_driver` descrie comportamentul CLI independent de credențiale.
 
 Acordați utilizatorului API numai subrețelele și operațiile necesare. Verificați aplicația read-only cu `gr auth test` și `gr doctor --api`. Previzualizați orice migrare sau actualizare fără `--apply`, limitați primul pilot și revizuiți raportul privat înainte de extindere.
 
-phpIPAM rămâne sursa de adevăr pentru hostname și inventar. Nu modificați schema sau codul phpIPAM și nu importați credențiale, chei ori fișiere de audit.
+Helperul creează și `custom_device_os` (varchar 128) pe tabela nativă `devices`
+și verifică existența tipului nativ `Server`. Este idempotent și se oprește în
+loc să modifice o coloană existentă incompatibilă.
+
+phpIPAM rămâne sursa de adevăr pentru hostname și inventar. Nu modificați codul phpIPAM și nu importați credențiale, chei ori fișiere de audit.

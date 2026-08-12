@@ -8,6 +8,19 @@ poate crea schema, iar credențialele SQL nu sunt copiate pe jump server.
 Validarea post-instalare `gr doctor --api` este obligatorie și eșuează dacă
 lipsește oricare dintre cele opt câmpuri necesare.
 
+Pregătirea idempotentă creează și validează toate câmpurile necesare pe adrese
+(`ssh_*`, `device_driver`, `device_vendor`, `os_version`),
+`devices.device_os` și tipul nativ `Server`. După backupul bazei, pe serverul
+aplicației phpIPAM poate fi integrată în instalare astfel:
+
+```console
+sudo ./install.sh --config /etc/gr/config.json \
+  --phpipam-config /var/www/html/phpipam/config.php
+```
+
+Pe jump server installerul se rulează fără `--phpipam-config`, iar `gr doctor
+--api` validează câmpurile de adresă prin API.
+
 ## Cerințe
 
 Debian 10+, Python 3.7+ și acces HTTPS la phpIPAM. Toate dependențele sunt
