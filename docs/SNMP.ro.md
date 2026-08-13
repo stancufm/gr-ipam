@@ -34,8 +34,12 @@ gr snmp test --all
 `inventory-sync` importă numai rezultatele reușite model/firmware din raportul
 JSON al colectorului de versiuni. Rămâne dry-run până la `--apply`.
 
-Se execută numai template-urile marcate `apply_supported` și cu handler
-tranzacțional revizuit. Înaintea fiecărei schimbări, configurația curentă trebuie
+Se execută numai template-urile marcate `apply_supported`, care includ acțiunea
+cerută în `supported_actions` și au handler tranzacțional revizuit. Handlerul din
+`/usr/local/libexec/gr/snmp-handlers` gestionează prompturile, confirmările
+interactive, codarea sigură a secretelor, cleanup-ul legacy exact și verificarea
+structurală normalizată. Template-urile rămân declarative și nu conțin
+credențiale sau inventarul organizației. Înaintea fiecărei schimbări, configurația curentă trebuie
 colectată cu succes în arhiva Git globală. Configurația rămâne apoi în running,
 se testează SNMPv3 și se salvează numai după succes, apoi configurația finală
 este arhivată din nou. La eșec se execută rollback.
@@ -46,27 +50,38 @@ existente, evitând un rollback distructiv. Rotația cere obligatoriu
 Cisco IOS extrage intern liniile community exacte, fără afișare, le elimină,
 testează v3 și le poate restaura înainte de save.
 
-Familiile cu dialoguri interactive, AES inconsistent, chei localizate mascate sau
-ACL-uri riscante rămân report/test-only până la validarea unui template derivat
-după model și OS. Nu se deduc și nu se aplică ACL-uri pe control-plane, interfață
-sau management global.
+Handlerul Aruba generează secrete temporare aleatorii, valabile numai în sesiune,
+pentru dialogul inițial și elimină userul `initial`. Handlerul Cisco Business
+răspunde confirmării Engine ID fără a o trata drept comandă. Comware recunoaște
+prompturile EXEC și system-view. PLANET generează Engine ID unic din MAC-ul din
+phpIPAM și respectă ordinea particulară PRIV/AUTH. Pe Dell, algoritmii sunt
+dovediți prin test SNMP autentificat deoarece CLI-ul maschează cheile. Outputul
+este redactat înainte de verificare sau raportare.
+
+Familiile cu AES inconsistent sau ACL-uri riscante rămân report/test-only. Nu se
+deduc și nu se aplică ACL-uri pe control-plane, interfață sau management global.
 
 Catalogul inițial include concluziile piloților:
 
-| Familie | Politică inițială | Motiv |
+| Familie | Handler/acțiuni | Limita validării |
 |---|---|---|
 | Cisco IOS/IOS XE | tranzacțional SHA/AES128, ACL pe grup | CLI, rollback și save validate |
-| Cisco CBS250 | report/test | confirmările engine-ID și sintaxa diferă între firmware-uri |
-| Cisco SG/SF legacy | report/test | unele versiuni creează userul, dar AES nu răspunde |
-| ArubaOS-Switch 15/16 | report/test | `snmpv3 enable` are dialoguri dependente de firmware |
-| HPE Comware 7 | report/test | necesită handler tranzacțional dedicat system-view |
-| Dell OS10 | report/test | firmware-ul testat nu are ACL pe proces și maschează cheile |
-| PLANET SGS | report/test | ordinea și ACL-ul pe grup au sintaxă particulară |
+| Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | rollout pe șase echipamente și confirmarea engine validate; cleanup legacy neprobat |
+| Cisco SG/SF 220/250/350 și restul CBS | report/test | unele versiuni creează userul, dar AES nu răspunde |
+| Aruba 2920 WB.15/WB.16 | configure/rotate | inițializare adaptivă, SHA/AES și v3-only validate |
+| HPE Comware 7 | configure/rotate, ACL pe proces | workflow system-view validat pe cele trei piloturi |
+| Dell OS10 | numai rotate, fără ACL | înlocuirea userului și testul SNMP validate; grup/view de la zero nu |
+| PLANET SGS-6310 2.2.0E | configure/rotate, ACL pe grup | ordinea parolelor și ACL-ul procesului validate; cleanup legacy neprobat |
 | FortiOS | report/test | sursele query și expunerea interfeței trebuie revizuite explicit |
 
 Un site poate clona un template și îl poate restrânge cu `model_regex`,
 `device_os_regex` și `os_version_regex`. Scrierea rămâne dezactivată până când
 apply, verify, save și rollback sunt testate integral pe un echipament reprezentativ.
+Catalogul din pachet este sursa capabilităților noi. Deoarece
+`/etc/gr/snmp-templates.json` este păstrat intenționat la upgrade, loaderul îl
+combină cu cel din pachet. O generație nouă din pachet înlocuiește ID-urile vechi
+generate, dar păstrează ID-urile locale suplimentare; catalogul local aflat la
+generația curentă poate suprascrie ID-urile din pachet.
 
 ## Rapoarte și LibreNMS
 

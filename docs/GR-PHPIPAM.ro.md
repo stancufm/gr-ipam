@@ -51,6 +51,13 @@ handlerul lor de login necesită credențiala criptată. Verifică decriptarea c
 `gr vault test PROFIL` și rulează `gr vault set PROFIL` numai după confirmarea
 independentă a parolei noi.
 
+Dacă un dialog GPG/pinentry abandonat blochează comenzile `gr` următoare,
+închide terminalul respectiv și rulează `gr vault reset-agent PROFIL`. Comanda
+repornește numai agentul GPG al utilizatorului Unix curent, nu modifică seiful și
+poate testa opțional profilul SSH indicat. Nu o rula cât timp același utilizator
+are intenționat un prompt de semnare/decriptare activ. Decriptarea se oprește
+acum după 120 de secunde cu această instrucțiune, în loc să aștepte nelimitat.
+
 Tabelul compact afișează câmpul phpIPAM `lastSeen` imediat după `STATUS`.
 
 ## Comenzi neinteractive și sudo

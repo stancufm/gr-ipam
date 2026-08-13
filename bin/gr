@@ -44,7 +44,7 @@ CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SNMP_MANAGER = "/usr/local/libexec/gr/snmp-manager"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.6.1"
+GR_VERSION = "2.7.0"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -1048,7 +1048,12 @@ def read_vault_password(secret):
     if not shutil.which("pass"):
         raise GrError("pass is not installed")
     try:
-        output = subprocess.check_output(["pass", "show", secret], universal_newlines=True)
+        output = subprocess.check_output(
+            ["pass", "show", secret], universal_newlines=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise GrError(
+            "Vault decryption timed out for {}; close any abandoned pinentry prompt "
+            "or run 'gr vault reset-agent', then retry".format(secret))
     except subprocess.CalledProcessError as exc:
         raise GrError("Cannot decrypt vault secret {} (pass exit {})".format(secret, exc.returncode))
     password = output.splitlines()[0] if output.splitlines() else ""
@@ -2716,6 +2721,8 @@ def command_doctor(cfg, test_api=False, system_only=False):
     except (OSError, ValueError) as exc:
         template_detail = "{} ({})".format(template_file, exc)
     check("SNMP template catalog", template_ok, template_detail, essential=True)
+    snmp_handlers = "/usr/local/libexec/gr/snmp-handlers"
+    check("SNMP handler registry", os.path.isfile(snmp_handlers), snmp_handlers, essential=True)
     archive_exists = os.path.isdir(GLOBAL_CONFIG_ARCHIVE)
     archive_access = archive_exists and os.access(GLOBAL_CONFIG_ARCHIVE, os.R_OK | os.X_OK)
     check("global config archive", archive_access,
@@ -2773,13 +2780,29 @@ def command_doctor(cfg, test_api=False, system_only=False):
 
 
 def command_vault(cfg, action, value=None):
-    if not shutil.which("pass"):
-        raise GrError("pass is not installed")
     if sys.stdin.isatty():
         try:
             os.environ["GPG_TTY"] = os.ttyname(sys.stdin.fileno())
         except OSError:
             pass
+    if action == "reset-agent":
+        if not shutil.which("gpgconf"):
+            raise GrError("gpgconf is not installed")
+        print("Resetting only the current user's GPG agent and pinentry state.")
+        if subprocess.call(["gpgconf", "--kill", "gpg-agent"]):
+            raise GrError("gpgconf could not stop the current user's GPG agent")
+        connector = shutil.which("gpg-connect-agent")
+        if connector:
+            result = subprocess.call(
+                [connector, "/bye"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if result:
+                raise GrError("The current user's GPG agent could not be restarted")
+        print("GPG agent reset complete; the encrypted vault was not modified.")
+        if not value:
+            return 0
+        action = "test"
+    if not shutil.which("pass"):
+        raise GrError("pass is not installed")
     if action == "init":
         if not value:
             raise GrError("Usage: gr vault init <GPG-ID>")
@@ -3294,8 +3317,10 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     auth = sub.add_parser("auth", help="configure or test API authentication")
     auth.add_argument("action", choices=("configure", "test"))
     vault = sub.add_parser("vault", help="initialize and manage encrypted per-user SSH passwords")
-    vault.add_argument("action", choices=("init", "list", "set", "test"))
-    vault.add_argument("value", nargs="?", help="GPG ID for init, or SSH profile for set/test")
+    vault.add_argument("action", choices=("init", "list", "set", "test", "reset-agent"))
+    vault.add_argument(
+        "value", nargs="?",
+        help="GPG ID for init, SSH profile for set/test, or optional profile to test after reset-agent")
     update = sub.add_parser("update", help="preview or update hostname and custom SSH fields in phpIPAM")
     update.add_argument("ip", help="exact phpIPAM address to update")
     update.add_argument("--apply", action="store_true", help="write and GET-verify the requested changes")

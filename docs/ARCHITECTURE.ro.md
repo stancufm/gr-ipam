@@ -15,7 +15,9 @@ folosește seiful privat al operatorului, iar scrierea folosește lock global.
 Un commit este creat numai când conținutul diferă; gr nu configurează remote.
 
 `libexec/snmp-manager` rezolvă template-uri după model/OS, inventariază și
-testează SNMP, controlează scrierile tranzacționale și reconciliază phpIPAM cu
+testează; `libexec/snmp-handlers` separă comportamentul interactiv revizuit și
+verificarea normalizată de template-urile SNMP declarative.
+Managerul controlează scrierile tranzacționale și reconciliază phpIPAM cu
 LibreNMS. Catalogul editabil este date; activarea scrierii cere și un handler
 de cod revizuit. Handlerul modifică running, verifică structura și accesul
 autentificat, salvează numai la succes și altfel face rollback.

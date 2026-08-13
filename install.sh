@@ -139,6 +139,7 @@ install -m 0755 "$package_dir/libexec/validate-ssh" "$destdir/usr/local/libexec/
 install -m 0755 "$package_dir/libexec/collect-version" "$destdir/usr/local/libexec/gr/collect-version"
 install -m 0755 "$package_dir/libexec/collect-config" "$destdir/usr/local/libexec/gr/collect-config"
 install -m 0755 "$package_dir/libexec/snmp-manager" "$destdir/usr/local/libexec/gr/snmp-manager"
+install -m 0755 "$package_dir/libexec/snmp-handlers" "$destdir/usr/local/libexec/gr/snmp-handlers"
 install -m 0755 "$package_dir/libexec/gr-update" "$destdir/usr/local/libexec/gr/gr-update"
 install -m 0644 "$package_dir"/docs/*.md "$destdir/usr/local/share/doc/gr/"
 install -m 0644 "$package_dir"/README*.md "$package_dir"/CONTRIBUTING*.md "$destdir/usr/local/share/doc/gr/"
@@ -192,7 +193,8 @@ fi
 
 python3 -c 'import ast,sys; [ast.parse(open(path, encoding="utf-8").read(), filename=path) for path in sys.argv[1:]]' \
   "$package_dir/bin/gr" "$package_dir/libexec/validate-ssh" "$package_dir/libexec/collect-version" \
-  "$package_dir/libexec/collect-config" "$package_dir/libexec/snmp-manager"
+    "$package_dir/libexec/collect-config" "$package_dir/libexec/snmp-manager" \
+    "$package_dir/libexec/snmp-handlers"
 sh -n "$package_dir/libexec/gr-update"
 bash -n "$package_dir/completions/gr.bash"
 

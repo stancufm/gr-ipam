@@ -5,7 +5,8 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
 
 python3 -c 'import ast,sys; [ast.parse(open(path, encoding="utf-8").read(), filename=path) for path in sys.argv[1:]]' \
-  bin/gr libexec/validate-ssh libexec/collect-version libexec/collect-config libexec/snmp-manager
+  bin/gr libexec/validate-ssh libexec/collect-version libexec/collect-config libexec/snmp-manager \
+  libexec/snmp-handlers
 sh -n install.sh
 sh -n .codex/setup.sh
 sh -n libexec/gr-update

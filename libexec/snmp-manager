@@ -23,6 +23,7 @@ GR_PATH = os.environ.get("GR_PATH", "/usr/local/bin/gr")
 DEFAULT_TEMPLATES = os.environ.get("GR_SNMP_TEMPLATES", "/usr/local/share/gr/snmp/templates.json")
 COLLECT_VERSION_PATH = os.environ.get("GR_COLLECT_VERSION", "/usr/local/libexec/gr/collect-version")
 COLLECT_CONFIG_PATH = os.environ.get("GR_COLLECT_CONFIG", "/usr/local/libexec/gr/collect-config")
+HANDLERS_PATH = os.environ.get("GR_SNMP_HANDLERS", "/usr/local/libexec/gr/snmp-handlers")
 
 
 def load_module(name, path):
@@ -34,6 +35,7 @@ def load_module(name, path):
 
 
 gr = load_module("gr_snmp_manager", GR_PATH)
+snmp_handlers = load_module("gr_snmp_handlers", HANDLERS_PATH)
 
 
 def custom(row, name):
@@ -44,11 +46,36 @@ def load_templates(cfg):
     path = gr.expand(cfg.get("snmp_template_file") or DEFAULT_TEMPLATES)
     if not os.path.isfile(path):
         path = DEFAULT_TEMPLATES
-    with open(path, encoding="utf-8") as handle:
-        data = json.load(handle)
-    if data.get("schema_version") != 1 or not isinstance(data.get("templates"), list):
-        raise gr.GrError("Unsupported SNMP template schema: {}".format(path))
-    return path, data["templates"]
+    def read_catalog(catalog_path):
+        with open(catalog_path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        if data.get("schema_version") != 1 or not isinstance(data.get("templates"), list):
+            raise gr.GrError("Unsupported SNMP template schema: {}".format(catalog_path))
+        return data
+
+    local = read_catalog(path)
+    if os.path.abspath(path) == os.path.abspath(DEFAULT_TEMPLATES) or not os.path.isfile(DEFAULT_TEMPLATES):
+        return path, local["templates"]
+    packaged = read_catalog(DEFAULT_TEMPLATES)
+    # New package catalogs must become usable after upgrade without deleting
+    # site-only template IDs.  A local catalog at the current generation may
+    # override package IDs; an older generated catalog yields to reviewed new
+    # definitions while retaining its additional IDs.
+    local_generation = int(local.get("catalog_version") or 0)
+    package_generation = int(packaged.get("catalog_version") or 0)
+    first, second = ((local, packaged) if local_generation < package_generation
+                     else (packaged, local))
+    merged = {}
+    order = []
+    for catalog in (first, second):
+        for template in catalog["templates"]:
+            template_id = str(template.get("id") or "")
+            if not template_id:
+                raise gr.GrError("SNMP template without id in {}".format(path))
+            if template_id not in merged:
+                order.append(template_id)
+            merged[template_id] = template
+    return "{} + {}".format(DEFAULT_TEMPLATES, path), [merged[item] for item in order]
 
 
 def row_ip(row):
@@ -175,12 +202,17 @@ def profile_values(cfg, row, args, need_secrets=True):
             "privacy_password": privacy_password, "sources": sources}
 
 
-def variables(row, credentials, args):
+def variables(row, credentials, args, template=None):
+    defaults = (template or {}).get("defaults", {})
     sources = list(args.source or credentials.get("sources") or ["<SOURCE_REQUIRED>"])
     while len(sources) < 3:
         sources.append(sources[-1])
     return dict(credentials, ip=row_ip(row), hostname=str(row.get("hostname") or row_ip(row)),
-                group=args.group, view=args.view, acl=args.acl,
+                mac=str(row.get("mac") or ""),
+                group=args.group or defaults.get("group") or "SNMP_DEFAULT_GROUP",
+                view=args.view or defaults.get("view") or "SNMP_DEFAULT_VIEW",
+                acl=args.acl or defaults.get("acl") or "SNMP_MON_SRV_ACL",
+                write_view=defaults.get("write_view") or "SNMP_NO_WRITE",
                 source_1=sources[0], source_2=sources[1], source_3=sources[2],
                 legacy_value="<legacy-value-not-rendered>")
 
@@ -245,12 +277,14 @@ def unauthenticated_probe(ip, timeout=2):
 
 def cli_error_lines(output):
     patterns = (r"^%\s*(?:error|invalid|incomplete|unrecognized|unknown)",
+                r"^\s*(?:unknown command|invalid input|incomplete command|ambiguous command)",
+                r"wrong number of parameters|missing mandatory parameter",
                 r"^\s*\^\s*$", r"too many parameters", r"illegal (?:command|parameter)")
     return [line.strip() for line in output.splitlines()
             if any(re.search(pattern, line, re.I) for pattern in patterns)]
 
 
-def run_device_commands(cfg, row, commands, timeout=70):
+def run_device_commands(cfg, row, commands, timeout=70, template=None, values=None):
     if not commands:
         return {"rc": 0, "output": "", "error": "", "timeout": False,
                 "complete": True, "cli_errors": []}
@@ -261,7 +295,12 @@ def run_device_commands(cfg, row, commands, timeout=70):
     if not meta["enabled"] or not meta["profile"] or not meta["user"]:
         raise gr.GrError("Incomplete SSH metadata for {}".format(row_ip(row)))
     driver = gr.resolve_device_driver(row)
-    login = gr.device_login_driver(driver)
+    template = template or {"handler": "generic-cli"}
+    context = {"driver": driver, "row": row, "values": values or {}}
+    try:
+        login = snmp_handlers.login_driver(gr, template, context)
+    except snmp_handlers.HandlerError as exc:
+        raise gr.GrError(str(exc))
     password = gr.read_vault_password(gr.vault_secret_name(cfg, meta["profile"]))
     known_hosts = gr.ensure_known_hosts(cfg)
     read_fd, write_fd = os.pipe()
@@ -277,8 +316,21 @@ def run_device_commands(cfg, row, commands, timeout=70):
                    "{}@{}".format(meta["user"], row_ip(row)), commands[0]]
         item = {"user": meta["user"], "client": meta.get("client") or "normal"}
         rc, output, error, timed_out, complete = helper.run_interactive_device(
-            item, password, command, read_fd, login, list(commands), ["exit"], timeout=timeout)
+            item, password, command, read_fd, login, list(commands),
+            snmp_handlers.exit_commands(template), timeout=timeout)
         read_fd = None
+        # Firmware commonly echoes configuration commands.  Redact every
+        # secret before the caller can verify, report or persist the output.
+        secrets_to_redact = [password]
+        for key in ("auth_password", "privacy_password"):
+            if values and values.get(key):
+                secrets_to_redact.append(values[key])
+        for key in ("temporary_auth", "temporary_priv"):
+            if context.get(key):
+                secrets_to_redact.append(context[key])
+        for secret in secrets_to_redact:
+            output = output.replace(str(secret), "[REDACTED]")
+            error = error.replace(str(secret), "[REDACTED]")
         return {"rc": rc, "output": output, "error": error.strip(), "timeout": timed_out,
                 "complete": complete, "cli_errors": cli_error_lines(output)}
     finally:
@@ -331,13 +383,15 @@ def command_templates(cfg, templates, args):
         if len(rows) != 1:
             raise gr.GrError("Expected one template target")
         template, source = resolve_template(templates, rows[0])
-        print("{} template={} source={} apply_supported={} reason={}".format(
+        print("{} template={} source={} apply_supported={} actions={} reason={}".format(
             row_ip(rows[0]), template["id"], source, bool(template.get("apply_supported")),
+            ",".join(template.get("supported_actions") or []) or "report,test",
             template.get("reason") or "-"))
         return 0
     for item in templates:
-        print("{} apply_supported={} match={} reason={}".format(
+        print("{} apply_supported={} actions={} match={} reason={}".format(
             item["id"], bool(item.get("apply_supported")),
+            ",".join(item.get("supported_actions") or []) or "report,test",
             json.dumps(item.get("match", {}), sort_keys=True), item.get("reason") or "-"))
     return 0
 
@@ -349,9 +403,22 @@ def command_plan_or_apply(cfg, templates, args):
     for row in rows:
         template, source = resolve_template(templates, row)
         credentials = profile_values(cfg, row, args, need_secrets=args.apply)
-        values = variables(row, credentials, args)
+        values = variables(row, credentials, args, template)
+        try:
+            values = snmp_handlers.prepare(template, row, values, applying=args.apply)
+        except snmp_handlers.HandlerError as exc:
+            print("ERROR={}".format(exc))
+            failed = True
+            continue
         print("TARGET={} TEMPLATE={} RESOLUTION={} ACTION={} APPLY_SUPPORTED={}".format(
             row_ip(row), template["id"], source, args.action, bool(template.get("apply_supported"))))
+        supported_actions = template.get("supported_actions") or (
+            ["configure", "rotate", "cleanup"] if template.get("apply_supported") else [])
+        if args.action not in supported_actions:
+            print("ERROR=Action {} is not reviewed for this template; supported={}".format(
+                args.action, ",".join(supported_actions) or "report,test"))
+            failed = True
+            continue
         commands = render_commands(template, args.action, values, redact=True)
         for command in commands:
             print("  {}".format(command))
@@ -374,7 +441,8 @@ def command_plan_or_apply(cfg, templates, args):
             failed = True
             continue
         preflight = run_device_commands(
-            cfg, row, render_commands(template, "inspect", values, redact=False))
+            cfg, row, render_commands(template, "inspect", values, redact=False),
+            template=template, values=values)
         managed_terms = [values["username"], values["group"], values["view"], values["acl"]]
         managed_existing = [term for term in managed_terms
                             if term.lower() in preflight["output"].lower()]
@@ -392,36 +460,38 @@ def command_plan_or_apply(cfg, templates, args):
         actual_commands = render_commands(template, args.action, values, redact=False)
         rollback_commands = render_commands(template, args.action + "_rollback", values, redact=False)
         if args.action == "cleanup":
-            inspection = run_device_commands(cfg, row, render_commands(template, "inspect", values, redact=False))
-            legacy_lines = [line.strip() for line in inspection["output"].splitlines()
-                            if re.match(r"^snmp-server\s+community\s+", line.strip(), re.I)]
-            actual_commands = ["configure terminal"] + ["no " + line for line in legacy_lines] + ["end"]
-            rollback_commands = ["configure terminal"] + legacy_lines + ["end"]
-            print("LEGACY_OBJECTS_DISCOVERED={}".format(len(legacy_lines)))
+            inspection = run_device_commands(
+                cfg, row, render_commands(template, "inspect", values, redact=False),
+                template=template, values=values)
+            actual_commands, rollback_commands = snmp_handlers.cleanup_plan(
+                template, inspection["output"], values)
+            print("LEGACY_CLEANUP_COMMANDS={}".format(max(0, len(actual_commands) - 2)))
         if args.action == "rotate":
             previous_args = argparse.Namespace(profile=args.previous_profile, username=None,
                                                prompt_credentials=False)
             previous = profile_values(cfg, row, previous_args)
-            previous_values = variables(row, previous, args)
+            previous_values = variables(row, previous, args, template)
+            previous_values = snmp_handlers.prepare(template, row, previous_values, applying=True)
             rollback_commands = render_commands(template, "rotate", previous_values, redact=False)
-        session = run_device_commands(cfg, row, actual_commands)
+        session = run_device_commands(cfg, row, actual_commands, template=template, values=values)
         verify_action = "inspect" if args.action == "cleanup" else "verify"
         verification = run_device_commands(
-            cfg, row, render_commands(template, verify_action, values, redact=False))
-        required_terms = [value.format(**values) for value in template.get("verification_terms", [])]
-        terms_ok = all(term.lower() in verification["output"].lower() for term in required_terms)
-        if args.action == "cleanup":
-            terms_ok = not any(re.match(r"^snmp-server\s+community\s+", line.strip(), re.I)
-                               for line in verification["output"].splitlines())
+            cfg, row, render_commands(template, verify_action, values, redact=False),
+            template=template, values=values)
+        terms_ok, normalized_checks = snmp_handlers.verify(
+            template, verification["output"], values, args.action)
         structurally_ok = (session["complete"] and not session["timeout"] and
                            not session["cli_errors"] and verification["complete"] and
                            not verification["timeout"] and not verification["cli_errors"] and
                            terms_ok)
         print("CLI_APPLY_COMPLETE={} CLI_ERRORS={} STRUCTURAL_VERIFY={}".format(
             session["complete"], len(session["cli_errors"]), structurally_ok))
+        print("NORMALIZED_CHECKS={}".format(json.dumps(normalized_checks, sort_keys=True)))
         test_rc, test_error = snmpget(row_ip(row), credentials, args.timeout) if structurally_ok else (1, "CLI verification failed")
         if structurally_ok and test_rc == 0:
-            saved = run_device_commands(cfg, row, render_commands(template, "save", values, redact=False))
+            saved = run_device_commands(
+                cfg, row, render_commands(template, "save", values, redact=False),
+                template=template, values=values)
             success = saved["complete"] and not saved["timeout"] and not saved["cli_errors"]
             if success:
                 try:
@@ -433,7 +503,8 @@ def command_plan_or_apply(cfg, templates, args):
             print("RESULT={} SAVED={}".format("success" if success else "save_failed", success))
             failed = failed or not success
         else:
-            rollback = run_device_commands(cfg, row, rollback_commands) if rollback_commands else None
+            rollback = run_device_commands(
+                cfg, row, rollback_commands, template=template, values=values) if rollback_commands else None
             rollback_ok = bool(rollback and rollback["complete"] and not rollback["cli_errors"])
             print("RESULT=failed ROLLBACK={} SNMP_TEST={}".format(
                 "success" if rollback_ok else "failed", "failed" if test_rc else "success"))
@@ -493,9 +564,11 @@ def command_report(cfg, templates, args):
             try:
                 template, _resolution = resolve_template(templates, row)
                 credentials = {"username": "", "auth_password": "", "privacy_password": ""}
-                values = variables(row, credentials, args)
+                values = variables(row, credentials, args, template)
+                values = snmp_handlers.prepare(template, row, values, applying=False)
                 live = run_device_commands(cfg, row, render_commands(template, "inspect", values,
-                                                                      redact=False))
+                                                                      redact=False),
+                                           template=template, values=values)
                 record.update({"live_complete": live["complete"], "live_timeout": live["timeout"],
                                "live_cli_errors": live["cli_errors"], "snmp_output": live["output"]})
             except gr.GrError as exc:
@@ -746,9 +819,9 @@ def build_parser():
                              help="vault-backed old profile required for recoverable rotation")
         command.add_argument("--timeout", type=int, default=5)
         command.add_argument("--source", action="append")
-        command.add_argument("--group", default="SNMP_DEFAULT_GROUP")
-        command.add_argument("--view", default="SNMP_DEFAULT_VIEW")
-        command.add_argument("--acl", default="SNMP_MON_SRV_ACL")
+        command.add_argument("--group")
+        command.add_argument("--view")
+        command.add_argument("--acl")
     test = sub.add_parser("test"); add_selectors(test)
     test.add_argument("--profile"); test.add_argument("--username")
     test.add_argument("--prompt-credentials", action="store_true")
@@ -758,9 +831,9 @@ def build_parser():
     report.add_argument("--mode", choices=("offline", "ports", "inventory", "live"), default="inventory")
     report.add_argument("--timeout", type=float, default=2.0)
     report.add_argument("--source", action="append")
-    report.add_argument("--group", default="SNMP_DEFAULT_GROUP")
-    report.add_argument("--view", default="SNMP_DEFAULT_VIEW")
-    report.add_argument("--acl", default="SNMP_MON_SRV_ACL")
+    report.add_argument("--group")
+    report.add_argument("--view")
+    report.add_argument("--acl")
     assign = sub.add_parser("assign"); add_selectors(assign)
     assign.add_argument("--enabled", choices=("yes", "no"), default="yes")
     assign.add_argument("--profile"); assign.add_argument("--template")

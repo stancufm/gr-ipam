@@ -15,6 +15,30 @@ GR = importlib.machinery.SourceFileLoader("gr_test_module", "bin/gr").load_modul
 
 
 class AuditTests(unittest.TestCase):
+    def test_vault_timeout_explains_safe_agent_recovery(self):
+        with mock.patch.object(GR.shutil, "which", return_value="/usr/bin/pass"), \
+                mock.patch.object(GR.subprocess, "check_output",
+                                  side_effect=GR.subprocess.TimeoutExpired(["pass"], 120)):
+            with self.assertRaises(GR.GrError) as raised:
+                GR.read_vault_password("gr/example")
+        self.assertIn("gr vault reset-agent", str(raised.exception))
+
+    def test_reset_agent_is_scoped_and_can_skip_vault_decryption(self):
+        calls = []
+
+        def which(name):
+            return "/usr/bin/{}".format(name)
+
+        def call(command, **_kwargs):
+            calls.append(command)
+            return 0
+
+        with mock.patch.object(GR.shutil, "which", side_effect=which), \
+                mock.patch.object(GR.subprocess, "call", side_effect=call):
+            self.assertEqual(GR.command_vault({}, "reset-agent"), 0)
+        self.assertEqual(calls[0], ["gpgconf", "--kill", "gpg-agent"])
+        self.assertEqual(calls[1], ["/usr/bin/gpg-connect-agent", "/bye"])
+
     def test_rejected_vault_password_can_retry_without_saving(self):
         callback = mock.Mock(return_value=0)
         stderr = io.StringIO()

@@ -23,6 +23,8 @@ class InstallDependencyTests(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(
                 root, "usr/local/libexec/gr/snmp-manager")))
             self.assertTrue(os.path.isfile(os.path.join(
+                root, "usr/local/libexec/gr/snmp-handlers")))
+            self.assertTrue(os.path.isfile(os.path.join(
                 root, "etc/gr/snmp-templates.json")))
 
     def test_missing_packages_abort_before_installation(self):
