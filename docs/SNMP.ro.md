@@ -135,7 +135,11 @@ din phpIPAM. Adăugarea este dry-run fără `--apply`, apoi asocierea validată 
 salvează în phpIPAM. `--sync-credentials --apply` actualizează câmpurile SNMPv3
 ale dispozitivelor LibreNMS existente, iar următorul poll este verificarea
 autoritativă. `--poll --apply` rulează imediat acel poll prin hostul de
-monitorizare din profil și recitește status/`last_polled`. Testele și rapoartele
+monitorizare din profil și recitește status/`last_polled`. Câmpul `host` din
+profil trebuie să fie un hostname sau IP exact din phpIPAM, cu metadate SSH și
+sudo funcționale. Poller-ul rulează ca utilizatorul `librenms` din
+`/opt/librenms`, iar la eșec este afișat mesajul relevant al poller-ului, nu
+bannerul de conectare `gr exec`. Testele și rapoartele
 pot fi programate extern. Pentru rotație se
 creează un profil nou în vault, se rulează dry-run cu
 `rotate --previous-profile VECHI --profile NOU`, se aplică în mentenanță, se
