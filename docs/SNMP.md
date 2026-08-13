@@ -184,7 +184,11 @@ associations are written back to phpIPAM. Periodic tests and reports may be run 
 an external scheduler. `--sync-credentials --apply` updates the SNMPv3 fields of
 existing LibreNMS devices; the next poll is the authoritative verification.
 `--poll --apply` runs that poll immediately through the monitoring host stored
-in the profile and then refreshes status/`last_polled`.
+in the profile and then refreshes status/`last_polled`. The profile `host` must
+be an exact phpIPAM hostname or IP with working SSH and sudo metadata. The
+poller runs as the `librenms` account from `/opt/librenms`, matching the normal
+LibreNMS CLI runtime, and failures report the actionable poller error rather
+than the `gr exec` connection banner.
 Credential rotation is deliberately an explicit reviewed operation: configure a
 new vault profile, run `rotate --previous-profile OLD --profile NEW` as a dry-run,
 apply in a maintenance window, synchronize LibreNMS, then assign the new profile

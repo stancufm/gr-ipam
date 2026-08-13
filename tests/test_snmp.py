@@ -309,6 +309,26 @@ rule 30 permit source 192.0.2.3 0
         self.assertTrue(args.poll)
         self.assertTrue(args.apply)
 
+    def test_monitor_poll_runs_lnms_from_application_directory(self):
+        completed = types.SimpleNamespace(returncode=0, stdout="poll complete\n", stderr="")
+        with mock.patch.object(SNMP.subprocess, "run", return_value=completed) as run:
+            rc, detail = SNMP.monitoring_poll({"host": "192.0.2.20"}, "40")
+        self.assertEqual(rc, 0)
+        self.assertEqual(detail, "poll complete")
+        command = run.call_args[0][0]
+        self.assertEqual(command[:4], ["gr", "exec", "192.0.2.20", "--sudo"])
+        self.assertEqual(command[-2], "-lc")
+        self.assertEqual(command[-1],
+                         "cd /opt/librenms && exec ./lnms device:poll 40 --no-interaction")
+
+    def test_monitor_poll_rejects_non_numeric_device_id(self):
+        with self.assertRaises(SNMP.gr.GrError):
+            SNMP.monitoring_poll({"host": "192.0.2.20"}, "40; unsafe")
+
+    def test_poll_error_summary_ignores_buffered_exec_banner(self):
+        detail = "poller reported a failure\nExecuting on user@192.0.2.20:22 using profile linux"
+        self.assertEqual(SNMP.poll_error_summary(detail), "poller reported a failure")
+
     def test_unauthenticated_unknown_user_proves_agent_response(self):
         completed = types.SimpleNamespace(returncode=1, stdout="",
                                           stderr="Unknown user name")

@@ -797,12 +797,27 @@ def monitoring_poll(profile, device_id):
     host = str(profile.get("host") or "").strip()
     if not host:
         raise gr.GrError("Monitoring profile host is required for --poll")
+    try:
+        normalized_device_id = str(int(device_id))
+    except (TypeError, ValueError):
+        raise gr.GrError("LibreNMS device ID must be numeric for --poll")
+    poll_command = (
+        "cd /opt/librenms && exec ./lnms device:poll {} --no-interaction"
+    ).format(normalized_device_id)
     command = ["gr", "exec", host, "--sudo", "--no-audit", "--",
                "/usr/bin/sudo", "-H", "-u", "librenms",
-               "/opt/librenms/lnms", "device:poll", str(device_id), "--no-interaction"]
+               "/bin/sh", "-lc", poll_command]
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             universal_newlines=True, timeout=900)
-    return result.returncode, (result.stderr or result.stdout).strip()
+    detail = "\n".join(part.strip() for part in (result.stdout, result.stderr)
+                         if part and part.strip())
+    return result.returncode, detail
+
+
+def poll_error_summary(detail):
+    lines = [line.strip() for line in str(detail or "").splitlines() if line.strip()]
+    actionable = [line for line in lines if not line.startswith("Executing on ")]
+    return (actionable or lines or ["unknown"])[-1][:200]
 
 
 def command_monitor(cfg, templates, args):
@@ -869,7 +884,7 @@ def command_monitor(cfg, templates, args):
             poll_rc, poll_error = monitoring_poll(profile, device.get("device_id"))
             if poll_rc:
                 print("RESULT {} poll_failed detail={}".format(
-                    ip, poll_error.splitlines()[-1][:200] if poll_error else "unknown"))
+                    ip, poll_error_summary(poll_error)))
                 failed = True
                 continue
             code, body = monitoring_request(profile, token, "GET", "/devices/{}".format(

@@ -44,7 +44,7 @@ CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SNMP_MANAGER = "/usr/local/libexec/gr/snmp-manager"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.7.3"
+GR_VERSION = "2.7.4"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -2263,7 +2263,8 @@ def command_exec(cfg, target, command_values, use_sudo=False, override_user=None
     display_command = [client_binary, "-p", port, "{}@{}".format(user, row["_ip"]),
                        "<sudo command>" if use_sudo else remote_text]
     print("Executing on {}@{}:{} using profile {}{}".format(
-        user, row["_ip"], port, selected_profile or "-", " with sudo" if use_sudo else ""))
+        user, row["_ip"], port, selected_profile or "-", " with sudo" if use_sudo else ""),
+          flush=True)
     recorder = None
     audit_enabled = cfg.get("ssh_audit_enabled", False) if audit is None else audit
     if audit_enabled:
