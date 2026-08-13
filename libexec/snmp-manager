@@ -189,6 +189,27 @@ def resolve_template(templates, row):
     return candidates[0], "selector"
 
 
+def profile_network_values(name, profile):
+    sources = profile.get("sources") or []
+    if not isinstance(sources, list):
+        raise gr.GrError("SNMP profile {} sources must be a JSON list".format(name))
+    try:
+        sources = [str(ipaddress.ip_address(str(source))) for source in sources]
+    except ValueError as exc:
+        raise gr.GrError("SNMP profile {} has an invalid source: {}".format(name, exc))
+    source_address = str(profile.get("source_address") or "").strip()
+    if source_address:
+        try:
+            source_address = str(ipaddress.ip_address(source_address))
+        except ValueError as exc:
+            raise gr.GrError("SNMP profile {} has an invalid source_address: {}".format(name, exc))
+        if sources and source_address not in sources:
+            raise gr.GrError(
+                "SNMP profile {} source_address {} is not in its approved sources".format(
+                    name, source_address))
+    return sources, source_address
+
+
 def profile_values(cfg, row, args, need_secrets=True):
     name = args.profile or str(custom(row, "snmp_profile") or "").strip()
     profile = cfg.get("snmp_profiles", {}).get(name, {}) if name else {}
@@ -197,13 +218,7 @@ def profile_values(cfg, row, args, need_secrets=True):
         raise gr.GrError("SNMP profile/username is missing for {}".format(row_ip(row)))
     auth_protocol = str(profile.get("auth_protocol") or "SHA").upper()
     privacy_protocol = str(profile.get("privacy_protocol") or "AES").upper()
-    sources = profile.get("sources") or []
-    if not isinstance(sources, list):
-        raise gr.GrError("SNMP profile {} sources must be a JSON list".format(name))
-    try:
-        sources = [str(ipaddress.ip_address(str(source))) for source in sources]
-    except ValueError as exc:
-        raise gr.GrError("SNMP profile {} has an invalid source: {}".format(name, exc))
+    sources, source_address = profile_network_values(name, profile)
     auth_password = privacy_password = ""
     if need_secrets:
         if args.prompt_credentials:
@@ -220,7 +235,8 @@ def profile_values(cfg, row, args, need_secrets=True):
             raise gr.GrError("SNMPv3 AUTH and PRIV passwords must contain at least 8 characters")
     return {"profile": name, "username": username, "auth_protocol": auth_protocol,
             "privacy_protocol": privacy_protocol, "auth_password": auth_password,
-            "privacy_password": privacy_password, "sources": sources}
+            "privacy_password": privacy_password, "sources": sources,
+            "source_address": source_address}
 
 
 def variables(row, credentials, args, template=None):
@@ -260,6 +276,8 @@ def snmpget(ip, credentials, timeout=5):
             return '"{}"'.format(str(value).replace("\\", "\\\\").replace('"', '\\"'))
 
         with open(config, "w", encoding="utf-8") as handle:
+            if credentials.get("source_address"):
+                handle.write("clientaddr {}\n".format(credentials["source_address"]))
             handle.write("defSecurityLevel authPriv\n")
             handle.write("defSecurityName {}\n".format(credentials["username"]))
             handle.write("defAuthType {}\n".format(credentials["auth_protocol"]))
@@ -276,9 +294,30 @@ def snmpget(ip, credentials, timeout=5):
     return result.returncode, result.stderr.strip()
 
 
-def unauthenticated_probe(ip, timeout=2):
+def snmp_test_status(returncode, detail):
+    """Classify an authenticated probe without hiding an authentication error behind a timeout."""
+    if returncode == 0:
+        return "success"
+    lower = str(detail or "").lower()
+    authentication_markers = (
+        "authentication failure", "unknown user", "unknown security name",
+        "wrong digest", "decryption error", "incorrect password", "incorrect key",
+    )
+    if any(marker in lower for marker in authentication_markers):
+        return "failed"
+    if "timeout" in lower or "no response" in lower:
+        return "timeout"
+    return "failed"
+
+
+def unauthenticated_probe(ip, timeout=2, source_address=""):
     with tempfile.TemporaryDirectory(prefix="gr-snmp-probe-") as directory:
         os.chmod(directory, 0o700)
+        if source_address:
+            config = os.path.join(directory, "snmp.conf")
+            with open(config, "w", encoding="utf-8") as handle:
+                handle.write("clientaddr {}\n".format(source_address))
+            os.chmod(config, 0o600)
         environment = os.environ.copy(); environment["SNMPCONFPATH"] = directory
         command = ["snmpget", "-v3", "-l", "noAuthNoPriv", "-u", "GRportProbe",
                    "-t", str(timeout), "-r", "0", "-On", ip,
@@ -545,7 +584,7 @@ def command_test(cfg, templates, args):
         template, _ = resolve_template(templates, row)
         credentials = profile_values(cfg, row, args)
         rc, error = snmpget(row_ip(row), credentials, args.timeout)
-        status = "success" if rc == 0 else ("timeout" if "Timeout" in error else "failed")
+        status = snmp_test_status(rc, error)
         results.append({"ip": row_ip(row), "hostname": row.get("hostname") or "",
                         "template": template["id"], "profile": credentials["profile"],
                         "status": status, "error": error.splitlines()[-1][:200] if error else ""})
@@ -607,7 +646,12 @@ def command_report(cfg, templates, args):
                 record.update({"live_complete": False, "live_error": str(exc)})
         elif args.mode == "ports":
             try:
-                record["udp_161"], detail = unauthenticated_probe(record["ip"], args.timeout)
+                profile_name = args.profile or str(custom(row, "snmp_profile") or "").strip()
+                profile = cfg.get("snmp_profiles", {}).get(profile_name, {}) if profile_name else {}
+                _sources, source_address = profile_network_values(profile_name, profile)
+                record["udp_161"], detail = unauthenticated_probe(
+                    record["ip"], args.timeout, source_address)
+                record["probe_source_address"] = source_address or "auto"
                 record["probe_detail"] = detail.splitlines()[-1][:200] if detail else ""
             except (OSError, subprocess.TimeoutExpired) as exc:
                 record["udp_161"] = "error"
@@ -887,6 +931,8 @@ def build_parser():
     test.add_argument("--timeout", type=int, default=5)
     report = sub.add_parser("report"); add_selectors(report)
     report.add_argument("--mode", choices=("offline", "ports", "inventory", "live"), default="inventory")
+    report.add_argument("--profile",
+                        help="SNMP profile used to bind a ports probe to source_address")
     report.add_argument("--timeout", type=float, default=2.0)
     report.add_argument("--source", action="append")
     report.add_argument("--group")

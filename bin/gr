@@ -44,7 +44,7 @@ CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SNMP_MANAGER = "/usr/local/libexec/gr/snmp-manager"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.7.2"
+GR_VERSION = "2.7.3"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -265,7 +265,7 @@ def profile_count(value):
 
 PROFILE_CONFIG_KEYS = ("password_secret", "sudo_password_secret", "identity_file")
 SNMP_PROFILE_CONFIG_KEYS = ("username", "auth_protocol", "privacy_protocol",
-                            "auth_secret", "privacy_secret", "sources")
+                            "auth_secret", "privacy_secret", "sources", "source_address")
 MONITORING_PROFILE_CONFIG_KEYS = ("type", "url", "ca_file", "token_secret", "host")
 
 
@@ -295,6 +295,12 @@ def validate_config_setting_name(name):
 
 def parse_config_setting(name, value):
     parts = validate_config_setting_name(name)
+    if (len(parts) == 3 and parts[0] == "snmp_profiles" and
+            parts[2] == "source_address"):
+        try:
+            return str(ipaddress.ip_address(str(value).strip()))
+        except ValueError as exc:
+            raise GrError("{} contains an invalid IP address: {}".format(name, exc))
     if len(parts) == 3 and parts[0] == "snmp_profiles" and parts[2] == "sources":
         try:
             parsed_sources = json.loads(value)

@@ -30,6 +30,7 @@
       "auth_protocol": "SHA",
       "privacy_protocol": "AES",
       "sources": ["192.0.2.20", "192.0.2.21", "192.0.2.22"],
+      "source_address": "192.0.2.20",
       "auth_secret": "gr/snmpv3/monitoring-v3/auth",
       "privacy_secret": "gr/snmpv3/monitoring-v3/priv"
     }
