@@ -122,13 +122,16 @@ generation may override package IDs.
 ## Reports and monitoring
 
 Selectors are `--ip` (repeatable), `--range`, `--subnet`, `--file` (text/CSV) and
-`--all`:
+`--all`. Add repeatable `--exclude-ip` for OOBM/duplicate paths that must not be
+treated as independent managed devices. `--managed-only` limits reports to rows
+with a device driver or explicit SNMP/monitoring intent:
 
 ```text
 gr snmp report --subnet 192.0.2.0/24 --mode inventory
 gr snmp report --file devices.csv --mode live
 gr snmp report --all --mode offline
 gr snmp report --range 192.0.2.1-192.0.2.50 --mode ports
+gr snmp report --all --managed-only --exclude-ip 192.0.2.250 --mode inventory
 ```
 
 Live reports execute template-specific show commands. Offline reports inspect the
@@ -138,7 +141,17 @@ answered without exposing a credential. UDP silence does not prove that SNMP is
 closed and the result is explicitly best-effort.
 Reports are private mode 0600 under `snmp_report_dir` and must never be published.
 Each run writes detailed JSON plus a comparison-friendly CSV summary; raw live
-CLI output remains only in JSON.
+CLI output remains only in JSON. Inventory reports include model, OS version,
+resolved template, write capability and supported actions so rollout eligibility
+can be reviewed without joining another report.
+
+Model/firmware metadata may be imported from multiple `collect-version` reports.
+Later reports win for the same IP; the command remains a plan without `--apply`:
+
+```text
+gr snmp inventory-sync --report older.json --report newer.json
+gr snmp inventory-sync --report older.json --report newer.json --apply
+```
 
 LibreNMS validation compares device presence, `status`, `last_polled` and the
 phpIPAM address `lastSeen`:

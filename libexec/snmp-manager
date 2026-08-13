@@ -109,6 +109,7 @@ def select_rows(rows, args, require_enabled=False):
         left, right = args.ip_range.split("-", 1)
         start, end = ipaddress.ip_address(left), ipaddress.ip_address(right)
     file_ips = set()
+    excluded_ips = set(getattr(args, "exclude_ip", []) or [])
     if args.file:
         with open(args.file, encoding="utf-8-sig", newline="") as handle:
             content = handle.read()
@@ -123,12 +124,22 @@ def select_rows(rows, args, require_enabled=False):
         matched = matched or (start is not None and start <= address <= end)
         if not matched:
             continue
+        if ip in excluded_ips:
+            continue
         if require_enabled and not bool(int(custom(row, "snmp_enabled") or 0)):
             continue
         selected.append(row)
     if not selected:
         raise gr.GrError("No phpIPAM addresses matched the SNMP selection")
     return selected
+
+
+def managed_row(row):
+    """Keep intentional management rows without flooding reports with IPAM leases."""
+    return (gr.resolve_device_driver(row) != "generic" or
+            bool(str(custom(row, "snmp_template") or "").strip()) or
+            bool(int(custom(row, "snmp_enabled") or 0)) or
+            bool(int(custom(row, "monitoring_enabled") or 0)))
 
 
 def template_matches(template, row):
@@ -542,17 +553,28 @@ def command_test(cfg, templates, args):
 def command_report(cfg, templates, args):
     with gr.api_session(cfg, prompt=False) as api:
         rows = select_rows(inventory_rows(api), args, require_enabled=False)
+    if args.managed_only:
+        rows = [row for row in rows if managed_row(row)]
+        if not rows:
+            raise gr.GrError("No managed phpIPAM addresses matched the SNMP selection")
     records = []
     for row in rows:
         try:
             template, resolution = resolve_template(templates, row)
             template_id = template["id"]
+            apply_supported = bool(template.get("apply_supported"))
+            supported_actions = template.get("supported_actions") or ["report", "test"]
         except gr.GrError:
             resolution, template_id = "none", "none"
+            apply_supported, supported_actions = False, ["report", "test"]
         record = {"ip": row_ip(row), "hostname": row.get("hostname") or "",
                   "driver": gr.resolve_device_driver(row), "template": template_id,
+                  "device_model": str(custom(row, "device_model") or ""),
                   "device_os": str(row.get("_device_os") or ""),
+                  "os_version": str(custom(row, "os_version") or ""),
                   "template_resolution": resolution,
+                  "apply_supported": apply_supported,
+                  "supported_actions": supported_actions,
                   "snmp_enabled": bool(int(custom(row, "snmp_enabled") or 0)),
                   "snmp_profile": str(custom(row, "snmp_profile") or ""),
                   "last_seen": str(row.get("lastSeen") or ""),
@@ -637,38 +659,68 @@ def command_assign(cfg, templates, args):
 
 
 def command_inventory_sync(cfg, args):
-    report = gr.expand(args.report)
-    with open(report, encoding="utf-8") as handle:
-        data = json.load(handle)
-    results = data.get("results", []) if isinstance(data, dict) else []
-    if not isinstance(results, list):
-        raise gr.GrError("Version report has no results array: {}".format(report))
+    reports = [gr.expand(report) for report in args.report]
+    by_result_ip = {}
+    for report in reports:
+        with open(report, encoding="utf-8") as handle:
+            data = json.load(handle)
+        results = data.get("results", []) if isinstance(data, dict) else []
+        if not isinstance(results, list):
+            raise gr.GrError("Version report has no results array: {}".format(report))
+        for result in results:
+            ip = str(result.get("ip") or "")
+            if ip and result.get("result") in (None, "success"):
+                by_result_ip[ip] = result
     with gr.api_session(cfg, prompt=False) as api:
         rows = inventory_rows(api)
     by_ip = {row_ip(row): row for row in rows}
     changes = []
-    for result in results:
+    unchanged = 0
+    for ip in sorted(by_result_ip, key=lambda value: ipaddress.ip_address(value)):
+        result = by_result_ip[ip]
         ip = str(result.get("ip") or "")
         row = by_ip.get(ip)
-        if not row or result.get("result") not in (None, "success"):
+        if not row:
             continue
         payload = {"custom_device_model": str(result.get("model") or "").strip(),
                    "custom_os_version": str(result.get("firmware") or "").strip()}
         payload = {key: value for key, value in payload.items() if value}
         if not payload:
             continue
+        current = {"custom_device_model": str(custom(row, "device_model") or "").strip(),
+                   "custom_os_version": str(custom(row, "os_version") or "").strip()}
+        if all(current.get(key) == value for key, value in payload.items()):
+            unchanged += 1
+            print("UNCHANGED {} model={} os_version={}".format(
+                ip, current["custom_device_model"] or "-", current["custom_os_version"] or "-"))
+            continue
         changes.append((row, payload))
         print("{} {} model={} os_version={}".format(
             "APPLY" if args.apply else "PLAN", ip,
             payload.get("custom_device_model", "-"), payload.get("custom_os_version", "-")))
     if not args.apply:
+        print("REPORTS={} UNIQUE_TARGETS={} CHANGES={} UNCHANGED={}".format(
+            len(reports), len(by_result_ip), len(changes), unchanged))
         print("DRY_RUN=True Re-run with --apply to synchronize model/OS version metadata.")
         return 0
     write_cfg = dict(cfg); write_cfg["app_id"] = cfg.get("migration_app_id", "gr-migrate")
     with gr.api_session(write_cfg) as api:
         for row, payload in changes:
             api.request("PATCH", "addresses/{}/".format(row["id"]), payload=payload)
-    print("INVENTORY_SYNC_STATUS=success count={}".format(len(changes)))
+            after = api.request("GET", "addresses/{}/".format(row["id"]))
+            data = after.get("data") if isinstance(after, dict) else None
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            if not isinstance(data, dict):
+                raise gr.GrError("phpIPAM metadata verification failed for {}".format(row_ip(row)))
+            verified = {
+                "custom_device_model": str(gr.custom_value(data, "device_model") or "").strip(),
+                "custom_os_version": str(gr.custom_value(data, "os_version") or "").strip(),
+            }
+            if any(verified.get(key) != value for key, value in payload.items()):
+                raise gr.GrError("phpIPAM metadata verification failed for {}".format(row_ip(row)))
+    print("INVENTORY_SYNC_STATUS=success changed={} unchanged={}".format(
+        len(changes), unchanged))
     return 0
 
 
@@ -803,6 +855,8 @@ def add_selectors(parser):
     group.add_argument("--subnet")
     group.add_argument("--range", dest="ip_range", metavar="START-END")
     group.add_argument("--file", help="text or CSV file containing IP addresses")
+    parser.add_argument("--exclude-ip", action="append", default=[],
+                        help="exclude one IP address; repeat for OOBM or duplicate paths")
 
 
 def build_parser():
@@ -834,13 +888,16 @@ def build_parser():
     report.add_argument("--group")
     report.add_argument("--view")
     report.add_argument("--acl")
+    report.add_argument("--managed-only", action="store_true",
+                        help="report only rows with a managed driver or explicit SNMP/monitoring intent")
     assign = sub.add_parser("assign"); add_selectors(assign)
     assign.add_argument("--enabled", choices=("yes", "no"), default="yes")
     assign.add_argument("--profile"); assign.add_argument("--template")
     assign.add_argument("--monitoring-profile"); assign.add_argument("--apply", action="store_true")
     inventory_sync = sub.add_parser("inventory-sync",
                                     help="import model and OS version from a collect-version JSON report")
-    inventory_sync.add_argument("--report", required=True)
+    inventory_sync.add_argument("--report", action="append", required=True,
+                                help="collect-version JSON report; repeat and later reports win per IP")
     inventory_sync.add_argument("--apply", action="store_true")
     monitor = sub.add_parser("monitor"); add_selectors(monitor)
     monitor.add_argument("--monitoring-profile", required=True)

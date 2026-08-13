@@ -3,6 +3,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import tempfile
 import types
 import unittest
 from unittest import mock
@@ -48,6 +49,13 @@ class SnmpManagerTests(unittest.TestCase):
             self.templates, row("cisco-small-business", "CBS250-8T-D", version="3.1.1.7"))
         self.assertEqual(template["id"], "cisco-business-cbs250-8td-3.1-v3")
         self.assertEqual(template["handler"], "cisco-business-3x")
+        self.assertTrue(template["apply_supported"])
+
+    def test_reviewed_planet_build_suffix_selects_apply_handler(self):
+        template, _source = SNMP.resolve_template(
+            self.templates,
+            row("planet-sgs", "SGS-6310-16S8C4XR", version="2.2.0E Build 97938"))
+        self.assertEqual(template["id"], "planet-sgs-6310-2.2-v3")
         self.assertTrue(template["apply_supported"])
 
     def test_unreviewed_cbs_firmware_remains_report_only(self):
@@ -161,6 +169,102 @@ rule 30 permit source 192.0.2.3 0
         for mode in ("inventory", "live", "offline", "ports"):
             args = SNMP.build_parser().parse_args(["report", "--ip", "192.0.2.10", "--mode", mode])
             self.assertEqual(args.mode, mode)
+
+    def test_managed_report_and_duplicate_exclusion_options(self):
+        args = SNMP.build_parser().parse_args([
+            "report", "--all", "--managed-only",
+            "--exclude-ip", "192.0.2.20", "--exclude-ip", "192.0.2.21"])
+        self.assertTrue(args.managed_only)
+        self.assertEqual(args.exclude_ip, ["192.0.2.20", "192.0.2.21"])
+
+    def test_select_rows_excludes_duplicate_paths(self):
+        args = types.SimpleNamespace(all=True, ip=None, subnet=None, ip_range=None,
+                                     file=None, exclude_ip=["192.0.2.11"])
+        selected = SNMP.select_rows(
+            [row(), dict(row(), ip="192.0.2.11")], args)
+        self.assertEqual([SNMP.row_ip(item) for item in selected], ["192.0.2.10"])
+
+    def test_managed_row_requires_driver_or_explicit_intent(self):
+        self.assertFalse(SNMP.managed_row({"ip": "192.0.2.1"}))
+        self.assertTrue(SNMP.managed_row(row()))
+        self.assertTrue(SNMP.managed_row({"ip": "192.0.2.2", "custom_snmp_enabled": 1}))
+
+    def test_inventory_sync_accepts_multiple_reports(self):
+        args = SNMP.build_parser().parse_args([
+            "inventory-sync", "--report", "old.json", "--report", "new.json"])
+        self.assertEqual(args.report, ["old.json", "new.json"])
+
+    def test_inventory_sync_is_idempotent_and_later_report_wins(self):
+        address = dict(row(), id="10", custom_device_model="new-model",
+                       custom_os_version="new-version")
+
+        class Api:
+            patches = []
+            def addresses(self):
+                return [address]
+            def request(self, method, path, payload=None):
+                if path == "devices/":
+                    return {"data": []}
+                if method == "PATCH":
+                    self.patches.append(payload)
+                return {"data": address}
+
+        class Session:
+            def __enter__(self):
+                return Api()
+            def __exit__(self, *_args):
+                return False
+
+        paths = []
+        try:
+            for model, version in (("old-model", "old-version"),
+                                   ("new-model", "new-version")):
+                handle = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+                json.dump({"results": [{"ip": "192.0.2.10", "model": model,
+                                         "firmware": version, "result": "success"}]}, handle)
+                handle.close(); paths.append(handle.name)
+            args = types.SimpleNamespace(report=paths, apply=True)
+            with mock.patch.object(SNMP.gr, "api_session", return_value=Session()):
+                self.assertEqual(SNMP.command_inventory_sync({}, args), 0)
+            self.assertEqual(Api.patches, [])
+        finally:
+            for path in paths:
+                os.unlink(path)
+
+    def test_inventory_sync_verifies_applied_metadata(self):
+        address = dict(row(), id="10", custom_device_model="", custom_os_version="")
+
+        class Api:
+            patches = []
+            def addresses(self):
+                return [address]
+            def request(self, method, path, payload=None):
+                if path == "devices/":
+                    return {"data": []}
+                if method == "PATCH":
+                    address.update(payload); self.patches.append(payload)
+                return {"data": address}
+
+        class Session:
+            def __enter__(self):
+                return Api()
+            def __exit__(self, *_args):
+                return False
+
+        handle = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        try:
+            json.dump({"results": [{"ip": "192.0.2.10", "model": "verified-model",
+                                     "firmware": "verified-version", "result": "success"}]}, handle)
+            handle.close()
+            args = types.SimpleNamespace(report=[handle.name], apply=True)
+            with mock.patch.object(SNMP.gr, "api_session", return_value=Session()):
+                self.assertEqual(SNMP.command_inventory_sync({}, args), 0)
+            self.assertEqual(len(Api.patches), 1)
+            self.assertEqual(address["custom_device_model"], "verified-model")
+        finally:
+            if not handle.closed:
+                handle.close()
+            os.unlink(handle.name)
 
     def test_applied_change_requires_successful_configuration_backup(self):
         completed = types.SimpleNamespace(returncode=2, stdout="", stderr="collector failed")
