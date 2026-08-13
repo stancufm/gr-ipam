@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": 2,
+  "catalog_version": 3,
   "templates": [
     {
       "id": "cisco-ios-v3",
@@ -118,7 +118,7 @@
     },
     {
       "id": "planet-sgs-6310-2.2-v3",
-      "match": {"driver": "planet-sgs", "model_regex": "^SGS-6310", "os_version_regex": "^2\\.2\\.0E$"},
+      "match": {"driver": "planet-sgs", "model_regex": "^SGS-6310", "os_version_regex": "^2\\.2\\.0E(?:\\s|$)"},
       "handler": "planet-sgs-2.2",
       "defaults": {"group": "SNMP_DEFAULT_GROUP", "view": "SNMP_DEFAULT_VIEW", "write_view": "SNMP_NO_WRITE", "acl": "SNMP_MON_SRV_ACL"},
       "apply_supported": true,

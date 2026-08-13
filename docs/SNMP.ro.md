@@ -86,6 +86,9 @@ generația curentă poate suprascrie ID-urile din pachet.
 ## Rapoarte și LibreNMS
 
 Selectorii sunt `--ip`, `--range`, `--subnet`, `--file` (TXT/CSV) și `--all`.
+`--exclude-ip` repetabil elimină traseele OOBM/duplicate care nu trebuie tratate
+ca dispozitive independente. `--managed-only` limitează raportul la adresele cu
+driver sau intenție SNMP/monitorizare explicită.
 Modurile sunt `inventory`, `live`, `offline` și `ports`. Live rulează comenzile
 show specifice template-ului; offline citește arhiva globală; ports folosește o
 descoperire SNMPv3 neautentificată cu user fictiv. Un răspuns unknown-user
@@ -93,7 +96,18 @@ demonstrează existența agentului fără credențiale, dar lipsa răspunsului U
 demonstrează că portul este închis.
 Rapoartele sunt 0600 în `snmp_report_dir` și nu se publică.
 Fiecare rulare produce JSON detaliat și un rezumat CSV comparativ; outputul CLI
-live brut rămâne numai în JSON.
+live brut rămâne numai în JSON. Raportul inventory include modelul, versiunea OS,
+template-ul rezolvat, capabilitatea de scriere și acțiunile permise.
+
+Metadatele model/firmware pot fi importate din mai multe rapoarte
+`collect-version`; ultimul raport pentru același IP are prioritate. Fără
+`--apply` comanda afișează numai planul:
+
+```text
+gr snmp inventory-sync --report vechi.json --report nou.json
+gr snmp inventory-sync --report vechi.json --report nou.json --apply
+gr snmp report --all --managed-only --exclude-ip 192.0.2.250 --mode inventory
+```
 
 ```text
 gr snmp monitor --all --monitoring-profile librenms
