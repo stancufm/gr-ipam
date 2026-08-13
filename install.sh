@@ -60,7 +60,7 @@ if [ "$(id -u)" -ne 0 ] && [ -z "$destdir" ]; then
   exit 2
 fi
 
-required_packages="python3 openssh-client sshpass pass gnupg ca-certificates git bash-completion less systemd"
+required_packages="python3 openssh-client sshpass pass gnupg ca-certificates git bash-completion less systemd snmp"
 
 check_dependencies() {
   missing_packages=
@@ -131,18 +131,25 @@ esac
 
 install -d -m 0755 "$destdir/usr/local/bin" "$destdir/usr/local/libexec/gr" \
   "$destdir/usr/local/share/doc/gr" "$destdir/usr/local/share/gr/phpipam" \
+  "$destdir/usr/local/share/gr/snmp" \
   "$destdir/etc/gr" "$destdir/var/lib/gr/ieee-vendors" \
   "$destdir/etc/systemd/system" "$destdir/etc/bash_completion.d"
 install -m 0755 "$package_dir/bin/gr" "$destdir/usr/local/bin/gr"
 install -m 0755 "$package_dir/libexec/validate-ssh" "$destdir/usr/local/libexec/gr/validate-ssh"
 install -m 0755 "$package_dir/libexec/collect-version" "$destdir/usr/local/libexec/gr/collect-version"
 install -m 0755 "$package_dir/libexec/collect-config" "$destdir/usr/local/libexec/gr/collect-config"
+install -m 0755 "$package_dir/libexec/snmp-manager" "$destdir/usr/local/libexec/gr/snmp-manager"
 install -m 0755 "$package_dir/libexec/gr-update" "$destdir/usr/local/libexec/gr/gr-update"
 install -m 0644 "$package_dir"/docs/*.md "$destdir/usr/local/share/doc/gr/"
 install -m 0644 "$package_dir"/README*.md "$package_dir"/CONTRIBUTING*.md "$destdir/usr/local/share/doc/gr/"
 install -m 0644 "$package_dir"/phpipam/*.md "$destdir/usr/local/share/doc/gr/"
 install -m 0755 "$package_dir/phpipam/ensure-custom-fields.php" \
   "$destdir/usr/local/share/gr/phpipam/ensure-custom-fields.php"
+install -m 0644 "$package_dir/snmp/templates.json" \
+  "$destdir/usr/local/share/gr/snmp/templates.json"
+if [ ! -e "$destdir/etc/gr/snmp-templates.json" ]; then
+  install -m 0644 "$package_dir/snmp/templates.json" "$destdir/etc/gr/snmp-templates.json"
+fi
 install -m 0644 "$package_dir/VERSION" "$destdir/usr/local/share/doc/gr/VERSION"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.service" "$destdir/etc/systemd/system/gr-vendor-update.service"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.timer" "$destdir/etc/systemd/system/gr-vendor-update.timer"
@@ -185,7 +192,7 @@ fi
 
 python3 -c 'import ast,sys; [ast.parse(open(path, encoding="utf-8").read(), filename=path) for path in sys.argv[1:]]' \
   "$package_dir/bin/gr" "$package_dir/libexec/validate-ssh" "$package_dir/libexec/collect-version" \
-  "$package_dir/libexec/collect-config"
+  "$package_dir/libexec/collect-config" "$package_dir/libexec/snmp-manager"
 sh -n "$package_dir/libexec/gr-update"
 bash -n "$package_dir/completions/gr.bash"
 

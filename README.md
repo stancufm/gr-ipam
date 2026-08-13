@@ -7,8 +7,8 @@ source of truth for network inventory and SSH connection metadata.
 
 It can search addresses, connect through SSH, keep device passwords in a
 per-user encrypted vault, maintain a shared IEEE OUI database, synchronize
-normalized vendor information, validate switch access and collect device
-version inventory.
+normalized vendor information, validate switch access, collect device versions,
+and manage SNMPv3 through model/OS templates and LibreNMS validation.
 
 ## Main properties
 
@@ -22,15 +22,20 @@ version inventory.
 - `/etc/hosts` generation is disabled by default.
 - Legacy SSH is opt-in per device and never weakens the normal SSH client.
 - Complete SSH terminal auditing is configurable globally and per session.
+- Rejected Vault passwords are diagnosed from `sshpass` status 5, with an
+  operator-approved OpenSSH prompt retry for generic targets.
 - Explicit non-interactive remote commands can reuse the encrypted SSH secret
   for sudo, or select a separate sudo secret per credential profile.
 - Bash completion covers commands, valid values and dynamic audit navigation.
+- SNMP credentials remain in the encrypted vault; phpIPAM stores only intent,
+  template/profile names and the monitoring association.
 
 ## Requirements
 
 - Debian 10 or newer with Python 3.7+
 - phpIPAM available through HTTPS
 - `openssh-client`
+- `snmp` (Net-SNMP command-line tools)
 - optional: `sshpass`, `pass`, and `gnupg` for encrypted password automation
 - optional: an `/usr/bin/ssh1` compatibility wrapper for legacy devices
 - systemd for automatic IEEE registry updates
@@ -78,6 +83,8 @@ gr ssh validate
 gr ssh validate --run --ip 192.0.2.10
 gr collect version --ip 192.0.2.10
 gr collect reports latest
+gr snmp report --ip 192.0.2.10 --mode inventory
+gr snmp test --ip 192.0.2.10
 gr self-update check
 ```
 
@@ -87,6 +94,7 @@ gr self-update check
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security model](docs/SECURITY-MODEL.md)
 - [SSH session auditing](docs/AUDIT.md)
+- [Template-driven SNMP management](docs/SNMP.md)
 - [Signed self-update](docs/UPDATE.md)
 - [Complete command guide](docs/GR-PHPIPAM.md)
 - [phpIPAM preparation](phpipam/SETUP.md)
@@ -94,7 +102,7 @@ gr self-update check
 
 ## Project status
 
-Version `1.4.0` has been tested through an isolated `DESTDIR` installation on
+Version `2.6.1` is tested through an isolated `DESTDIR` installation on
 Debian. The package contains no credentials, private keys, inventory exports or
 organization-specific addressing.
 

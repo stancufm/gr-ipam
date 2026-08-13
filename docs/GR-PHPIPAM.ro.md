@@ -43,6 +43,14 @@ gr --ssh --user operator --port 2222 --profile network-admin --driver cisco-ios 
 
 Dacă există un singur rezultat, conectarea este automată; altfel se afișează selectorul. Override-urile CLI sunt valabile numai pentru sesiunea curentă. `--no-vault` forțează promptul OpenSSH. Clientul legacy este selectat numai prin metadata/CLI și nu slăbește clientul normal.
 
+Când `sshpass` întoarce codul 5, `gr` identifică explicit parola respinsă din
+profilul Vault selectat. Pentru o țintă SSH generică, operatorul poate confirma
+o singură reîncercare prin promptul nativ OpenSSH; valoarea introdusă nu este
+salvată de `gr`. Driverele interactive automatizate se opresc, deoarece
+handlerul lor de login necesită credențiala criptată. Verifică decriptarea cu
+`gr vault test PROFIL` și rulează `gr vault set PROFIL` numai după confirmarea
+independentă a parolei noi.
+
 Tabelul compact afișează câmpul phpIPAM `lastSeen` imediat după `STATUS`.
 
 ## Comenzi neinteractive și sudo
@@ -409,6 +417,10 @@ de afișare. Rapoartele sunt căutate în `device_version_dir`, implicit
 ## Diagnostic și documentație
 
 `gr doctor --api` verifică fișierele, permisiunile, dependențele, baza IEEE și API-ul. `gr docs --language en` afișează ghidul englez, iar `gr docs --language ro` ghidul român. Toate scrierile de inventar rămân dry-run până la `--apply`.
+
+Inventarul SNMP pe bază de template-uri, configurarea tranzacțională, rotația,
+cleanup-ul, rapoartele private și reconcilierea LibreNMS sunt documentate în
+`SNMP.ro.md`.
 
 ### Inventarul configurației
 

@@ -31,12 +31,12 @@ _gr_completion() {
     COMPREPLY=()
 
     if (( COMP_CWORD == 1 )); then
-        _gr_complete_words "init doctor config ssh exec collect find search subnet local sync export auth vault update self-update migrate-ssh migrate-drivers driver vendor audit completion docs help --ssh --config --version" "$current"
+        _gr_complete_words "init doctor config ssh exec collect snmp find search subnet local sync export auth vault update self-update migrate-ssh migrate-drivers driver vendor audit completion docs help --ssh --config --version" "$current"
         return
     fi
 
     case "$previous" in
-        --config|--output|-o)
+        --config|--output|--report|-o)
             COMPREPLY=( $(compgen -f -- "$current") )
             compopt -o filenames 2>/dev/null || true
             return
@@ -170,6 +170,17 @@ _gr_completion() {
                 fi
             elif [[ $subcommand == reports && $current == -* ]]; then
                 _gr_complete_words "--raw --no-more --config --help" "$current"
+            fi
+            ;;
+        snmp)
+            if (( COMP_CWORD == 2 )); then
+                _gr_complete_words "templates assign inventory-sync configure rotate cleanup test report monitor" "$current"
+            elif [[ $previous == --mode ]]; then
+                _gr_complete_words "inventory live offline ports" "$current"
+            elif [[ $previous == --enabled ]]; then
+                _gr_complete_words "yes no" "$current"
+            elif [[ $current == -* ]]; then
+                _gr_complete_words "--all --ip --subnet --range --file --profile --previous-profile --username --prompt-credentials --source --template --monitoring-profile --sync-credentials --poll --enabled --include-disabled --mode --timeout --add --apply --help" "$current"
             fi
             ;;
         subnet|local)

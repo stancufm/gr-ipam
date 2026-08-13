@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "templates": [
+    {
+      "id": "cisco-ios-v3",
+      "match": {"driver": "cisco-ios"},
+      "apply_supported": true,
+      "workflow": "transactional-cli-v1",
+      "inspect_commands": ["show running-config | section ^snmp", "show snmp user", "show access-lists {acl}"],
+      "configure_commands": ["configure terminal", "snmp-server view {view} iso included", "ip access-list standard {acl}", "10 permit {source_1}", "20 permit {source_2}", "30 permit {source_3}", "90 deny any log", "exit", "snmp-server group {group} v3 priv read {view} access {acl}", "snmp-server user {username} {group} v3 auth {auth_protocol} {auth_password} priv aes 128 {privacy_password}", "end"],
+      "rotate_commands": ["configure terminal", "no snmp-server user {username} {group} v3", "snmp-server user {username} {group} v3 auth {auth_protocol} {auth_password} priv aes 128 {privacy_password}", "end"],
+      "cleanup_commands": ["configure terminal", "no snmp-server community {legacy_value}", "end"],
+      "verify_commands": ["show snmp user {username}", "show snmp group", "show access-lists {acl}"],
+      "verification_terms": ["{username}", "{group}", "{acl}", "{source_1}", "{source_2}", "{source_3}"],
+      "save_commands": ["write memory"],
+      "configure_rollback_commands": ["configure terminal", "no snmp-server user {username} {group} v3", "no snmp-server group {group} v3 priv", "no snmp-server view {view} iso included", "no ip access-list standard {acl}", "end"],
+      "rotate_rollback_commands": [],
+      "cleanup_rollback_commands": []
+    },
+    {
+      "id": "cisco-business-cbs250-v3",
+      "match": {"driver": "cisco-small-business", "model_regex": "^CBS250"},
+      "apply_supported": false,
+      "reason": "CBS engine-ID confirmation and user syntax vary by firmware; use inventory/test until a model-specific workflow is reviewed.",
+      "inspect_commands": ["terminal datadump", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],
+      "configure_commands": ["terminal datadump", "configure terminal", "snmp-server engineID local default", "Y", "Y", "snmp-server view {view} iso included", "snmp-server group {group} v3 priv read {view}", "snmp-server user {username} {group} v3 auth {auth_protocol} {auth_password} priv aes {privacy_password}", "end"],
+      "rotate_commands": ["configure terminal", "no snmp-server user {username}", "snmp-server user {username} {group} v3 auth {auth_protocol} {auth_password} priv aes {privacy_password}", "end"],
+      "cleanup_commands": [],
+      "verify_commands": ["show snmp engineID", "show snmp groups", "show snmp users"],
+      "save_commands": ["copy running-config startup-config"],
+      "rollback_commands": ["configure terminal", "no snmp-server user {username}", "end"]
+    },
+    {
+      "id": "cisco-business-legacy-report-only",
+      "match": {"driver": "cisco-small-business"},
+      "apply_supported": false,
+      "reason": "Legacy SG/SF firmware did not consistently validate AES; upgrade and specialize by model first.",
+      "inspect_commands": ["terminal datadump", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"]
+    },
+    {
+      "id": "hpe-arubaos-switch-v3-adaptive",
+      "match": {"driver": "hpe-arubaos-switch"},
+      "apply_supported": false,
+      "reason": "snmpv3 enable is an interactive, firmware-dependent initialization dialog; use a reviewed derived template.",
+      "inspect_commands": ["no page", "show snmpv3 enable", "show snmpv3 only", "show snmpv3 user", "show snmpv3 group"]
+    },
+    {
+      "id": "hpe-comware7-v3",
+      "match": {"driver": "hpe-comware7"},
+      "apply_supported": false,
+      "reason": "Supported for inventory/test; transactional system-view handler remains required for apply.",
+      "inspect_commands": ["screen-length disable", "display snmp-agent usm-user", "display current-configuration | include snmp-agent"]
+    },
+    {
+      "id": "dell-os10-v3",
+      "match": {"driver": "dell-os10"},
+      "apply_supported": false,
+      "reason": "OS10 10.5 lacks process ACL and masks localized keys; rotate only through a reviewed derived template.",
+      "inspect_commands": ["terminal length 0", "show running-configuration snmp", "show snmp user"]
+    },
+    {
+      "id": "planet-sgs-v3",
+      "match": {"driver": "planet-sgs", "model_regex": "^SGS-6310"},
+      "apply_supported": false,
+      "reason": "Firmware-specific CLI ordering and direct SNMP group ACL require a reviewed derived template.",
+      "inspect_commands": ["enable", "terminal length 0", "show snmp", "show snmp engineID", "show snmp view", "show snmp group", "show snmp user"]
+    },
+    {
+      "id": "fortigate-fortios-v3",
+      "match": {"driver": "fortigate-fortios"},
+      "apply_supported": false,
+      "reason": "FortiOS SNMPv3 query source restrictions differ from community hosts; interface ACLs are never inferred.",
+      "inspect_commands": ["show system snmp sysinfo", "show system snmp user", "show system snmp community", "show system interface"]
+    }
+  ]
+}

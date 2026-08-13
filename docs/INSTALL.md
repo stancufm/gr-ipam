@@ -32,7 +32,7 @@ Run the installer on a jump server without `--phpipam-config`; `gr doctor
 
 ```bash
 sudo apt-get update
-sudo apt-get install python3 openssh-client sshpass pass gnupg ca-certificates git bash-completion less systemd
+sudo apt-get install python3 openssh-client sshpass pass gnupg ca-certificates git bash-completion less systemd snmp
 ```
 
 All dependencies are mandatory so every documented feature is available. The

@@ -20,6 +20,10 @@ class InstallDependencyTests(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(root, "usr/local/bin/gr")))
             self.assertTrue(os.path.isfile(os.path.join(
                 root, "usr/local/libexec/gr/collect-config")))
+            self.assertTrue(os.path.isfile(os.path.join(
+                root, "usr/local/libexec/gr/snmp-manager")))
+            self.assertTrue(os.path.isfile(os.path.join(
+                root, "etc/gr/snmp-templates.json")))
 
     def test_missing_packages_abort_before_installation(self):
         with tempfile.TemporaryDirectory() as root:
@@ -42,6 +46,7 @@ class InstallDependencyTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("Missing required Debian packages:", result.stderr)
             self.assertIn("bash-completion", result.stderr)
+            self.assertIn("snmp", result.stderr)
             self.assertIn("--install-dependencies", result.stderr)
 
 

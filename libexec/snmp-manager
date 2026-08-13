@@ -1,0 +1,810 @@
+#!/usr/bin/env python3
+"""Template-driven SNMP inventory, testing, planning and controlled execution."""
+import argparse
+import csv
+import datetime
+import getpass
+import importlib.machinery
+import importlib.util
+import ipaddress
+import json
+import os
+import re
+import socket
+import ssl
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+
+GR_PATH = os.environ.get("GR_PATH", "/usr/local/bin/gr")
+DEFAULT_TEMPLATES = os.environ.get("GR_SNMP_TEMPLATES", "/usr/local/share/gr/snmp/templates.json")
+COLLECT_VERSION_PATH = os.environ.get("GR_COLLECT_VERSION", "/usr/local/libexec/gr/collect-version")
+COLLECT_CONFIG_PATH = os.environ.get("GR_COLLECT_CONFIG", "/usr/local/libexec/gr/collect-config")
+
+
+def load_module(name, path):
+    loader = importlib.machinery.SourceFileLoader(name, path)
+    spec = importlib.util.spec_from_loader(name, loader)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+gr = load_module("gr_snmp_manager", GR_PATH)
+
+
+def custom(row, name):
+    return gr.custom_value(row, name)
+
+
+def load_templates(cfg):
+    path = gr.expand(cfg.get("snmp_template_file") or DEFAULT_TEMPLATES)
+    if not os.path.isfile(path):
+        path = DEFAULT_TEMPLATES
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    if data.get("schema_version") != 1 or not isinstance(data.get("templates"), list):
+        raise gr.GrError("Unsupported SNMP template schema: {}".format(path))
+    return path, data["templates"]
+
+
+def row_ip(row):
+    return str(gr.normalize_ip(row.get("ip")) or row.get("ip") or "")
+
+
+def inventory_rows(api):
+    """Join native device OS metadata onto address rows when API access permits."""
+    rows = api.addresses()
+    devices = {}
+    try:
+        response = api.request("GET", "devices/")
+        values = response.get("data", []) if isinstance(response, dict) else []
+        if isinstance(values, dict):
+            values = list(values.values())
+        for device in values if isinstance(values, list) else []:
+            devices[str(device.get("id") or device.get("deviceId") or "")] = device
+    except gr.GrError:
+        pass
+    for row in rows:
+        device = devices.get(str(row.get("deviceId") or ""), {})
+        row["_device_os"] = str(gr.custom_value(device, "device_os") or "")
+    return rows
+
+
+def select_rows(rows, args, require_enabled=False):
+    selected = []
+    network = ipaddress.ip_network(args.subnet, strict=False) if args.subnet else None
+    start = end = None
+    if args.ip_range:
+        left, right = args.ip_range.split("-", 1)
+        start, end = ipaddress.ip_address(left), ipaddress.ip_address(right)
+    file_ips = set()
+    if args.file:
+        with open(args.file, encoding="utf-8-sig", newline="") as handle:
+            content = handle.read()
+        file_ips.update(re.findall(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])", content))
+    for row in rows:
+        ip = row_ip(row)
+        if not ip:
+            continue
+        address = ipaddress.ip_address(ip)
+        matched = args.all or (args.ip and ip in args.ip) or ip in file_ips
+        matched = matched or (network is not None and address in network)
+        matched = matched or (start is not None and start <= address <= end)
+        if not matched:
+            continue
+        if require_enabled and not bool(int(custom(row, "snmp_enabled") or 0)):
+            continue
+        selected.append(row)
+    if not selected:
+        raise gr.GrError("No phpIPAM addresses matched the SNMP selection")
+    return selected
+
+
+def template_matches(template, row):
+    match = template.get("match", {})
+    values = {
+        "ip": row_ip(row), "driver": gr.resolve_device_driver(row),
+        "vendor": str(custom(row, "device_vendor") or ""),
+        "model": str(custom(row, "device_model") or ""),
+        "device_os": str(row.get("_device_os") or ""),
+        "os_version": str(custom(row, "os_version") or ""),
+    }
+    for key in ("ip", "driver", "vendor"):
+        if match.get(key) and values[key].lower() != str(match[key]).lower():
+            return False
+    for key in ("model", "device_os", "os_version"):
+        pattern = match.get(key + "_regex")
+        if pattern and not re.search(pattern, values[key], re.I):
+            return False
+    return True
+
+
+def resolve_template(templates, row):
+    explicit = str(custom(row, "snmp_template") or "").strip()
+    if explicit:
+        found = [item for item in templates if item.get("id") == explicit]
+        if not found:
+            raise gr.GrError("Unknown explicit SNMP template {} for {}".format(explicit, row_ip(row)))
+        return found[0], "ip-override"
+    candidates = [item for item in templates if template_matches(item, row)]
+    if not candidates:
+        raise gr.GrError("No SNMP template matches {}".format(row_ip(row)))
+    def score(item):
+        match = item.get("match", {})
+        return sum(1 for key in ("ip", "model_regex", "device_os_regex", "os_version_regex", "vendor", "driver")
+                   if match.get(key))
+    candidates.sort(key=score, reverse=True)
+    return candidates[0], "selector"
+
+
+def profile_values(cfg, row, args, need_secrets=True):
+    name = args.profile or str(custom(row, "snmp_profile") or "").strip()
+    profile = cfg.get("snmp_profiles", {}).get(name, {}) if name else {}
+    username = args.username or str(profile.get("username") or "").strip()
+    if not username:
+        raise gr.GrError("SNMP profile/username is missing for {}".format(row_ip(row)))
+    auth_protocol = str(profile.get("auth_protocol") or "SHA").upper()
+    privacy_protocol = str(profile.get("privacy_protocol") or "AES").upper()
+    sources = profile.get("sources") or []
+    if not isinstance(sources, list):
+        raise gr.GrError("SNMP profile {} sources must be a JSON list".format(name))
+    try:
+        sources = [str(ipaddress.ip_address(str(source))) for source in sources]
+    except ValueError as exc:
+        raise gr.GrError("SNMP profile {} has an invalid source: {}".format(name, exc))
+    auth_password = privacy_password = ""
+    if need_secrets:
+        if args.prompt_credentials:
+            auth_password = getpass.getpass("SNMPv3 AUTH password: ")
+            privacy_password = getpass.getpass("SNMPv3 PRIV password: ")
+        else:
+            auth_secret = str(profile.get("auth_secret") or "").strip()
+            privacy_secret = str(profile.get("privacy_secret") or "").strip()
+            if not auth_secret or not privacy_secret:
+                raise gr.GrError("SNMP vault secret names are missing in profile {}".format(name))
+            auth_password = gr.read_vault_password(auth_secret)
+            privacy_password = gr.read_vault_password(privacy_secret)
+        if len(auth_password) < 8 or len(privacy_password) < 8:
+            raise gr.GrError("SNMPv3 AUTH and PRIV passwords must contain at least 8 characters")
+    return {"profile": name, "username": username, "auth_protocol": auth_protocol,
+            "privacy_protocol": privacy_protocol, "auth_password": auth_password,
+            "privacy_password": privacy_password, "sources": sources}
+
+
+def variables(row, credentials, args):
+    sources = list(args.source or credentials.get("sources") or ["<SOURCE_REQUIRED>"])
+    while len(sources) < 3:
+        sources.append(sources[-1])
+    return dict(credentials, ip=row_ip(row), hostname=str(row.get("hostname") or row_ip(row)),
+                group=args.group, view=args.view, acl=args.acl,
+                source_1=sources[0], source_2=sources[1], source_3=sources[2],
+                legacy_value="<legacy-value-not-rendered>")
+
+
+def render_commands(template, action, values, redact=True):
+    commands = []
+    for command in template.get(action + "_commands", []):
+        rendered = command.format(**values)
+        if redact:
+            for key in ("auth_password", "privacy_password"):
+                if values.get(key):
+                    rendered = rendered.replace(values[key], "[REDACTED]")
+        commands.append(rendered)
+    return commands
+
+
+def snmpget(ip, credentials, timeout=5):
+    # Net-SNMP normally exposes -A/-X passphrases in the process list.  A
+    # private, short-lived snmp.conf keeps credentials out of argv and reports.
+    with tempfile.TemporaryDirectory(prefix="gr-snmp-") as directory:
+        os.chmod(directory, 0o700)
+        config = os.path.join(directory, "snmp.conf")
+        def quoted(value):
+            return '"{}"'.format(str(value).replace("\\", "\\\\").replace('"', '\\"'))
+
+        with open(config, "w", encoding="utf-8") as handle:
+            handle.write("defSecurityLevel authPriv\n")
+            handle.write("defSecurityName {}\n".format(credentials["username"]))
+            handle.write("defAuthType {}\n".format(credentials["auth_protocol"]))
+            handle.write("defAuthPassphrase {}\n".format(quoted(credentials["auth_password"])))
+            handle.write("defPrivType {}\n".format(credentials["privacy_protocol"]))
+            handle.write("defPrivPassphrase {}\n".format(quoted(credentials["privacy_password"])))
+        os.chmod(config, 0o600)
+        environment = os.environ.copy()
+        environment["SNMPCONFPATH"] = directory
+        command = ["snmpget", "-v3", "-t", str(timeout), "-r", "0", "-On",
+                   ip, ".1.3.6.1.2.1.1.5.0"]
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                universal_newlines=True, timeout=timeout + 3, env=environment)
+    return result.returncode, result.stderr.strip()
+
+
+def unauthenticated_probe(ip, timeout=2):
+    with tempfile.TemporaryDirectory(prefix="gr-snmp-probe-") as directory:
+        os.chmod(directory, 0o700)
+        environment = os.environ.copy(); environment["SNMPCONFPATH"] = directory
+        command = ["snmpget", "-v3", "-l", "noAuthNoPriv", "-u", "GRportProbe",
+                   "-t", str(timeout), "-r", "0", "-On", ip,
+                   ".1.3.6.1.2.1.1.5.0"]
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                universal_newlines=True, timeout=timeout + 3, env=environment)
+    detail = (result.stderr or result.stdout).strip()
+    lower = detail.lower()
+    if "timeout" in lower or "no response" in lower:
+        return "no-response", detail
+    if "network is unreachable" in lower or "no route to host" in lower:
+        return "error", detail
+    # An unknown-user/authentication REPORT still proves that an SNMP agent
+    # answered the unauthenticated discovery exchange.
+    return "responsive", detail
+
+
+def cli_error_lines(output):
+    patterns = (r"^%\s*(?:error|invalid|incomplete|unrecognized|unknown)",
+                r"^\s*\^\s*$", r"too many parameters", r"illegal (?:command|parameter)")
+    return [line.strip() for line in output.splitlines()
+            if any(re.search(pattern, line, re.I) for pattern in patterns)]
+
+
+def run_device_commands(cfg, row, commands, timeout=70):
+    if not commands:
+        return {"rc": 0, "output": "", "error": "", "timeout": False,
+                "complete": True, "cli_errors": []}
+    if not os.path.isfile(COLLECT_VERSION_PATH):
+        raise gr.GrError("Missing interactive collection helper: {}".format(COLLECT_VERSION_PATH))
+    helper = load_module("gr_snmp_collect_version", COLLECT_VERSION_PATH)
+    meta = gr.phpipam_ssh_metadata(row)
+    if not meta["enabled"] or not meta["profile"] or not meta["user"]:
+        raise gr.GrError("Incomplete SSH metadata for {}".format(row_ip(row)))
+    driver = gr.resolve_device_driver(row)
+    login = gr.device_login_driver(driver)
+    password = gr.read_vault_password(gr.vault_secret_name(cfg, meta["profile"]))
+    known_hosts = gr.ensure_known_hosts(cfg)
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, (password + "\n").encode("utf-8")); os.close(write_fd)
+        client = "/usr/bin/ssh1" if meta.get("client") == "legacy" else "ssh"
+        strict = "no" if meta.get("client") == "legacy" else "accept-new"
+        command = ["sshpass", "-d", str(read_fd), client, "-F", "/dev/null",
+                   "-o", "StrictHostKeyChecking={}".format(strict),
+                   "-o", "UserKnownHostsFile={}".format(known_hosts),
+                   "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
+                   "-p", str(meta.get("port") or 22),
+                   "{}@{}".format(meta["user"], row_ip(row)), commands[0]]
+        item = {"user": meta["user"], "client": meta.get("client") or "normal"}
+        rc, output, error, timed_out, complete = helper.run_interactive_device(
+            item, password, command, read_fd, login, list(commands), ["exit"], timeout=timeout)
+        read_fd = None
+        return {"rc": rc, "output": output, "error": error.strip(), "timeout": timed_out,
+                "complete": complete, "cli_errors": cli_error_lines(output)}
+    finally:
+        if read_fd is not None:
+            try:
+                os.close(read_fd)
+            except OSError:
+                pass
+
+
+def report_path(cfg, name):
+    root = gr.expand(cfg["snmp_report_dir"])
+    os.makedirs(root, mode=0o700, exist_ok=True); os.chmod(root, 0o700)
+    stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    return os.path.join(root, "{}-{}".format(stamp, name))
+
+
+def backup_configuration(ip):
+    if not os.path.isfile(COLLECT_CONFIG_PATH):
+        raise gr.GrError("Missing configuration backup helper: {}".format(COLLECT_CONFIG_PATH))
+    result = subprocess.run([sys.executable, COLLECT_CONFIG_PATH, "--ip", ip,
+                             "--workers", "1"], stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, universal_newlines=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        raise gr.GrError("Pre-change backup failed for {}: {}".format(
+            ip, detail[-1][:240] if detail else "collector exit {}".format(result.returncode)))
+    summary = [line for line in result.stdout.splitlines()
+               if line.startswith(("SUMMARY=", "ARCHIVE=", "COMMIT="))]
+    print("BACKUP_STATUS=success {}".format(" ".join(summary)))
+
+
+def offline_facts(ip):
+    try:
+        item = gr.config_archive_target(ip)
+        content = gr.git_archive_output(["show", "HEAD:{}".format(item["path"])])
+    except Exception:
+        return {"available": False}
+    lower = content.lower()
+    return {"available": True, "v3": bool(re.search(r"snmpv3|snmp-server\s+(?:user|group).*\bv3\b|usm-user", lower)),
+            "legacy": bool(re.search(r"snmp-server\s+community|snmp-agent\s+community|config system snmp community", lower)),
+            "user_visible": bool(re.search(r"snmp-server\s+user|usm-user", lower))}
+
+
+def command_templates(cfg, templates, args):
+    if args.target:
+        with gr.api_session(cfg, prompt=False) as api:
+            rows = [row for row in inventory_rows(api) if row_ip(row) == args.target or
+                    str(row.get("hostname") or "").lower() == args.target.lower()]
+        if len(rows) != 1:
+            raise gr.GrError("Expected one template target")
+        template, source = resolve_template(templates, rows[0])
+        print("{} template={} source={} apply_supported={} reason={}".format(
+            row_ip(rows[0]), template["id"], source, bool(template.get("apply_supported")),
+            template.get("reason") or "-"))
+        return 0
+    for item in templates:
+        print("{} apply_supported={} match={} reason={}".format(
+            item["id"], bool(item.get("apply_supported")),
+            json.dumps(item.get("match", {}), sort_keys=True), item.get("reason") or "-"))
+    return 0
+
+
+def command_plan_or_apply(cfg, templates, args):
+    with gr.api_session(cfg, prompt=False) as api:
+        rows = select_rows(inventory_rows(api), args, require_enabled=True)
+    failed = False
+    for row in rows:
+        template, source = resolve_template(templates, row)
+        credentials = profile_values(cfg, row, args, need_secrets=args.apply)
+        values = variables(row, credentials, args)
+        print("TARGET={} TEMPLATE={} RESOLUTION={} ACTION={} APPLY_SUPPORTED={}".format(
+            row_ip(row), template["id"], source, args.action, bool(template.get("apply_supported"))))
+        commands = render_commands(template, args.action, values, redact=True)
+        for command in commands:
+            print("  {}".format(command))
+        if not args.apply:
+            continue
+        if not template.get("apply_supported"):
+            print("ERROR={}".format(template.get("reason") or "Template is report/test only"))
+            failed = True
+            continue
+        if template.get("workflow") != "transactional-cli-v1":
+            print("ERROR=Template has no reviewed transactional workflow; no commands sent")
+            failed = True
+            continue
+        if args.action == "rotate" and not args.previous_profile:
+            print("ERROR=--previous-profile is required for recoverable rotation")
+            failed = True
+            continue
+        if "<SOURCE_REQUIRED>" in values.values():
+            print("ERROR=Approved SNMP sources are missing; set profile sources or use --source")
+            failed = True
+            continue
+        preflight = run_device_commands(
+            cfg, row, render_commands(template, "inspect", values, redact=False))
+        managed_terms = [values["username"], values["group"], values["view"], values["acl"]]
+        managed_existing = [term for term in managed_terms
+                            if term.lower() in preflight["output"].lower()]
+        if args.action == "configure" and managed_existing:
+            print("ERROR=Managed SNMP objects already exist: {}; use test/rotate or a reconciliation template".format(
+                ",".join(managed_existing)))
+            failed = True
+            continue
+        try:
+            backup_configuration(row_ip(row))
+        except gr.GrError as exc:
+            print("ERROR={}".format(exc))
+            failed = True
+            continue
+        actual_commands = render_commands(template, args.action, values, redact=False)
+        rollback_commands = render_commands(template, args.action + "_rollback", values, redact=False)
+        if args.action == "cleanup":
+            inspection = run_device_commands(cfg, row, render_commands(template, "inspect", values, redact=False))
+            legacy_lines = [line.strip() for line in inspection["output"].splitlines()
+                            if re.match(r"^snmp-server\s+community\s+", line.strip(), re.I)]
+            actual_commands = ["configure terminal"] + ["no " + line for line in legacy_lines] + ["end"]
+            rollback_commands = ["configure terminal"] + legacy_lines + ["end"]
+            print("LEGACY_OBJECTS_DISCOVERED={}".format(len(legacy_lines)))
+        if args.action == "rotate":
+            previous_args = argparse.Namespace(profile=args.previous_profile, username=None,
+                                               prompt_credentials=False)
+            previous = profile_values(cfg, row, previous_args)
+            previous_values = variables(row, previous, args)
+            rollback_commands = render_commands(template, "rotate", previous_values, redact=False)
+        session = run_device_commands(cfg, row, actual_commands)
+        verify_action = "inspect" if args.action == "cleanup" else "verify"
+        verification = run_device_commands(
+            cfg, row, render_commands(template, verify_action, values, redact=False))
+        required_terms = [value.format(**values) for value in template.get("verification_terms", [])]
+        terms_ok = all(term.lower() in verification["output"].lower() for term in required_terms)
+        if args.action == "cleanup":
+            terms_ok = not any(re.match(r"^snmp-server\s+community\s+", line.strip(), re.I)
+                               for line in verification["output"].splitlines())
+        structurally_ok = (session["complete"] and not session["timeout"] and
+                           not session["cli_errors"] and verification["complete"] and
+                           not verification["timeout"] and not verification["cli_errors"] and
+                           terms_ok)
+        print("CLI_APPLY_COMPLETE={} CLI_ERRORS={} STRUCTURAL_VERIFY={}".format(
+            session["complete"], len(session["cli_errors"]), structurally_ok))
+        test_rc, test_error = snmpget(row_ip(row), credentials, args.timeout) if structurally_ok else (1, "CLI verification failed")
+        if structurally_ok and test_rc == 0:
+            saved = run_device_commands(cfg, row, render_commands(template, "save", values, redact=False))
+            success = saved["complete"] and not saved["timeout"] and not saved["cli_errors"]
+            if success:
+                try:
+                    backup_configuration(row_ip(row))
+                    print("FINAL_ARCHIVE_STATUS=success")
+                except gr.GrError as exc:
+                    print("FINAL_ARCHIVE_STATUS=failed ERROR={}".format(exc))
+                    success = False
+            print("RESULT={} SAVED={}".format("success" if success else "save_failed", success))
+            failed = failed or not success
+        else:
+            rollback = run_device_commands(cfg, row, rollback_commands) if rollback_commands else None
+            rollback_ok = bool(rollback and rollback["complete"] and not rollback["cli_errors"])
+            print("RESULT=failed ROLLBACK={} SNMP_TEST={}".format(
+                "success" if rollback_ok else "failed", "failed" if test_rc else "success"))
+            if test_error:
+                print("SNMP_ERROR={}".format(test_error.splitlines()[-1][:200]))
+            failed = True
+    if not args.apply:
+        print("DRY_RUN=True Re-run with --apply only after reviewing the selected templates and commands.")
+    return 2 if failed else 0
+
+
+def command_test(cfg, templates, args):
+    with gr.api_session(cfg, prompt=False) as api:
+        rows = select_rows(inventory_rows(api), args, require_enabled=not args.include_disabled)
+    results = []
+    for row in rows:
+        template, _ = resolve_template(templates, row)
+        credentials = profile_values(cfg, row, args)
+        rc, error = snmpget(row_ip(row), credentials, args.timeout)
+        status = "success" if rc == 0 else ("timeout" if "Timeout" in error else "failed")
+        results.append({"ip": row_ip(row), "hostname": row.get("hostname") or "",
+                        "template": template["id"], "profile": credentials["profile"],
+                        "status": status, "error": error.splitlines()[-1][:200] if error else ""})
+        print("RESULT {} {} {} template={} profile={}".format(
+            row.get("hostname") or row_ip(row), row_ip(row), status,
+            template["id"], credentials["profile"] or "manual"))
+    path = report_path(cfg, "snmp-test.json")
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"results": results}, handle, indent=2, sort_keys=True); handle.write("\n")
+    os.chmod(path, 0o600)
+    print("REPORT={}".format(path))
+    return 0 if all(item["status"] == "success" for item in results) else 2
+
+
+def command_report(cfg, templates, args):
+    with gr.api_session(cfg, prompt=False) as api:
+        rows = select_rows(inventory_rows(api), args, require_enabled=False)
+    records = []
+    for row in rows:
+        try:
+            template, resolution = resolve_template(templates, row)
+            template_id = template["id"]
+        except gr.GrError:
+            resolution, template_id = "none", "none"
+        record = {"ip": row_ip(row), "hostname": row.get("hostname") or "",
+                  "driver": gr.resolve_device_driver(row), "template": template_id,
+                  "device_os": str(row.get("_device_os") or ""),
+                  "template_resolution": resolution,
+                  "snmp_enabled": bool(int(custom(row, "snmp_enabled") or 0)),
+                  "snmp_profile": str(custom(row, "snmp_profile") or ""),
+                  "last_seen": str(row.get("lastSeen") or ""),
+                  "monitoring_enabled": bool(int(custom(row, "monitoring_enabled") or 0)),
+                  "monitoring_device_id": str(custom(row, "monitoring_device_id") or "")}
+        if args.mode == "offline":
+            record.update(offline_facts(record["ip"]))
+        elif args.mode == "live":
+            try:
+                template, _resolution = resolve_template(templates, row)
+                credentials = {"username": "", "auth_password": "", "privacy_password": ""}
+                values = variables(row, credentials, args)
+                live = run_device_commands(cfg, row, render_commands(template, "inspect", values,
+                                                                      redact=False))
+                record.update({"live_complete": live["complete"], "live_timeout": live["timeout"],
+                               "live_cli_errors": live["cli_errors"], "snmp_output": live["output"]})
+            except gr.GrError as exc:
+                record.update({"live_complete": False, "live_error": str(exc)})
+        elif args.mode == "ports":
+            try:
+                record["udp_161"], detail = unauthenticated_probe(record["ip"], args.timeout)
+                record["probe_detail"] = detail.splitlines()[-1][:200] if detail else ""
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                record["udp_161"] = "error"
+                record["probe_detail"] = str(exc)[:200]
+        records.append(record)
+        print("RESULT {} {} template={} snmp_enabled={} mode={}".format(
+            record["hostname"] or record["ip"], record["ip"], record["template"],
+            record["snmp_enabled"], args.mode))
+    path = report_path(cfg, "snmp-{}.json".format(args.mode))
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"mode": args.mode, "results": records}, handle, indent=2, sort_keys=True); handle.write("\n")
+    os.chmod(path, 0o600)
+    csv_path = path[:-5] + ".csv"
+    fieldnames = sorted(set(key for record in records for key in record if key != "snmp_output"))
+    with open(csv_path, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for record in records:
+            writer.writerow({key: (json.dumps(value, sort_keys=True) if isinstance(value, (dict, list)) else value)
+                             for key, value in record.items() if key != "snmp_output"})
+    os.chmod(csv_path, 0o600)
+    print("REPORT={}".format(path)); print("CSV_REPORT={}".format(csv_path)); return 0
+
+
+def command_assign(cfg, templates, args):
+    with gr.api_session(cfg, prompt=False) as api:
+        rows = select_rows(inventory_rows(api), args, require_enabled=False)
+    changes = []
+    for row in rows:
+        template_id = args.template or ""
+        if args.enabled == "yes" and not template_id:
+            template_id = resolve_template(templates, row)[0]["id"]
+        if args.enabled == "yes" and not args.profile:
+            raise gr.GrError("--profile is required when SNMP is enabled")
+        payload = {"custom_snmp_enabled": 1 if args.enabled == "yes" else 0,
+                   "custom_snmp_profile": args.profile or "",
+                   "custom_snmp_template": template_id if args.enabled == "yes" else ""}
+        if args.monitoring_profile:
+            payload.update({"custom_monitoring_enabled": 1,
+                            "custom_monitoring_profile": args.monitoring_profile})
+        changes.append((row, payload))
+        print("{} {} template={} profile={} monitoring={}".format(
+            "APPLY" if args.apply else "PLAN", row_ip(row), template_id,
+            args.profile, args.monitoring_profile or "disabled"))
+    if not args.apply:
+        print("DRY_RUN=True Re-run with --apply to update phpIPAM custom fields.")
+        return 0
+    write_cfg = dict(cfg); write_cfg["app_id"] = cfg.get("migration_app_id", "gr-migrate")
+    with gr.api_session(write_cfg) as api:
+        for row, payload in changes:
+            api.request("PATCH", "addresses/{}/".format(row["id"]), payload=payload)
+            after = api.request("GET", "addresses/{}/".format(row["id"]))
+            data = after.get("data") if isinstance(after, dict) else None
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            if not isinstance(data, dict) or str(gr.custom_value(data, "snmp_template") or "") != payload["custom_snmp_template"]:
+                raise gr.GrError("phpIPAM verification failed for {}".format(row_ip(row)))
+    print("ASSIGN_STATUS=success count={}".format(len(changes))); return 0
+
+
+def command_inventory_sync(cfg, args):
+    report = gr.expand(args.report)
+    with open(report, encoding="utf-8") as handle:
+        data = json.load(handle)
+    results = data.get("results", []) if isinstance(data, dict) else []
+    if not isinstance(results, list):
+        raise gr.GrError("Version report has no results array: {}".format(report))
+    with gr.api_session(cfg, prompt=False) as api:
+        rows = inventory_rows(api)
+    by_ip = {row_ip(row): row for row in rows}
+    changes = []
+    for result in results:
+        ip = str(result.get("ip") or "")
+        row = by_ip.get(ip)
+        if not row or result.get("result") not in (None, "success"):
+            continue
+        payload = {"custom_device_model": str(result.get("model") or "").strip(),
+                   "custom_os_version": str(result.get("firmware") or "").strip()}
+        payload = {key: value for key, value in payload.items() if value}
+        if not payload:
+            continue
+        changes.append((row, payload))
+        print("{} {} model={} os_version={}".format(
+            "APPLY" if args.apply else "PLAN", ip,
+            payload.get("custom_device_model", "-"), payload.get("custom_os_version", "-")))
+    if not args.apply:
+        print("DRY_RUN=True Re-run with --apply to synchronize model/OS version metadata.")
+        return 0
+    write_cfg = dict(cfg); write_cfg["app_id"] = cfg.get("migration_app_id", "gr-migrate")
+    with gr.api_session(write_cfg) as api:
+        for row, payload in changes:
+            api.request("PATCH", "addresses/{}/".format(row["id"]), payload=payload)
+    print("INVENTORY_SYNC_STATUS=success count={}".format(len(changes)))
+    return 0
+
+
+def monitoring_request(profile, token, method, path, payload=None):
+    context = ssl.create_default_context(cafile=gr.expand(profile.get("ca_file") or
+                                                          "/etc/ssl/certs/ca-certificates.crt"))
+    base = str(profile.get("url") or "").rstrip("/")
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = urllib.request.Request(base + path, data=data, method=method,
+                                     headers={"X-Auth-Token": token, "Accept": "application/json",
+                                              "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, context=context, timeout=60) as response:
+            raw = response.read().decode("utf-8")
+            return response.status, json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", "replace")
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            body = {"message": raw[:300]}
+        return exc.code, body
+
+
+def monitoring_poll(profile, device_id):
+    host = str(profile.get("host") or "").strip()
+    if not host:
+        raise gr.GrError("Monitoring profile host is required for --poll")
+    command = ["gr", "exec", host, "--sudo", "--no-audit", "--",
+               "/usr/bin/sudo", "-H", "-u", "librenms",
+               "/opt/librenms/lnms", "device:poll", str(device_id), "--no-interaction"]
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            universal_newlines=True, timeout=900)
+    return result.returncode, (result.stderr or result.stdout).strip()
+
+
+def command_monitor(cfg, templates, args):
+    profile_name = args.monitoring_profile
+    profile = cfg.get("monitoring_profiles", {}).get(profile_name, {})
+    if profile.get("type") != "librenms":
+        raise gr.GrError("Monitoring profile {} is not a LibreNMS profile".format(profile_name))
+    token = gr.read_vault_password(str(profile.get("token_secret") or ""))
+    with gr.api_session(cfg, prompt=False) as api:
+        rows = select_rows(inventory_rows(api), args, require_enabled=False)
+    updates = []
+    failed = False
+    for row in rows:
+        ip = row_ip(row)
+        code, body = monitoring_request(profile, token, "GET", "/devices/{}".format(
+            urllib.parse.quote(ip, safe="")))
+        devices = body.get("devices") if isinstance(body, dict) else None
+        device = devices[0] if code == 200 and devices else None
+        if device is None and args.add:
+            credentials = profile_values(cfg, row, args)
+            payload = {"hostname": ip, "snmpver": "v3", "port": 161,
+                       "transport": "udp", "authlevel": "authPriv",
+                       "authname": credentials["username"], "authalgo": credentials["auth_protocol"],
+                       "authpass": credentials["auth_password"],
+                       "cryptoalgo": credentials["privacy_protocol"],
+                       "cryptopass": credentials["privacy_password"]}
+            if args.apply:
+                add_code, _ = monitoring_request(profile, token, "POST", "/devices", payload)
+                if add_code not in (200, 201):
+                    print("RESULT {} add_failed http={}".format(ip, add_code)); failed = True; continue
+                code, body = monitoring_request(profile, token, "GET", "/devices/{}".format(
+                    urllib.parse.quote(ip, safe="")))
+                devices = body.get("devices") if isinstance(body, dict) else None
+                device = devices[0] if code == 200 and devices else None
+            else:
+                print("PLAN {} add_to_librenms profile={}".format(ip, profile_name)); continue
+        if device is not None and args.sync_credentials:
+            credentials = profile_values(cfg, row, args)
+            credential_fields = ["snmpver", "authlevel", "authname", "authpass",
+                                 "authalgo", "cryptopass", "cryptoalgo"]
+            credential_data = ["v3", "authPriv", credentials["username"],
+                               credentials["auth_password"], credentials["auth_protocol"],
+                               credentials["privacy_password"], credentials["privacy_protocol"]]
+            if args.apply:
+                update_code, _update_body = monitoring_request(
+                    profile, token, "PATCH", "/devices/{}".format(
+                        urllib.parse.quote(str(device.get("device_id") or ip), safe="")),
+                    {"field": credential_fields, "data": credential_data})
+                if update_code != 200:
+                    print("RESULT {} credential_sync_failed http={}".format(ip, update_code))
+                    failed = True
+                    continue
+                print("CREDENTIAL_SYNC {} updated=True verification=next_poller_run".format(ip))
+            else:
+                print("PLAN {} sync_librenms_credentials profile={}".format(ip,
+                                                                            credentials["profile"]))
+                continue
+        if device is None:
+            print("RESULT {} missing lastSeen={}".format(ip, row.get("lastSeen") or "-")); failed = True; continue
+        if args.poll:
+            if not args.apply:
+                print("PLAN {} poll_librenms_device id={}".format(ip, device.get("device_id")))
+                continue
+            poll_rc, poll_error = monitoring_poll(profile, device.get("device_id"))
+            if poll_rc:
+                print("RESULT {} poll_failed detail={}".format(
+                    ip, poll_error.splitlines()[-1][:200] if poll_error else "unknown"))
+                failed = True
+                continue
+            code, body = monitoring_request(profile, token, "GET", "/devices/{}".format(
+                urllib.parse.quote(ip, safe="")))
+            devices = body.get("devices") if isinstance(body, dict) else None
+            device = devices[0] if code == 200 and devices else device
+            print("POLL {} success=True".format(ip))
+        status = bool(device.get("status"))
+        print("RESULT {} present id={} up={} last_polled={} phpipam_lastSeen={}".format(
+            ip, device.get("device_id"), status, device.get("last_polled") or "-",
+            row.get("lastSeen") or "-"))
+        updates.append((row, str(device.get("device_id") or "")))
+        failed = failed or not status
+    if args.apply and updates:
+        write_cfg = dict(cfg); write_cfg["app_id"] = cfg.get("migration_app_id", "gr-migrate")
+        with gr.api_session(write_cfg) as api:
+            for row, device_id in updates:
+                api.request("PATCH", "addresses/{}/".format(row["id"]), payload={
+                    "custom_monitoring_enabled": 1,
+                    "custom_monitoring_profile": profile_name,
+                    "custom_monitoring_device_id": device_id})
+    if (args.add or args.sync_credentials or args.poll) and not args.apply:
+        print("DRY_RUN=True Re-run with --apply to change LibreNMS and persist associations.")
+    return 2 if failed else 0
+
+
+def add_selectors(parser):
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--all", action="store_true")
+    group.add_argument("--ip", action="append")
+    group.add_argument("--subnet")
+    group.add_argument("--range", dest="ip_range", metavar="START-END")
+    group.add_argument("--file", help="text or CSV file containing IP addresses")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="gr snmp", description=__doc__)
+    parser.add_argument("--config")
+    sub = parser.add_subparsers(dest="action", required=True)
+    templates = sub.add_parser("templates"); templates.add_argument("--target")
+    for action in ("configure", "rotate", "cleanup"):
+        command = sub.add_parser(action); add_selectors(command)
+        command.add_argument("--apply", action="store_true")
+        command.add_argument("--profile"); command.add_argument("--username")
+        command.add_argument("--prompt-credentials", action="store_true")
+        command.add_argument("--previous-profile",
+                             help="vault-backed old profile required for recoverable rotation")
+        command.add_argument("--timeout", type=int, default=5)
+        command.add_argument("--source", action="append")
+        command.add_argument("--group", default="SNMP_DEFAULT_GROUP")
+        command.add_argument("--view", default="SNMP_DEFAULT_VIEW")
+        command.add_argument("--acl", default="SNMP_MON_SRV_ACL")
+    test = sub.add_parser("test"); add_selectors(test)
+    test.add_argument("--profile"); test.add_argument("--username")
+    test.add_argument("--prompt-credentials", action="store_true")
+    test.add_argument("--include-disabled", action="store_true")
+    test.add_argument("--timeout", type=int, default=5)
+    report = sub.add_parser("report"); add_selectors(report)
+    report.add_argument("--mode", choices=("offline", "ports", "inventory", "live"), default="inventory")
+    report.add_argument("--timeout", type=float, default=2.0)
+    report.add_argument("--source", action="append")
+    report.add_argument("--group", default="SNMP_DEFAULT_GROUP")
+    report.add_argument("--view", default="SNMP_DEFAULT_VIEW")
+    report.add_argument("--acl", default="SNMP_MON_SRV_ACL")
+    assign = sub.add_parser("assign"); add_selectors(assign)
+    assign.add_argument("--enabled", choices=("yes", "no"), default="yes")
+    assign.add_argument("--profile"); assign.add_argument("--template")
+    assign.add_argument("--monitoring-profile"); assign.add_argument("--apply", action="store_true")
+    inventory_sync = sub.add_parser("inventory-sync",
+                                    help="import model and OS version from a collect-version JSON report")
+    inventory_sync.add_argument("--report", required=True)
+    inventory_sync.add_argument("--apply", action="store_true")
+    monitor = sub.add_parser("monitor"); add_selectors(monitor)
+    monitor.add_argument("--monitoring-profile", required=True)
+    monitor.add_argument("--add", action="store_true"); monitor.add_argument("--apply", action="store_true")
+    monitor.add_argument("--sync-credentials", action="store_true",
+                         help="update SNMPv3 fields on an existing LibreNMS device")
+    monitor.add_argument("--poll", action="store_true",
+                         help="run and validate an immediate LibreNMS poll (requires --apply)")
+    monitor.add_argument("--profile"); monitor.add_argument("--username")
+    monitor.add_argument("--prompt-credentials", action="store_true")
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    cfg = gr.load_config(args.config)
+    _path, templates = load_templates(cfg)
+    if args.action == "templates":
+        return command_templates(cfg, templates, args)
+    if args.action in ("configure", "rotate", "cleanup"):
+        return command_plan_or_apply(cfg, templates, args)
+    if args.action == "test":
+        return command_test(cfg, templates, args)
+    if args.action == "report":
+        return command_report(cfg, templates, args)
+    if args.action == "assign":
+        return command_assign(cfg, templates, args)
+    if args.action == "inventory-sync":
+        return command_inventory_sync(cfg, args)
+    if args.action == "monitor":
+        return command_monitor(cfg, templates, args)
+    raise gr.GrError("Unsupported SNMP action")
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (gr.GrError, ValueError, OSError) as exc:
+        print("gr snmp: error: {}".format(exc), file=sys.stderr)
+        sys.exit(2)

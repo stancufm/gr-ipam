@@ -28,7 +28,7 @@ obligatorii pentru ca fiecare funcționalitate documentată să fie disponibilă
 
 ```bash
 sudo apt-get update
-sudo apt-get install python3 openssh-client sshpass pass gnupg ca-certificates git bash-completion less systemd
+sudo apt-get install python3 openssh-client sshpass pass gnupg ca-certificates git bash-completion less systemd snmp
 ```
 
 Clientul legacy trebuie instalat separat ca `/usr/bin/ssh1`. Installerul verifică

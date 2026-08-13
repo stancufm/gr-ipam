@@ -24,11 +24,19 @@ Under **Administration → Custom fields → IP addresses**, create:
 | `ssh_client` | varchar | 16 | `normal` or `legacy` |
 | `device_driver` | varchar | 64 | Device CLI behavior, independent from credentials |
 | `device_vendor` | varchar | 64 | Normalized vendor inferred from MAC OUI |
+| `device_model` | varchar | 128 | Model used by SNMP template resolution |
 | `os_version` | varchar | 128 | Firmware or operating-system version for this address |
+| `snmp_enabled` | tinyint / boolean | 1 | Device is managed/tested as SNMP-enabled |
+| `snmp_profile` | varchar | 64 | Vault-backed SNMP credential profile name |
+| `snmp_template` | varchar | 128 | Optional per-address template override |
+| `monitoring_enabled` | tinyint / boolean | 1 | Monitoring is expected for this address |
+| `monitoring_profile` | varchar | 64 | Monitoring integration profile |
+| `monitoring_device_id` | varchar | 64 | External monitoring-system device identifier |
 
 phpIPAM returns these through the API as `custom_ssh_enabled`,
 `custom_ssh_user`, and so on. No schema fork or source-code modification is
 required: these are standard phpIPAM custom fields and survive normal upgrades.
+They contain no SNMP passwords or LibreNMS tokens.
 
 The helper also creates `custom_device_os` (varchar 128) on the native
 `devices` table and ensures that the native `Server` device type exists. It is

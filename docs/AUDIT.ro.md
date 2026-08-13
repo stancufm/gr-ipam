@@ -32,6 +32,11 @@ O conectare creează:
 
 Directoarele au modul `0700`, iar fișierele `0600`. Formatul `.ses` este JSON Lines. Prima înregistrare conține metadatele, fiecare cadru conține timpul relativ, canalul și octeții originali codificați Base64, iar ultima înregistrare conține codul de ieșire. Astfel se păstrează exact datele și separarea stdin/stdout/stderr.
 
+O autentificare `sshpass` eșuată poate să nu producă niciun cadru de terminal.
+Redarea unei asemenea sesiuni nu mai este tăcută: `gr audit show` afișează
+statusul final, iar codul 5 este explicat drept parolă Vault respinsă.
+Transcriptul nu stochează parola automată.
+
 Navigarea pornește de la echipament, apoi restrânge lista la sesiunile
 hostname-ului sau IP-ului ales, fără memorarea căilor:
 
