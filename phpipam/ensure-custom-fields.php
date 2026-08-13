@@ -38,6 +38,13 @@ $fields = [
         'custom_device_driver' => ['varchar', "VARCHAR(64) NULL DEFAULT NULL"],
         'custom_device_vendor' => ['varchar', "VARCHAR(64) NULL DEFAULT NULL"],
         'custom_os_version'    => ['varchar', "VARCHAR(128) NULL DEFAULT NULL"],
+        'custom_device_model'  => ['varchar', "VARCHAR(128) NULL DEFAULT NULL"],
+        'custom_snmp_enabled'  => ['tinyint', "TINYINT(1) NULL DEFAULT 0"],
+        'custom_snmp_profile'  => ['varchar', "VARCHAR(64) NULL DEFAULT NULL"],
+        'custom_snmp_template' => ['varchar', "VARCHAR(128) NULL DEFAULT NULL"],
+        'custom_monitoring_enabled' => ['tinyint', "TINYINT(1) NULL DEFAULT 0"],
+        'custom_monitoring_profile' => ['varchar', "VARCHAR(64) NULL DEFAULT NULL"],
+        'custom_monitoring_device_id' => ['varchar', "VARCHAR(64) NULL DEFAULT NULL"],
     ],
     'devices' => [
         'custom_device_os'     => ['varchar', "VARCHAR(128) NULL DEFAULT NULL"],

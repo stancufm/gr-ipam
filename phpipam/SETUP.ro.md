@@ -19,10 +19,14 @@ Creați două aplicații API separate: una read-only pentru căutare/inventar ș
 
 Adăugați câmpurile custom standard pentru adrese: `ssh_enabled`, `ssh_user`,
 `ssh_port`, `ssh_profile`, `ssh_jump`, `ssh_client`, `device_driver` și, dacă
-este folosită sincronizarea IEEE, `device_vendor`, plus `os_version` pentru
+este folosită sincronizarea IEEE, `device_vendor`, `device_model`, plus `os_version` pentru
 versiunea OS/firmware asociată adresei. Profilul selectează numai
 secretul criptat local. `ssh_client` acceptă `normal` sau `legacy`, iar
 `device_driver` descrie comportamentul CLI independent de credențiale.
+
+Pentru modulul SNMP adăugați `snmp_enabled`, `snmp_profile`, `snmp_template`,
+`monitoring_enabled`, `monitoring_profile` și `monitoring_device_id`. Acestea
+memorează intenția și asocierea, niciodată parole SNMP sau tokenul LibreNMS.
 
 Acordați utilizatorului API numai subrețelele și operațiile necesare. Verificați aplicația read-only cu `gr auth test` și `gr doctor --api`. Previzualizați orice migrare sau actualizare fără `--apply`, limitați primul pilot și revizuiți raportul privat înainte de extindere.
 

@@ -38,8 +38,10 @@ documentation and vault management.
   parsed JSON inventory.
 - `libexec/collect-config` runs the driver's configuration commands and commits
   changed normalized configurations to the global private Git archive.
+- `libexec/snmp-manager` resolves model/OS templates, inventories and tests
+  SNMP, gates transactional writes, and reconciles phpIPAM with LibreNMS.
 
-Both helpers load the installed `gr` module so API, metadata, credential
+The helpers load the installed `gr` module so API, metadata, credential
 profiles, device drivers, vault and legacy-client behavior remain consistent.
 
 The device-driver registry currently includes generic, Cisco IOS, adaptive
@@ -56,14 +58,16 @@ GET verification.
 ### Configuration layers
 
 `/etc/gr/config.json` contains shared, non-secret settings. An optional
-`~/.config/gr/config.json` overlays only user-specific keys; `ssh_profiles` is
-merged by profile name. `--config PATH` deliberately selects one file without
+`~/.config/gr/config.json` overlays only user-specific keys; `ssh_profiles`,
+`snmp_profiles` and `monitoring_profiles` are merged by profile name.
+`--config PATH` deliberately selects one file without
 layering.
 
 ### Credential boundaries
 
 - phpIPAM password: `~/.config/gr/credentials`, mode `0600`;
 - SSH passwords: `~/.password-store/gr/`, encrypted by the user's GPG key;
+- SNMP AUTH/PRIV values and monitoring API tokens: named `pass` entries;
 - SSH keys and persistent gr known hosts: owned and managed by the Linux user;
 - reports: `~/.local/state/gr/`, directory mode `0700`, files mode `0600`.
 - device configuration history: `/var/lib/gr/config-archive`, mode `2770`,
@@ -79,6 +83,21 @@ The tool uses the official HTTPS API and standard custom IP-address fields. A
 read-only application serves lookup and inventory. A second application is
 selected for explicit write operations. This avoids phpIPAM source changes and
 survives normal application upgrades.
+
+SNMP address fields store desired enablement, template/profile association and
+the external monitoring device identifier, never secrets. Native device OS is
+joined by `deviceId` when permitted. LibreNMS is authoritative for current
+presence, status and last poll; phpIPAM remains authoritative for inventory and
+`lastSeen`.
+
+### SNMP transaction boundary
+
+The site-editable template catalog is data, while reviewed workflow handlers
+are code. A template cannot enable writes by commands alone: it must opt into a
+known handler. Plans are always available, but apply requires `--apply`. The
+handler changes running state, performs structural and authenticated checks,
+saves only after success, and otherwise executes rollback. Reports and tests
+never create terminal audit transcripts containing newly configured secrets.
 
 ### SSH selection
 

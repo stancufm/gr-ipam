@@ -415,6 +415,9 @@ user.
 
 `gr doctor --api` checks configuration, permissions, executables, IEEE data and API access. `gr docs --language en` shows this guide; `gr docs --language ro` shows Romanian documentation. Inventory writes remain dry-run until `--apply`.
 
+Template-driven SNMP inventory, transactional configuration, rotation, cleanup,
+private reporting and LibreNMS reconciliation are documented in `SNMP.md`.
+
 ### Configuration inventory
 
 ```bash

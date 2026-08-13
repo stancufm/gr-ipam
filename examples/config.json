@@ -22,6 +22,27 @@
     },
     "shared-network": {"password_secret": "gr/shared-network"}
   },
+  "snmp_template_file": "/etc/gr/snmp-templates.json",
+  "snmp_report_dir": "~/.local/state/gr/snmp-reports",
+  "snmp_profiles": {
+    "monitoring-v3": {
+      "username": "snmp-monitor",
+      "auth_protocol": "SHA",
+      "privacy_protocol": "AES",
+      "sources": ["192.0.2.20", "192.0.2.21", "192.0.2.22"],
+      "auth_secret": "gr/snmpv3/monitoring-v3/auth",
+      "privacy_secret": "gr/snmpv3/monitoring-v3/priv"
+    }
+  },
+  "monitoring_profiles": {
+    "librenms": {
+      "type": "librenms",
+      "url": "https://monitoring.example.net/api/v0",
+      "ca_file": "/etc/ssl/certs/ca-certificates.crt",
+      "token_secret": "gr/monitoring/librenms/token",
+      "host": "monitoring.example.net"
+    }
+  },
   "username": "gr-api",
   "vendor_db_dir": "/var/lib/gr/ieee-vendors"
 }

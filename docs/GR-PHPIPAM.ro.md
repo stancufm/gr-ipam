@@ -410,6 +410,10 @@ de afișare. Rapoartele sunt căutate în `device_version_dir`, implicit
 
 `gr doctor --api` verifică fișierele, permisiunile, dependențele, baza IEEE și API-ul. `gr docs --language en` afișează ghidul englez, iar `gr docs --language ro` ghidul român. Toate scrierile de inventar rămân dry-run până la `--apply`.
 
+Inventarul SNMP pe bază de template-uri, configurarea tranzacțională, rotația,
+cleanup-ul, rapoartele private și reconcilierea LibreNMS sunt documentate în
+`SNMP.ro.md`.
+
 ### Inventarul configurației
 
 ```bash

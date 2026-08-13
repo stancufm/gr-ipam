@@ -12,6 +12,22 @@ GR = importlib.machinery.SourceFileLoader("gr_config_test_module", "bin/gr").loa
 
 
 class ConfigShowTests(unittest.TestCase):
+    def test_snmp_and_monitoring_profiles_merge_per_profile(self):
+        merged = GR.merge_config(
+            {"snmp_profiles": {"old": {"username": "old"}},
+             "monitoring_profiles": {"one": {"type": "librenms"}}},
+            {"snmp_profiles": {"new": {"username": "new"}},
+             "monitoring_profiles": {"two": {"type": "librenms"}}})
+        self.assertEqual(sorted(merged["snmp_profiles"]), ["new", "old"])
+        self.assertEqual(sorted(merged["monitoring_profiles"]), ["one", "two"])
+
+    def test_snmp_profile_sources_are_validated_as_ip_list(self):
+        value = GR.parse_config_setting("snmp_profiles.monitor.sources",
+                                        '["192.0.2.20", "2001:db8::20"]')
+        self.assertEqual(value, ["192.0.2.20", "2001:db8::20"])
+        with self.assertRaises(GR.GrError):
+            GR.parse_config_setting("snmp_profiles.monitor.sources", '["not-an-ip"]')
+
     def test_required_phpipam_custom_fields_are_validated(self):
         complete = {name: None for name in GR.REQUIRED_ADDRESS_CUSTOM_FIELDS}
         self.assertEqual(GR.missing_address_custom_fields([complete]), [])
@@ -33,6 +49,7 @@ class ConfigShowTests(unittest.TestCase):
         self.assertEqual(GR.resolve_device_driver(row, "generic"), "generic")
         with self.assertRaises(GR.GrError):
             GR.normalize_device_driver("unknown")
+        self.assertIs(GR.device_login_driver("dell-os10"), GR.CiscoIosLogin)
 
     def test_sudo_secret_defaults_to_ssh_secret_and_can_be_separate(self):
         cfg = {"ssh_profiles": {

@@ -41,9 +41,10 @@ DEFAULT_DOCUMENTATION_RO = "/usr/local/share/doc/gr/GR-PHPIPAM.ro.md"
 SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
+SNMP_MANAGER = "/usr/local/libexec/gr/snmp-manager"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.5.0"
+GR_VERSION = "2.6.0"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -108,6 +109,9 @@ REQUIRED_ADDRESS_CUSTOM_FIELDS = (
     "custom_ssh_enabled", "custom_ssh_user", "custom_ssh_port", "custom_ssh_profile",
     "custom_ssh_jump", "custom_ssh_client", "custom_device_driver", "custom_device_vendor",
     "custom_os_version",
+    "custom_device_model", "custom_snmp_enabled", "custom_snmp_profile",
+    "custom_snmp_template", "custom_monitoring_enabled", "custom_monitoring_profile",
+    "custom_monitoring_device_id",
 )
 
 
@@ -162,6 +166,10 @@ CONFIG_OPTIONS = (
     ("ssh_profiles", {}),
     ("device_version_dir", "~/.local/state/gr/device-version"),
     ("vendor_db_dir", "/var/lib/gr/ieee-vendors"),
+    ("snmp_template_file", "/etc/gr/snmp-templates.json"),
+    ("snmp_report_dir", "~/.local/state/gr/snmp-reports"),
+    ("snmp_profiles", {}),
+    ("monitoring_profiles", {}),
 )
 
 
@@ -192,7 +200,7 @@ def read_json_config(path, required=True):
 def merge_config(base, override):
     merged = dict(base)
     for key, value in override.items():
-        if key == "ssh_profiles" and isinstance(value, dict) and isinstance(merged.get(key), dict):
+        if key in ("ssh_profiles", "snmp_profiles", "monitoring_profiles") and isinstance(value, dict) and isinstance(merged.get(key), dict):
             profiles = dict(merged[key])
             profiles.update(value)
             merged[key] = profiles
@@ -230,6 +238,10 @@ def load_config(path=None):
     cfg["ssh_profiles"] = cfg.get("ssh_profiles", {})
     cfg["device_version_dir"] = expand(cfg.get("device_version_dir", "~/.local/state/gr/device-version"))
     cfg["vendor_db_dir"] = expand(cfg.get("vendor_db_dir", "/var/lib/gr/ieee-vendors"))
+    cfg["snmp_template_file"] = expand(cfg.get("snmp_template_file", "/etc/gr/snmp-templates.json"))
+    cfg["snmp_report_dir"] = expand(cfg.get("snmp_report_dir", "~/.local/state/gr/snmp-reports"))
+    cfg["snmp_profiles"] = cfg.get("snmp_profiles", {})
+    cfg["monitoring_profiles"] = cfg.get("monitoring_profiles", {})
     cfg["_config_sources"] = sources
     return cfg
 
@@ -252,6 +264,9 @@ def profile_count(value):
 
 
 PROFILE_CONFIG_KEYS = ("password_secret", "sudo_password_secret", "identity_file")
+SNMP_PROFILE_CONFIG_KEYS = ("username", "auth_protocol", "privacy_protocol",
+                            "auth_secret", "privacy_secret", "sources")
+MONITORING_PROFILE_CONFIG_KEYS = ("type", "url", "ca_file", "token_secret", "host")
 
 
 def config_setting_path(scope):
@@ -265,16 +280,32 @@ def config_setting_path(scope):
 def validate_config_setting_name(name):
     parts = str(name or "").split(".")
     top_level = {item[0] for item in CONFIG_OPTIONS}
-    if len(parts) == 1 and parts[0] in top_level and parts[0] != "ssh_profiles":
+    if (len(parts) == 1 and parts[0] in top_level and
+            parts[0] not in ("ssh_profiles", "snmp_profiles", "monitoring_profiles")):
         return parts
-    if (len(parts) == 3 and parts[0] == "ssh_profiles" and
-            re.match(r"^[A-Za-z0-9._-]+$", parts[1]) and parts[2] in PROFILE_CONFIG_KEYS):
+    profile_keys = {"ssh_profiles": PROFILE_CONFIG_KEYS,
+                    "snmp_profiles": SNMP_PROFILE_CONFIG_KEYS,
+                    "monitoring_profiles": MONITORING_PROFILE_CONFIG_KEYS}
+    if (len(parts) == 3 and parts[0] in profile_keys and
+            re.match(r"^[A-Za-z0-9._-]+$", parts[1]) and
+            parts[2] in profile_keys[parts[0]]):
         return parts
     raise GrError("Unsupported configuration setting: {}".format(name))
 
 
 def parse_config_setting(name, value):
     parts = validate_config_setting_name(name)
+    if len(parts) == 3 and parts[0] == "snmp_profiles" and parts[2] == "sources":
+        try:
+            parsed_sources = json.loads(value)
+        except ValueError:
+            raise GrError("{} expects a JSON list of IP addresses".format(name))
+        if not isinstance(parsed_sources, list) or not parsed_sources:
+            raise GrError("{} expects a non-empty JSON list".format(name))
+        try:
+            return [str(ipaddress.ip_address(str(item))) for item in parsed_sources]
+        except ValueError as exc:
+            raise GrError("{} contains an invalid IP address: {}".format(name, exc))
     defaults = dict(CONFIG_OPTIONS)
     default = defaults.get(parts[0])
     if isinstance(default, bool):
@@ -321,20 +352,20 @@ def command_config_change(action, name, value=None, scope="user"):
         if len(parts) == 1:
             data[parts[0]] = parsed
         else:
-            profiles = data.setdefault("ssh_profiles", {})
+            profiles = data.setdefault(parts[0], {})
             profile = profiles.setdefault(parts[1], {})
             profile[parts[2]] = parsed
     else:
         if len(parts) == 1:
             data.pop(parts[0], None)
         else:
-            profiles = data.get("ssh_profiles", {})
+            profiles = data.get(parts[0], {})
             profile = profiles.get(parts[1], {})
             profile.pop(parts[2], None)
             if not profile:
                 profiles.pop(parts[1], None)
             if not profiles:
-                data.pop("ssh_profiles", None)
+                data.pop(parts[0], None)
     write_config_settings(path, data, mode)
     print("{} {} configuration setting {} in {}".format(
         "Set" if action == "set" else "Removed", scope, name, path))
@@ -370,7 +401,12 @@ def command_config_show(cfg, custom_path=None):
             source = "global"
         else:
             source = "default" if default is not None else "required"
-        if key == "ssh_profiles":
+        profile_prefixes = {
+            "ssh_profiles": "ssh_profiles",
+            "snmp_profiles": "snmp_profiles",
+            "monitoring_profiles": "monitoring_profiles",
+        }
+        if key in profile_prefixes:
             rows.append((key, profile_count(default), profile_count(global_value),
                          profile_count(user_value), profile_count(cfg.get(key)), source))
             global_profiles = global_value if isinstance(global_value, dict) else {}
@@ -391,7 +427,7 @@ def command_config_show(cfg, custom_path=None):
                         profile_source = "global"
                     else:
                         profile_source = "effective"
-                    rows.append(("ssh_profiles.{}.{}".format(profile, field), "-",
+                    rows.append(("{}.{}.{}".format(profile_prefixes[key], profile, field), "-",
                                  global_profile.get(field), user_profile.get(field),
                                  effective_profile.get(field), profile_source))
             continue
@@ -1181,6 +1217,7 @@ def device_login_driver(driver):
         "cisco-ios": CiscoIosLogin,
         "cisco-small-business": CiscoSmallBusinessLogin,
         "planet-sgs": PlanetSgsLogin,
+        "dell-os10": CiscoIosLogin,
         "hpe-arubaos-switch": HpeArubaOsSwitchLogin,
         "hpe-comware7": HpeComwareLogin,
         "fortigate-fortios": FortiGateFortiOsLogin,
@@ -2004,6 +2041,12 @@ def command_completion(cfg, action, value=None):
         for profile in sorted(cfg.get("ssh_profiles", {}), key=str.lower):
             for key in PROFILE_CONFIG_KEYS:
                 print("ssh_profiles.{}.{}".format(profile, key))
+        for profile in sorted(cfg.get("snmp_profiles", {}), key=str.lower):
+            for key in SNMP_PROFILE_CONFIG_KEYS:
+                print("snmp_profiles.{}.{}".format(profile, key))
+        for profile in sorted(cfg.get("monitoring_profiles", {}), key=str.lower):
+            for key in MONITORING_PROFILE_CONFIG_KEYS:
+                print("monitoring_profiles.{}.{}".format(profile, key))
         return 0
     if action == "drivers":
         for driver in DEVICE_DRIVERS:
@@ -2578,7 +2621,7 @@ def command_doctor(cfg, test_api=False, system_only=False):
             check("API credential", mode == 0o600, "{} mode {:04o}".format(credential, mode), essential=True)
         else:
             check("API credential", False, "missing; run gr auth configure", essential=True)
-    for executable in ("python3", "ssh", "sshpass", "pass", "gpg", "git", "less", "systemctl"):
+    for executable in ("python3", "ssh", "sshpass", "pass", "gpg", "git", "less", "systemctl", "snmpget"):
         found = shutil.which(executable)
         check(executable, found is not None, found or "not found", essential=True)
     legacy = shutil.which("ssh1")
@@ -2597,6 +2640,18 @@ def command_doctor(cfg, test_api=False, system_only=False):
           "/etc/gr/release-key.asc or install with --release-key")
     check("Bash completion", os.path.isfile(BASH_COMPLETION),
           "{} or run: eval \"$(gr completion bash)\"".format(BASH_COMPLETION), essential=True)
+    template_file = expand(cfg.get("snmp_template_file") or "/etc/gr/snmp-templates.json")
+    template_ok = False
+    template_detail = template_file
+    try:
+        with open(template_file, encoding="utf-8") as handle:
+            template_data = json.load(handle)
+        template_ok = (template_data.get("schema_version") == 1 and
+                       isinstance(template_data.get("templates"), list) and
+                       bool(template_data.get("templates")))
+    except (OSError, ValueError) as exc:
+        template_detail = "{} ({})".format(template_file, exc)
+    check("SNMP template catalog", template_ok, template_detail, essential=True)
     archive_exists = os.path.isdir(GLOBAL_CONFIG_ARCHIVE)
     archive_access = archive_exists and os.access(GLOBAL_CONFIG_ARCHIVE, os.R_OK | os.X_OK)
     check("global config archive", archive_access,
@@ -3122,6 +3177,9 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                                  help="display the original JSON instead of the default device table")
     collect_reports.add_argument("--no-more", action="store_true",
                                  help="write report directly instead of using the automatic pager")
+    snmp = sub.add_parser("snmp", help="manage templated SNMP configuration, tests and reports")
+    snmp.add_argument("snmp_args", nargs=argparse.REMAINDER,
+                      help="SNMP helper action and options; use: gr snmp --help")
     find = sub.add_parser("find", aliases=["search"], help="find addresses by IP, hostname, description, owner, MAC or port")
     find.add_argument("terms", nargs="+")
     output_group = find.add_mutually_exclusive_group()
@@ -3277,7 +3335,7 @@ def main(argv=None):
         argv = argv[:separator]
         if not exec_remote_command:
             raise GrError("Remote command is required after --")
-    known_commands = {"init", "doctor", "config", "ssh", "collect", "find", "search", "exec", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "migrate-drivers", "driver", "vendor", "audit", "completion", "docs", "help"}
+    known_commands = {"init", "doctor", "config", "ssh", "collect", "snmp", "find", "search", "exec", "subnet", "local", "sync", "export", "auth", "vault", "update", "self-update", "migrate-ssh", "migrate-drivers", "driver", "vendor", "audit", "completion", "docs", "help"}
     ssh_requested = "--ssh" in argv
     if ssh_requested:
         argv = [value for value in argv if value != "--ssh"]
@@ -3348,6 +3406,11 @@ def main(argv=None):
         if args.api and args.system:
             raise GrError("--api and --system cannot be used together")
         return command_doctor(cfg, args.api, args.system)
+    if args.command == "snmp":
+        helper_args = list(args.snmp_args or [])
+        if args.config:
+            helper_args[0:0] = ["--config", args.config]
+        return command_helper(SNMP_MANAGER, helper_args)
     if args.command == "ssh":
         if args.ssh_action != "validate":
             parser.parse_args(["ssh", "--help"])
