@@ -47,4 +47,9 @@ parola. Dacă auditul este activ, un releu PTY captează separat stdin, stdout �
 stderr înainte de a le transmite terminalului și scrie cadre JSON Lines Base64
 fără pierderi. Auditul global poate fi suprascris per sesiune.
 
+Codul 5 întors de `sshpass` este interpretat drept credențială Vault respinsă.
+Pentru o țintă generică, operatorul poate aproba o singură reîncercare prin
+promptul OpenSSH, fără salvarea parolei. Driverele automatizate se opresc până
+la corectarea profilului Vault, deoarece handlerul lor necesită credențiala.
+
 Actualizările phpIPAM folosesc aplicația de scriere numai după `--apply`, verifică rezultatul prin GET și produc rapoarte private. Registrele IEEE sunt actualizate atomic și sunt căutate prin longest-prefix matching.

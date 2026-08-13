@@ -48,6 +48,14 @@ gr --ssh --user operator --port 2222 --profile network-admin --driver cisco-ios 
 
 One match connects automatically; multiple matches open an interactive selector. CLI overrides last only for that connection. `--no-vault` uses the OpenSSH prompt. A `legacy` client is isolated per device.
 
+When `sshpass` reports exit status 5, `gr` identifies the failure explicitly as
+a rejected password from the selected Vault profile. For a generic SSH target,
+the operator may approve one retry through the native OpenSSH password prompt;
+the entered value is not stored by `gr`. Automated interactive device drivers
+stop instead, because their login handler requires the encrypted credential.
+Use `gr vault test PROFILE` to verify decryption and `gr vault set PROFILE` only
+after independently confirming the replacement password.
+
 The compact result table shows phpIPAM `lastSeen` immediately after `STATUS`.
 
 ## Non-interactive commands and sudo

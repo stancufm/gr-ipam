@@ -22,6 +22,8 @@ and manage SNMPv3 through model/OS templates and LibreNMS validation.
 - `/etc/hosts` generation is disabled by default.
 - Legacy SSH is opt-in per device and never weakens the normal SSH client.
 - Complete SSH terminal auditing is configurable globally and per session.
+- Rejected Vault passwords are diagnosed from `sshpass` status 5, with an
+  operator-approved OpenSSH prompt retry for generic targets.
 - Explicit non-interactive remote commands can reuse the encrypted SSH secret
   for sudo, or select a separate sudo secret per credential profile.
 - Bash completion covers commands, valid values and dynamic audit navigation.
@@ -100,7 +102,7 @@ gr self-update check
 
 ## Project status
 
-Version `2.6.0` is tested through an isolated `DESTDIR` installation on
+Version `2.6.1` is tested through an isolated `DESTDIR` installation on
 Debian. The package contains no credentials, private keys, inventory exports or
 organization-specific addressing.
 

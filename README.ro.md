@@ -16,6 +16,8 @@ Poate căuta adrese, deschide conexiuni SSH, păstra parolele dispozitivelor în
 - scrierile sunt dry-run implicit și necesită `--apply`;
 - algoritmii SSH vechi sunt izolați per dispozitiv;
 - auditul SSH este configurabil global sau per sesiune și produce fișiere private.
+- parolele Vault respinse sunt diagnosticate din codul 5 `sshpass`, cu o
+  reîncercare OpenSSH confirmată de operator pentru ținte generice.
 - comenzile remote neinteractive pot reutiliza secretul SSH pentru sudo sau un
   secret sudo separat în profilul de credențiale.
 - autocomplete-ul Bash acoperă comenzile, valorile valide și navigarea în audit.
@@ -69,4 +71,4 @@ gr self-update check
 - [Pregătire phpIPAM](phpipam/SETUP.ro.md)
 - [Contribuții](CONTRIBUTING.ro.md)
 
-Versiunea `2.6.0` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).
+Versiunea `2.6.1` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).

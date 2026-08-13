@@ -9,11 +9,35 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 GR = importlib.machinery.SourceFileLoader("gr_test_module", "bin/gr").load_module()
 
 
 class AuditTests(unittest.TestCase):
+    def test_rejected_vault_password_can_retry_without_saving(self):
+        callback = mock.Mock(return_value=0)
+        stderr = io.StringIO()
+        with mock.patch("builtins.input", return_value="y"), \
+                contextlib.redirect_stderr(stderr):
+            result = GR.retry_rejected_vault_password(
+                5, "192.0.2.10", "operator", callback)
+        self.assertEqual(result, 0)
+        callback.assert_called_once_with()
+        self.assertIn("Vault password was rejected", stderr.getvalue())
+        self.assertIn("will not be saved", stderr.getvalue())
+
+    def test_rejected_vault_password_stops_for_interactive_driver(self):
+        callback = mock.Mock(return_value=0)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = GR.retry_rejected_vault_password(
+                5, "192.0.2.10", "switch", callback,
+                prompt_retry_supported=False)
+        self.assertEqual(result, 5)
+        callback.assert_not_called()
+        self.assertIn("gr vault test switch", stderr.getvalue())
+
     def test_cisco_small_business_login_handles_fragmented_prompts(self):
         driver = GR.CiscoSmallBusinessLogin("cisco", "vault-secret")
         self.assertEqual(driver.feed(b"Welcome\r\nUser Na"), [])
@@ -74,6 +98,33 @@ class AuditTests(unittest.TestCase):
             finally:
                 sys.stdout, sys.stderr = old_stdout, old_stderr
             self.assertEqual(stdout.buffer.getvalue(), b"secret\x00\noutput\xff")
+
+    def test_empty_rejected_session_has_actionable_replay(self):
+        with tempfile.TemporaryDirectory() as root:
+            audit = GR.SshSessionAudit(
+                {"ssh_audit_dir": root},
+                {"_hostname": "server", "_ip": ipaddress.ip_address("192.0.2.10")},
+                ["sshpass", "-d", "4", "ssh", "192.0.2.10"])
+            path = audit.path
+            audit.close(5)
+
+            class BinaryCapture:
+                def __init__(self):
+                    self.buffer = io.BytesIO()
+
+                def isatty(self):
+                    return False
+
+            old_stdout, old_stderr = sys.stdout, sys.stderr
+            stdout, stderr = BinaryCapture(), BinaryCapture()
+            try:
+                sys.stdout, sys.stderr = stdout, stderr
+                GR.command_audit_replay(path, GR.audit_replay_streams())
+            finally:
+                sys.stdout, sys.stderr = old_stdout, old_stderr
+            self.assertEqual(stdout.buffer.getvalue(), b"")
+            self.assertIn(b"sshpass exit 5", stderr.buffer.getvalue())
+            self.assertIn(b"Vault profile", stderr.buffer.getvalue())
 
     def test_cli_audit_overrides(self):
         parser = GR.build_parser()

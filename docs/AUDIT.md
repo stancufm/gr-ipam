@@ -32,6 +32,11 @@ A connection creates:
 
 Directories have mode `0700`; files have mode `0600`. `.ses` is JSON Lines. The first record contains metadata, every data record contains an elapsed timestamp, stream name and Base64-encoded original bytes, and the final record contains the exit status. This preserves terminal bytes exactly and distinguishes stdin, stdout and stderr.
 
+A failed `sshpass` authentication may legitimately produce no terminal frames.
+Replaying such a session is no longer silent: `gr audit show` reports the final
+status, and status 5 is explained as a rejected Vault password. The transcript
+still stores no automated password.
+
 Browse targets first, then narrow the list to one hostname or IP and select a
 session without memorizing storage paths:
 

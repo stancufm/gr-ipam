@@ -44,7 +44,7 @@ CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SNMP_MANAGER = "/usr/local/libexec/gr/snmp-manager"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.6.0"
+GR_VERSION = "2.6.1"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -1370,6 +1370,37 @@ def run_pty_ssh(command, audit=None, inherited_fd=None, login_driver=None):
     return exit_status
 
 
+def retry_rejected_vault_password(exit_status, target, profile, retry_callback,
+                                  prompt_retry_supported=True):
+    """Explain sshpass status 5 and optionally retry through OpenSSH.
+
+    The retry is deliberately operator-approved and bypasses the vault. Device
+    drivers with automated credential handling cannot safely switch to an
+    OpenSSH-owned prompt, so they stop with an actionable diagnostic instead.
+    """
+    if exit_status != 5:
+        return exit_status
+    print("\nVault password was rejected by {} for profile {}.".format(
+        target, profile), file=sys.stderr)
+    if not prompt_retry_supported:
+        print("This device driver requires its encrypted credential. Validate it with "
+              "'gr vault test {}' and replace it with 'gr vault set {}' after "
+              "verification.".format(profile, profile), file=sys.stderr)
+        return exit_status
+    try:
+        answer = input("Retry once with the OpenSSH password prompt? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("", file=sys.stderr)
+        return exit_status
+    if answer not in ("y", "yes"):
+        print("Not retrying. Validate with 'gr vault test {}' and replace the secret "
+              "only after verifying the password.".format(profile), file=sys.stderr)
+        return exit_status
+    print("Retrying without Vault. The entered password will not be saved by gr.",
+          file=sys.stderr)
+    return retry_callback()
+
+
 def audit_replay_streams(include_stdin=False, stream=None):
     if stream:
         return {stream}
@@ -1431,12 +1462,17 @@ def command_audit_replay(path, streams=None, use_pager=True):
                 pager_input = pager.stdin
             except OSError as exc:
                 raise GrError("Cannot start audit pager {}: {}".format(pager_command[0], exc))
+    total_frames = 0
+    exit_status = "incomplete"
     try:
         with open(path, encoding="ascii") as handle:
             for line_number, line in enumerate(handle, 1):
                 record = json.loads(line)
+                if "exit_status" in record:
+                    exit_status = record["exit_status"]
                 if "data" not in record:
                     continue
+                total_frames += 1
                 if record.get("stream") not in streams:
                     continue
                 data = base64.b64decode(record["data"], validate=True)
@@ -1457,6 +1493,19 @@ def command_audit_replay(path, streams=None, use_pager=True):
                 pass
         if pager is not None:
             pager.wait()
+    if total_frames == 0:
+        if exit_status == 5:
+            message = ("No terminal stream data was recorded. SSH password authentication "
+                       "was rejected (sshpass exit 5); validate the selected Vault profile.\n")
+        else:
+            message = ("No terminal stream data was recorded (session exit status: {}).\n".format(
+                exit_status))
+        destination = getattr(sys.stderr, "buffer", sys.stderr)
+        if destination is sys.stderr:
+            destination.write(message)
+        else:
+            destination.write(message.encode("utf-8"))
+        destination.flush()
     return 0
 
 
@@ -2290,13 +2339,28 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
     if driver_spec["interactive_cli"]:
         print("Using device driver: {}".format(device_driver))
         login_driver = device_login_driver(device_driver)(user, vault_password)
+
+    def retry_with_prompt(exit_status):
+        if not vault_password:
+            return exit_status
+        return retry_rejected_vault_password(
+            exit_status, target, selected_profile,
+            lambda: connect_ssh(cfg, row, override_user, override_port, override_profile,
+                                override_client, override_driver, no_vault=True, audit=audit),
+            prompt_retry_supported=login_driver is None)
+
     audit_enabled = cfg.get("ssh_audit_enabled", False) if audit is None else audit
     if audit_enabled:
         recorder = SshSessionAudit(cfg, row, command)
         print("Recording complete SSH session to: {}".format(recorder.path), file=sys.stderr)
-        return run_pty_ssh(command, recorder, inherited_fd, login_driver)
+        return retry_with_prompt(run_pty_ssh(command, recorder, inherited_fd, login_driver))
     if login_driver is not None:
-        return run_pty_ssh(command, inherited_fd=inherited_fd, login_driver=login_driver)
+        return retry_with_prompt(run_pty_ssh(command, inherited_fd=inherited_fd,
+                                             login_driver=login_driver))
+    if vault_password:
+        # We must wait for sshpass to return to identify status 5 and offer the
+        # operator an interactive retry. Non-vault SSH retains execvp behavior.
+        return retry_with_prompt(run_pty_ssh(command, inherited_fd=inherited_fd))
     os.execvp(command[0], command)
 
 

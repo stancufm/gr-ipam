@@ -131,6 +131,9 @@ Browsing uses `gr config devices/history/view`; gr configures no archive remote.
 5. Obtain the selected profile's secret from the current user's GPG vault.
 6. If enabled, relay the PTY through a lossless stdin/stdout/stderr recorder.
 7. Execute OpenSSH or the isolated legacy wrapper against the IP address.
+8. Interpret `sshpass` status 5 as a rejected Vault credential. Generic targets
+   may be retried once through an operator-approved OpenSSH prompt; automated
+   device drivers stop until their Vault profile is corrected.
 
 ### Updates
 
