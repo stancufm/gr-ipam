@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""Reviewed, vendor-specific SNMP CLI behavior used by snmp-manager.
+
+This module contains no inventory or credential values.  It turns a selected
+template into a safe interactive login driver, prepares firmware-specific CLI
+values, and normalizes structural verification across supported operating
+systems.
+"""
+import re
+import secrets
+
+
+class HandlerError(Exception):
+    pass
+
+
+def _secret(value, label, quoted=False):
+    value = str(value or "")
+    if not value:
+        return "[{}_SECRET]".format(label)
+    if len(value) < 8 or "\r" in value or "\n" in value:
+        raise HandlerError("{} secret cannot be encoded safely for this CLI".format(label))
+    if quoted:
+        if '"' in value or "\\" in value:
+            raise HandlerError("{} secret contains a character unsupported by the quoted CLI encoder".format(label))
+        return '"{}"'.format(value)
+    if re.search(r"\s", value):
+        raise HandlerError("{} secret contains whitespace unsupported by this CLI".format(label))
+    return value
+
+
+def _mac_engine_id(row):
+    mac = re.sub(r"[^0-9A-Fa-f]", "", str(row.get("mac") or ""))
+    if len(mac) != 12:
+        raise HandlerError("PLANET SNMPv3 configuration requires a valid device MAC in phpIPAM")
+    # RFC 3411 enterprise-specific engine ID, format 3 (MAC address), using
+    # PLANET Technology Corp.'s IANA private enterprise number 10456 (0x28D8).
+    return "800028D803{}".format(mac.upper())
+
+
+def _contains_all(output, terms):
+    lower = output.lower()
+    return all(str(term).lower() in lower for term in terms)
+
+
+def _base_values(row, values, quoted=False):
+    prepared = dict(values)
+    prepared["auth_cli"] = _secret(values.get("auth_password"), "AUTH", quoted)
+    prepared["privacy_cli"] = _secret(values.get("privacy_password"), "PRIV", quoted)
+    return prepared
+
+
+def _base_verify(_template, output, values, action):
+    if action == "cleanup":
+        return not bool(re.search(r"(?im)^\s*(?:snmp-server|snmp-agent)\s+community\b", output)), {}
+    required = [term.format(**values) for term in _template.get("verification_terms", [])]
+    return _contains_all(output, required), {"required_terms": required}
+
+
+def _generic_login(gr, _context):
+    return gr.device_login_driver(_context["driver"])
+
+
+def _cbs_login(gr, _context):
+    class CiscoBusinessConfirmLogin(gr.CiscoSmallBusinessLogin):
+        CONFIRM_RE = re.compile(br"(?:do|do you wish)\s+to\s+continue\s*\??\s*\(y/n\)\s*\[n\]\s*$", re.I)
+
+        def feed(self, data):
+            visible = (self.buffer + data)[-4096:]
+            if self.CONFIRM_RE.search(visible):
+                self.buffer = b""
+                return [("credential", b"y")]
+            return super().feed(data)
+
+    return CiscoBusinessConfirmLogin
+
+
+def _aruba_login(gr, context):
+    temporary_auth = context.setdefault("temporary_auth", secrets.token_urlsafe(18))
+    temporary_priv = context.setdefault("temporary_priv", secrets.token_urlsafe(18))
+
+    class ArubaSnmpInitLogin:
+        AUTH_RE = re.compile(br"Enter authentication password:\s*$", re.I)
+        PRIV_RE = re.compile(br"Enter privacy password:\s*$", re.I)
+        SHA_RE = re.compile(br"Would you like to create a user that uses SHA\?\s*(?:\[y/n\])?\s*$", re.I)
+        RESTRICT_RE = re.compile(
+            br"Would you like to restrict SNMPv1 and SNMPv2c messages.*?(?:\[y/n\])?\s*$",
+            re.I | re.S)
+
+        def __init__(self, username, password):
+            self.base = gr.HpeArubaOsSwitchLogin(username, password)
+
+        def feed(self, data):
+            visible = self.base.ANSI_RE.sub(b"", (self.base.buffer + data)[-4096:])
+            for pattern, reply in (
+                    (self.AUTH_RE, temporary_auth.encode("utf-8") + b"\n"),
+                    (self.PRIV_RE, temporary_priv.encode("utf-8") + b"\n"),
+                    (self.SHA_RE, b"n\n"), (self.RESTRICT_RE, b"n\n")):
+                if pattern.search(visible):
+                    self.base.buffer = b""
+                    return [("credential", reply)]
+            return self.base.feed(data)
+
+    return ArubaSnmpInitLogin
+
+
+def _comware_login(_gr, _context):
+    class ComwareConfigLogin:
+        PROMPT_RE = re.compile(br"(?:^|[\r\n])(?:<[^>\r\n]{1,128}>|\[[^\]\r\n]{1,128}\])\s*$")
+        ANSI_RE = re.compile(br"\x1b\[[0-?]*[ -/]*[@-~]")
+
+        def __init__(self, _username, _password):
+            self.state = "prompt"
+            self.buffer = b""
+
+        def feed(self, data):
+            self.buffer = (self.buffer + data)[-4096:]
+            visible = self.ANSI_RE.sub(b"", self.buffer)
+            if self.state == "prompt" and self.PROMPT_RE.search(visible):
+                self.state = "ready"
+                self.buffer = b""
+                return [("ready", b"")]
+            if self.state == "ready" and self.PROMPT_RE.search(visible):
+                self.buffer = b""
+                return [("prompt", b"")]
+            return []
+
+    return ComwareConfigLogin
+
+
+def _prepare_generic(_row, values, _applying):
+    return _base_values(_row, values, quoted=False)
+
+
+def _prepare_quoted(_row, values, _applying):
+    return _base_values(_row, values, quoted=True)
+
+
+def _prepare_planet(row, values, _applying):
+    prepared = _base_values(row, values, quoted=True)
+    prepared["engine_id"] = _mac_engine_id(row)
+    # PLANET 2.2.0E expects PRIV first and AUTH second after ``auth sha``.
+    prepared["planet_first_cli"] = prepared["privacy_cli"]
+    prepared["planet_second_cli"] = prepared["auth_cli"]
+    return prepared
+
+
+def _verify_aruba(_template, output, values, action):
+    if action == "cleanup":
+        return bool(re.search(r"Accept SNMP v3 messages only\s*:\s*Yes", output, re.I)), {}
+    checks = {
+        "enabled": bool(re.search(r"SNMP v3 enabled\s*:\s*Yes", output, re.I)),
+        "v3_only": bool(re.search(r"Accept SNMP v3 messages only\s*:\s*Yes", output, re.I)),
+        "user_sha_aes": bool(re.search(r"(?im)^\s*{}\s+SHA\s+.*AES".format(
+            re.escape(values["username"])), output)),
+        "group": values["username"] in output and values["group"] in output and "ver3" in output,
+        "initial_absent": not bool(re.search(r"(?im)^\s*initial\s+(?:MD5|SHA)", output)),
+    }
+    return all(checks.values()), checks
+
+
+def _verify_comware(_template, output, values, action):
+    if action == "cleanup":
+        return not bool(re.search(r"(?im)^\s*snmp-agent community\b", output)), {}
+    checks = {
+        "v3_only": bool(re.search(r"(?im)^\s*snmp-agent sys-info version\s+v3", output)),
+        "user": values["username"].lower() in output.lower(),
+        "group": values["group"].lower() in output.lower(),
+        "sources": _contains_all(output, (values["source_1"], values["source_2"], values["source_3"])),
+        "community_absent": not bool(re.search(r"(?im)^\s*snmp-agent community\b", output)),
+    }
+    return all(checks.values()), checks
+
+
+def _verify_dell(_template, output, values, action):
+    if action == "cleanup":
+        return not bool(re.search(r"(?im)^\s*snmp-server community\b", output)), {}
+    checks = {
+        "user": values["username"].lower() in output.lower(),
+        "group": values["group"].lower() in output.lower(),
+        "community_absent": not bool(re.search(r"(?im)^\s*snmp-server community\b", output)),
+    }
+    # OS10 masks localized keys.  SHA/AES are intentionally validated by the
+    # authenticated SNMP probe after this structural check.
+    return all(checks.values()), checks
+
+
+def _verify_planet(_template, output, values, action):
+    if action == "cleanup":
+        return not bool(re.search(r"(?im)^\s*snmp-server community\b", output)), {}
+    checks = {
+        "engine": values["engine_id"].lower() in output.lower(),
+        "read_view": values["view"].lower() in output.lower(),
+        "deny_write_view": values["write_view"].lower() in output.lower(),
+        "group": values["group"].lower() in output.lower(),
+        "user": values["username"].lower() in output.lower(),
+        "acl": _contains_all(output, (values["acl"], values["source_1"],
+                                      values["source_2"], values["source_3"])),
+        "community_absent": not bool(re.search(r"(?im)^\s*snmp-server community\b", output)),
+    }
+    return all(checks.values()), checks
+
+
+def _cleanup_ios(output, _values):
+    lines = [line.strip() for line in output.splitlines()
+             if re.match(r"^snmp-server\s+community\s+", line.strip(), re.I)]
+    return (["configure terminal"] + ["no " + line for line in lines] + ["end"],
+            ["configure terminal"] + lines + ["end"])
+
+
+def _cleanup_comware(output, _values):
+    lines = [line.strip() for line in output.splitlines()
+             if re.match(r"^snmp-agent\s+community\s+", line.strip(), re.I)]
+    return (["system-view"] + ["undo " + line for line in lines] + ["quit"],
+            ["system-view"] + lines + ["quit"])
+
+
+def _cleanup_aruba(_output, _values):
+    return (["no page", "configure terminal", "snmpv3 only", "exit"], [])
+
+
+def _cleanup_planet(output, _values):
+    lines = [line.strip() for line in output.splitlines()
+             if re.match(r"^snmp-server\s+community\s+", line.strip(), re.I)]
+    return (["enable", "terminal length 0", "config"] +
+            ["no " + line for line in lines] + ["quit"],
+            ["enable", "terminal length 0", "config"] + lines + ["quit"])
+
+
+HANDLERS = {
+    "generic-cli": {"login": _generic_login, "prepare": _prepare_generic,
+                    "verify": _base_verify, "cleanup": _cleanup_ios, "exits": ["exit"]},
+    "cisco-ios": {"login": _generic_login, "prepare": _prepare_generic,
+                  "verify": _base_verify, "cleanup": _cleanup_ios, "exits": ["exit"]},
+    "cisco-business-3x": {"login": _cbs_login, "prepare": _prepare_quoted,
+                          "verify": _base_verify, "cleanup": _cleanup_ios,
+                          "exits": ["exit", "exit"]},
+    "arubaos-switch-adaptive": {"login": _aruba_login, "prepare": _prepare_quoted,
+                                "verify": _verify_aruba, "cleanup": _cleanup_aruba,
+                                "exits": ["exit", "exit"]},
+    "comware7": {"login": _comware_login, "prepare": _prepare_generic,
+                 "verify": _verify_comware, "cleanup": _cleanup_comware,
+                 "exits": ["quit"]},
+    "dell-os10": {"login": _generic_login, "prepare": _prepare_generic,
+                  "verify": _verify_dell, "cleanup": _cleanup_ios,
+                  "exits": ["exit"]},
+    "planet-sgs-2.2": {"login": _generic_login, "prepare": _prepare_planet,
+                       "verify": _verify_planet, "cleanup": _cleanup_planet,
+                       "exits": ["exit", "exit", "exit"]},
+}
+
+
+def get(template):
+    name = str(template.get("handler") or "generic-cli")
+    if name not in HANDLERS:
+        raise HandlerError("Unknown SNMP handler {}".format(name))
+    return HANDLERS[name]
+
+
+def prepare(template, row, values, applying=False):
+    return get(template)["prepare"](row, values, applying)
+
+
+def login_driver(gr, template, context):
+    return get(template)["login"](gr, context)
+
+
+def cleanup_plan(template, output, values):
+    return get(template)["cleanup"](output, values)
+
+
+def verify(template, output, values, action):
+    return get(template)["verify"](template, output, values, action)
+
+
+def exit_commands(template):
+    return list(get(template)["exits"])

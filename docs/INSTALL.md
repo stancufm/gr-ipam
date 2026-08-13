@@ -126,6 +126,8 @@ subkey and then run:
 gr vault init GPG_ID
 gr vault set PROFILE
 gr vault test PROFILE
+# Recovery only when an abandoned pinentry blocks the current user's agent:
+gr vault reset-agent PROFILE
 ```
 
 ## Signed upgrades

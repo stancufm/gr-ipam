@@ -66,7 +66,12 @@ gr snmp test --all
 `inventory-sync` imports only successful model/firmware facts from a version
 collector JSON report into address metadata. It is also dry-run until `--apply`.
 
-Only templates with `apply_supported: true` and a reviewed workflow execute.
+Only templates with `apply_supported: true`, the requested action in
+`supported_actions`, and a reviewed workflow execute. Templates select a
+vendor handler in `/usr/local/libexec/gr/snmp-handlers`; the handler owns prompt
+recognition, interactive confirmations, CLI-safe secret encoding, exact legacy
+cleanup and normalized structural verification. Templates remain declarative
+and contain no credentials or site inventory.
 Before every applied change, the current running configuration must be collected
 successfully into the global Git archive. Configuration is then applied to
 running state, SNMPv3 is tested, and only then is it saved. Failure triggers
@@ -79,27 +84,40 @@ Rotation additionally requires
 legacy cleanup discovers exact community lines without displaying them, removes
 them, tests v3, and can restore the exact lines before save.
 
-Firmware families with interactive initialization, inconsistent AES support,
-masked localized keys or unsafe ACL semantics are intentionally report/test-only
-until a derived model/OS template and handler are reviewed. A template never
-infers control-plane, interface or global management ACLs.
+The Aruba handler creates random, session-only initialization secrets for the
+first-time `snmpv3 enable` dialog and removes the temporary `initial` user. The
+Cisco Business handler answers the Engine ID confirmation without representing
+it as a configuration command. Comware recognizes both EXEC and system-view
+prompts. PLANET derives a unique Engine ID from the device MAC held in phpIPAM
+and implements the reviewed firmware's unusual PRIV/AUTH order. Dell OS10 treats
+an authenticated SNMP probe as the algorithm proof because the CLI masks
+localized keys. Handler output is redacted before verification or reporting.
+
+Firmware families with inconsistent AES support or unsafe ACL semantics remain
+report/test-only. A template never infers control-plane, interface or global
+management ACLs.
 
 The initial catalog incorporates the pilot evidence:
 
-| Family | Initial policy | Reason |
+| Family | Handler/action policy | Evidence boundary |
 |---|---|---|
 | Cisco IOS/IOS XE | transactional SHA/AES128, group ACL | consistent CLI, rollback and save verified |
-| Cisco CBS250 | report/test | engine-ID confirmations and syntax vary by firmware |
-| Cisco SG/SF legacy | report/test | several releases created users but did not validate AES |
-| ArubaOS-Switch 15/16 | report/test | `snmpv3 enable` has firmware-dependent secret dialogs |
-| HPE Comware 7 | report/test | needs a dedicated system-view transaction handler |
-| Dell OS10 | report/test | no process ACL on tested firmware; localized keys are masked |
-| PLANET SGS | report/test | nonstandard order and group ACL syntax require a derived handler |
+| Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | six-device rollout and engine confirmation validated; legacy cleanup not exercised |
+| Cisco SG/SF 220/250/350 and other CBS | report/test | several releases created users but did not validate AES |
+| Aruba 2920 WB.15/WB.16 | configure/rotate | adaptive initialization, SHA/AES and v3-only validated |
+| HPE Comware 7 | configure/rotate, process ACL | system-view workflow validated on the three pilot devices |
+| Dell OS10 | rotate only, no ACL | user replacement and SNMP proof validated; blank-state group/view creation was not |
+| PLANET SGS-6310 2.2.0E | configure/rotate, group ACL | privacy/auth ordering and exact process ACL validated; legacy cleanup not exercised |
 | FortiOS | report/test | query-source and interface exposure must be reviewed explicitly |
 
 Sites may clone a template and narrow it with `model_regex`, `device_os_regex`
 and `os_version_regex`; write support must remain false until its complete apply,
 verify, save and rollback behavior is tested on a representative device.
+The package catalog is the source for new handler capabilities. Because
+`/etc/gr/snmp-templates.json` is intentionally preserved on upgrade, the loader
+merges it with the packaged catalog. Newer packaged generations replace stale
+generated IDs while retaining site-only IDs; a local catalog at the current
+generation may override package IDs.
 
 ## Reports and monitoring
 

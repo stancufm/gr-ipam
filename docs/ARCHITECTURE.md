@@ -38,7 +38,9 @@ documentation and vault management.
   parsed JSON inventory.
 - `libexec/collect-config` runs the driver's configuration commands and commits
   changed normalized configurations to the global private Git archive.
-- `libexec/snmp-manager` resolves model/OS templates, inventories and tests
+- `libexec/snmp-manager` resolves model/OS templates, inventories and tests;
+- `libexec/snmp-handlers` contains reviewed interactive session and normalized
+  verification behavior, separate from declarative SNMP templates
   SNMP, gates transactional writes, and reconciles phpIPAM with LibreNMS.
 
 The helpers load the installed `gr` module so API, metadata, credential

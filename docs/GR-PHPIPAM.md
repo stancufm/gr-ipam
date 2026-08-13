@@ -56,6 +56,13 @@ stop instead, because their login handler requires the encrypted credential.
 Use `gr vault test PROFILE` to verify decryption and `gr vault set PROFILE` only
 after independently confirming the replacement password.
 
+If an abandoned GPG pinentry blocks later `gr` commands, close that terminal
+and run `gr vault reset-agent PROFILE`. It restarts only the current Unix user's
+GPG agent, does not modify the password store, and optionally tests the named
+SSH profile. Do not run it while another intentional signing/decryption prompt
+for the same user is active. Vault decryption now times out after 120 seconds
+with this recovery instruction instead of waiting indefinitely.
+
 The compact result table shows phpIPAM `lastSeen` immediately after `STATUS`.
 
 ## Non-interactive commands and sudo
