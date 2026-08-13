@@ -142,6 +142,16 @@ def managed_row(row):
             bool(int(custom(row, "monitoring_enabled") or 0)))
 
 
+def response_row(response):
+    """Normalize phpIPAM client data and raw API envelopes for verification."""
+    data = response
+    if isinstance(data, dict) and "data" in data and isinstance(data.get("data"), (dict, list)):
+        data = data.get("data")
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    return data if isinstance(data, dict) else {}
+
+
 def template_matches(template, row):
     match = template.get("match", {})
     values = {
@@ -649,10 +659,7 @@ def command_assign(cfg, templates, args):
     with gr.api_session(write_cfg) as api:
         for row, payload in changes:
             api.request("PATCH", "addresses/{}/".format(row["id"]), payload=payload)
-            after = api.request("GET", "addresses/{}/".format(row["id"]))
-            data = after.get("data") if isinstance(after, dict) else None
-            if isinstance(data, list):
-                data = data[0] if data else {}
+            data = response_row(api.request("GET", "addresses/{}/".format(row["id"])))
             if not isinstance(data, dict) or str(gr.custom_value(data, "snmp_template") or "") != payload["custom_snmp_template"]:
                 raise gr.GrError("phpIPAM verification failed for {}".format(row_ip(row)))
     print("ASSIGN_STATUS=success count={}".format(len(changes))); return 0
@@ -707,10 +714,7 @@ def command_inventory_sync(cfg, args):
     with gr.api_session(write_cfg) as api:
         for row, payload in changes:
             api.request("PATCH", "addresses/{}/".format(row["id"]), payload=payload)
-            after = api.request("GET", "addresses/{}/".format(row["id"]))
-            data = after.get("data") if isinstance(after, dict) else None
-            if isinstance(data, list):
-                data = data[0] if data else {}
+            data = response_row(api.request("GET", "addresses/{}/".format(row["id"])))
             if not isinstance(data, dict):
                 raise gr.GrError("phpIPAM metadata verification failed for {}".format(row_ip(row)))
             verified = {

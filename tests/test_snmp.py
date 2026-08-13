@@ -189,6 +189,13 @@ rule 30 permit source 192.0.2.3 0
         self.assertTrue(SNMP.managed_row(row()))
         self.assertTrue(SNMP.managed_row({"ip": "192.0.2.2", "custom_snmp_enabled": 1}))
 
+    def test_phpipam_response_row_accepts_unwrapped_and_enveloped_data(self):
+        value = {"id": "10", "custom_device_model": "model"}
+        self.assertEqual(SNMP.response_row(value), value)
+        self.assertEqual(SNMP.response_row({"data": value}), value)
+        self.assertEqual(SNMP.response_row({"data": [value]}), value)
+        self.assertEqual(SNMP.response_row(None), {})
+
     def test_inventory_sync_accepts_multiple_reports(self):
         args = SNMP.build_parser().parse_args([
             "inventory-sync", "--report", "old.json", "--report", "new.json"])
@@ -243,7 +250,7 @@ rule 30 permit source 192.0.2.3 0
                     return {"data": []}
                 if method == "PATCH":
                     address.update(payload); self.patches.append(payload)
-                return {"data": address}
+                return address
 
         class Session:
             def __enter__(self):
