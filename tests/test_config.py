@@ -28,6 +28,13 @@ class ConfigShowTests(unittest.TestCase):
         with self.assertRaises(GR.GrError):
             GR.parse_config_setting("snmp_profiles.monitor.sources", '["not-an-ip"]')
 
+    def test_snmp_profile_source_address_is_validated(self):
+        self.assertEqual(
+            GR.parse_config_setting("snmp_profiles.monitor.source_address", "192.0.2.20"),
+            "192.0.2.20")
+        with self.assertRaises(GR.GrError):
+            GR.parse_config_setting("snmp_profiles.monitor.source_address", "not-an-ip")
+
     def test_required_phpipam_custom_fields_are_validated(self):
         complete = {name: None for name in GR.REQUIRED_ADDRESS_CUSTOM_FIELDS}
         self.assertEqual(GR.missing_address_custom_fields([complete]), [])

@@ -20,6 +20,17 @@ Secretele AUTH/PRIV și tokenul LibreNMS se păstrează în `pass`; configurați
 conține doar numele intrărilor din seif. `--prompt-credentials` citește parolele
 fără ecou. Net-SNMP folosește un fișier temporar 0600, nu argumentele `-A/-X`.
 
+Lista `sources` reprezintă sursele aprobate introduse în ACL-urile SNMP ale
+echipamentelor. Câmpul opțional `source_address` este adresa locală de care se
+leagă Net-SNMP atunci când serverul de administrare are mai multe adrese sau o
+adresă VIP. Dacă este definită, adresa trebuie să existe și în `sources`. Astfel,
+testul nu pleacă accidental de pe adresa principală neaprobată de ACL. Configurarea
+nu atinge seiful:
+
+```text
+gr config set snmp_profiles.monitoring-v3.source_address 192.0.2.20
+```
+
 ## Flux sigur
 
 ```text
@@ -29,6 +40,7 @@ gr snmp inventory-sync --report ~/.local/state/gr/device-version/RAPORT.json
 gr snmp configure --ip 192.0.2.10 --source 192.0.2.20 --source 192.0.2.21 --source 192.0.2.22
 gr snmp configure --ip 192.0.2.10 --source 192.0.2.20 --source 192.0.2.21 --source 192.0.2.22 --apply
 gr snmp test --all
+gr snmp report --all --mode ports --profile monitoring-v3
 ```
 
 `inventory-sync` importă numai rezultatele reușite model/firmware din raportul
@@ -94,6 +106,8 @@ show specifice template-ului; offline citește arhiva globală; ports folosește
 descoperire SNMPv3 neautentificată cu user fictiv. Un răspuns unknown-user
 demonstrează existența agentului fără credențiale, dar lipsa răspunsului UDP nu
 demonstrează că portul este închis.
+Cu `--profile`, raportul ports folosește `source_address` din profil; fără profil,
+sursa este aleasă automat de rutare.
 Rapoartele sunt 0600 în `snmp_report_dir` și nu se publică.
 Fiecare rulare produce JSON detaliat și un rezumat CSV comparativ; outputul CLI
 live brut rămâne numai în JSON. Raportul inventory include modelul, versiunea OS,

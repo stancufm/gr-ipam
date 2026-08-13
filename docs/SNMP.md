@@ -32,6 +32,7 @@ Example profiles (names and vault paths are site-defined):
       "auth_protocol": "SHA",
       "privacy_protocol": "AES",
       "sources": ["192.0.2.20", "192.0.2.21", "192.0.2.22"],
+      "source_address": "192.0.2.20",
       "auth_secret": "gr/snmpv3/monitoring-v3/auth",
       "privacy_secret": "gr/snmpv3/monitoring-v3/priv"
     }
@@ -52,6 +53,17 @@ Interactive credentials use `--prompt-credentials` and are never accepted as
 plain command-line options. Net-SNMP receives credentials through a mode-0600
 temporary configuration, not `-A`/`-X` process arguments.
 
+`sources` is the approved list rendered into device-side SNMP ACLs.
+`source_address` is the local address that Net-SNMP must bind when the management
+host is multi-homed or owns a service/VIP address. It is optional, but when set it
+must also occur in `sources`. This prevents a test from silently leaving through
+an unapproved primary address while the device ACL permits a different local
+address. Configure it without touching the vault:
+
+```text
+gr config set snmp_profiles.monitoring-v3.source_address 192.0.2.20
+```
+
 ## Workflow
 
 ```text
@@ -61,6 +73,7 @@ gr snmp inventory-sync --report ~/.local/state/gr/device-version/REPORT.json
 gr snmp configure --ip 192.0.2.10 --source 192.0.2.20 --source 192.0.2.21 --source 192.0.2.22
 gr snmp configure --ip 192.0.2.10 --source 192.0.2.20 --source 192.0.2.21 --source 192.0.2.22 --apply
 gr snmp test --all
+gr snmp report --all --mode ports --profile monitoring-v3
 ```
 
 `inventory-sync` imports only successful model/firmware facts from a version
@@ -139,6 +152,8 @@ global configuration archive. Port reports send an unauthenticated SNMPv3
 discovery using a fictitious user; an unknown-user response proves an agent
 answered without exposing a credential. UDP silence does not prove that SNMP is
 closed and the result is explicitly best-effort.
+When `--profile` is supplied, a ports report uses that profile's
+`source_address`; otherwise routing selects the source automatically.
 Reports are private mode 0600 under `snmp_report_dir` and must never be published.
 Each run writes detailed JSON plus a comparison-friendly CSV summary; raw live
 CLI output remains only in JSON. Inventory reports include model, OS version,

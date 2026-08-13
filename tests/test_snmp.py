@@ -152,7 +152,7 @@ rule 30 permit source 192.0.2.3 0
     def test_snmpget_does_not_put_secrets_in_process_argv(self):
         credentials = {"username": "snmp-user", "auth_protocol": "SHA",
                        "privacy_protocol": "AES", "auth_password": "auth-secret",
-                       "privacy_password": "priv-secret"}
+                       "privacy_password": "priv-secret", "source_address": "192.0.2.20"}
 
         def run(command, **kwargs):
             joined = " ".join(command)
@@ -160,15 +160,37 @@ rule 30 permit source 192.0.2.3 0
             self.assertNotIn("priv-secret", joined)
             config = os.path.join(kwargs["env"]["SNMPCONFPATH"], "snmp.conf")
             self.assertEqual(os.stat(config).st_mode & 0o777, 0o600)
+            with open(config, encoding="utf-8") as handle:
+                self.assertIn("clientaddr 192.0.2.20", handle.read())
             return types.SimpleNamespace(returncode=0, stderr="")
 
         with mock.patch.object(SNMP.subprocess, "run", side_effect=run):
             self.assertEqual(SNMP.snmpget("192.0.2.10", credentials), (0, ""))
 
+    def test_profile_source_address_must_be_an_approved_source(self):
+        cfg = {"snmp_profiles": {"monitor": {
+            "username": "snmp-user", "auth_protocol": "SHA", "privacy_protocol": "AES",
+            "sources": ["192.0.2.20"], "source_address": "192.0.2.21"}}}
+        args = types.SimpleNamespace(profile="monitor", username=None,
+                                     prompt_credentials=False)
+        with self.assertRaises(SNMP.gr.GrError):
+            SNMP.profile_values(cfg, row(), args, need_secrets=False)
+
+    def test_authentication_failure_takes_priority_over_timeout_text(self):
+        detail = "Timeout while discovering engine ID\nsnmpget: Authentication failure (incorrect password or key)"
+        self.assertEqual(SNMP.snmp_test_status(1, detail), "failed")
+        self.assertEqual(SNMP.snmp_test_status(1, "Timeout: No Response"), "timeout")
+        self.assertEqual(SNMP.snmp_test_status(0, ""), "success")
+
     def test_parser_supports_all_report_modes(self):
         for mode in ("inventory", "live", "offline", "ports"):
             args = SNMP.build_parser().parse_args(["report", "--ip", "192.0.2.10", "--mode", mode])
             self.assertEqual(args.mode, mode)
+
+    def test_ports_report_accepts_source_profile(self):
+        args = SNMP.build_parser().parse_args([
+            "report", "--ip", "192.0.2.10", "--mode", "ports", "--profile", "monitor"])
+        self.assertEqual(args.profile, "monitor")
 
     def test_managed_report_and_duplicate_exclusion_options(self):
         args = SNMP.build_parser().parse_args([
@@ -292,6 +314,18 @@ rule 30 permit source 192.0.2.3 0
                                           stderr="Unknown user name")
         with mock.patch.object(SNMP.subprocess, "run", return_value=completed):
             status, _detail = SNMP.unauthenticated_probe("192.0.2.10")
+        self.assertEqual(status, "responsive")
+
+    def test_unauthenticated_probe_binds_configured_source(self):
+        def run(_command, **kwargs):
+            config = os.path.join(kwargs["env"]["SNMPCONFPATH"], "snmp.conf")
+            with open(config, encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "clientaddr 192.0.2.20\n")
+            return types.SimpleNamespace(returncode=1, stdout="", stderr="Unknown user name")
+
+        with mock.patch.object(SNMP.subprocess, "run", side_effect=run):
+            status, _detail = SNMP.unauthenticated_probe(
+                "192.0.2.10", source_address="192.0.2.20")
         self.assertEqual(status, "responsive")
 
 
