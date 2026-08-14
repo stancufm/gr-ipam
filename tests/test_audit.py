@@ -15,6 +15,31 @@ GR = importlib.machinery.SourceFileLoader("gr_test_module", "bin/gr").load_modul
 
 
 class AuditTests(unittest.TestCase):
+    def test_vault_decryption_refreshes_pinentry_tty_for_current_session(self):
+        class InteractiveInput:
+            @staticmethod
+            def isatty():
+                return True
+
+            @staticmethod
+            def fileno():
+                return 9
+
+        def which(name):
+            return "/usr/bin/{}".format(name)
+
+        with mock.patch.object(GR.sys, "stdin", InteractiveInput()), \
+                mock.patch.object(GR.os, "ttyname", return_value="/dev/pts/42"), \
+                mock.patch.object(GR.shutil, "which", side_effect=which), \
+                mock.patch.object(GR.subprocess, "call", return_value=0) as agent, \
+                mock.patch.object(GR.subprocess, "check_output",
+                                  return_value="vault-password\n") as decrypt:
+            self.assertEqual(GR.read_vault_password("gr/example"), "vault-password")
+        agent.assert_called_once_with(
+            ["/usr/bin/gpg-connect-agent", "updatestartuptty", "/bye"],
+            env=mock.ANY, stdout=GR.subprocess.DEVNULL, stderr=GR.subprocess.DEVNULL)
+        self.assertEqual(decrypt.call_args[1]["env"]["GPG_TTY"], "/dev/pts/42")
+
     def test_vault_timeout_explains_safe_agent_recovery(self):
         with mock.patch.object(GR.shutil, "which", return_value="/usr/bin/pass"), \
                 mock.patch.object(GR.subprocess, "check_output",
@@ -34,10 +59,10 @@ class AuditTests(unittest.TestCase):
             return 0
 
         with mock.patch.object(GR.shutil, "which", side_effect=which), \
-                mock.patch.object(GR.subprocess, "call", side_effect=call):
+                mock.patch.object(GR.subprocess, "call", side_effect=call), \
+                contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(GR.command_vault({}, "reset-agent"), 0)
-        self.assertEqual(calls[0], ["gpgconf", "--kill", "gpg-agent"])
-        self.assertEqual(calls[1], ["/usr/bin/gpg-connect-agent", "/bye"])
+        self.assertEqual(calls, [["gpgconf", "--kill", "gpg-agent"]])
 
     def test_rejected_vault_password_can_retry_without_saving(self):
         callback = mock.Mock(return_value=0)

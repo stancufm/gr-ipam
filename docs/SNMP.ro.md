@@ -35,6 +35,7 @@ gr config set snmp_profiles.monitoring-v3.source_address 192.0.2.20
 
 ```text
 gr snmp templates --target 192.0.2.10
+gr snmp capabilities --ip 192.0.2.10
 gr snmp assign --ip 192.0.2.10 --profile monitoring-v3 --apply
 gr snmp inventory-sync --report ~/.local/state/gr/device-version/RAPORT.json
 gr snmp configure --ip 192.0.2.10 --source 192.0.2.20 --source 192.0.2.21 --source 192.0.2.22
@@ -73,13 +74,56 @@ este redactat înainte de verificare sau raportare.
 Familiile cu AES inconsistent sau ACL-uri riscante rămân report/test-only. Nu se
 deduc și nu se aplică ACL-uri pe control-plane, interfață sau management global.
 
+`gr snmp capabilities` este poarta read-only pentru handlerele candidate. Intră
+în modul de configurare numai pentru help contextual, folosind comenzi
+`snmp-server ... ?` intenționat incomplete. Un validator static refuză orice
+comandă candidat care ar putea crea un obiect, iar rezultatul conține numai
+capabilități normalizate, nu configurația completă. Comanda nu citește
+credențiale SNMP. Template-ul rămâne `apply_supported: false` până când această
+probă și un pilot tranzacțional complet reușesc pe un echipament reprezentativ.
+
+Cisco Business folosește două dialecte CLI vechi care nu trebuie confundate cu
+IOS. Pentru firmware 2.x pe seriile 250/350, documentația Cisco definește userul
+ca `... v3 auth sha AUTH priv PRIV`; parola `priv` selectează implicit AES-128,
+deci tokenii IOS `priv aes 128` sunt invalizi. Pe seria 220, comanda userului nu
+conține `v3`, iar verificarea folosește `show snmp-server ...` și
+`snmp-server engineid`. Pachetul conține de aceea handlere candidate separate,
+cu parole neîncadrate în ghilimele și fără spații. Vezi
+[referința Cisco Business 350](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbms/CBS_250_350/CLI/cbs-350-cli-/snmp-commands.html)
+și [referința Cisco 220](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbss/CBS220/CLI-Guide/b_220CLI/snmp_commands.html).
+Sesiunile interactive Cisco Business solicită un PTY de 512 coloane. Astfel,
+redesenarea comenzilor SNMP lungi de către editorul CLI nu mai poate semăna cu
+un prompt nou și nu poate avansa prematur coada tranzacțională de comenzi.
+Numai pentru aceste template-uri marcate explicit, verificarea structurală
+acceptă lipsa etichetei algoritmului privacy ca AES128 dacă userul și
+autentificarea SHA sunt prezente; o etichetă explicită DES sau fără privacy este
+respinsă. Testele authPriv din shadow și de pe serverul de monitorizare rămân
+obligatorii înainte de save.
+Verificarea limitează etichetele de autentificare și privacy la blocul userului
+cerut, astfel încât alți useri fără privacy nu pot influența decizia.
+Dacă un template marcat explicit cu AES implicit raportează o etichetă privacy
+nesigură, dar engine, view, grup, user și SHA sunt validate, gr poate rula
+testele authPriv AES128 ca probă funcțională. Salvează numai dacă reușesc atât
+proba locală, cât și cea de pe serverul de monitorizare; orice eșec face rollback.
+Pentru diagnostic, handlerul 2.x verifică și că `show snmp` raportează agentul
+activ. După eșecul probei AES128 poate încerca o singură citire authNoPriv pentru
+a separa un user doar cu autentificare de un agent inaccesibil/dezactivat;
+acest rezultat nu poate autoriza save.
+Outputul tranzacțional include numai lista limitată `CLI_SAFE_DIAGNOSTICS` cu
+avertismente și erori independente emise de echipament. Liniile de prompt sau
+comandă repetate de terminal sunt eliminate complet: fragmentele redesenate pot
+conține numai o parte dintr-un secret și nu pot fi securizate prin înlocuirea
+valorii complete. Nu se păstrează transcript complet sau sensibil.
+
 Catalogul inițial include concluziile piloților:
 
 | Familie | Handler/acțiuni | Limita validării |
 |---|---|---|
 | Cisco IOS/IOS XE | tranzacțional SHA/AES128, ACL pe grup | CLI, rollback și save validate |
 | Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | rollout pe șase echipamente și confirmarea engine validate; cleanup legacy neprobat |
-| Cisco SG/SF 220/250/350 și restul CBS | report/test | unele versiuni creează userul, dar AES nu răspunde |
+| Cisco SG/SF 250/350 firmware 2.x | handler blocat, report/test | SG350XG-2F10 2.5.0.83 a acceptat comanda documentată, dar a creat `Privacy Method: None`; atât cheia de 32 hex, cât și passphrase-ul alfanumeric de 16 caractere au eșuat pragul AES128 local și au fost retrase fără save, înaintea testului din LibreNMS |
+| Cisco SG/SF 220 firmware 1.1 | handler candidat distinct, report/test | sintaxa userului omite `v3`; mai sunt necesare help-ul contextual și un pilot tranzacțional reprezentativ |
+| Restul Cisco Business | report/test | nu există încă handler validat pe model/firmware |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | inițializare adaptivă, SHA/AES și v3-only validate |
 | HPE Comware 7 | configure/rotate, ACL pe proces | workflow system-view validat pe cele trei piloturi |
 | Dell OS10 | numai rotate, fără ACL | înlocuirea userului și testul SNMP validate; grup/view de la zero nu |
@@ -94,6 +138,9 @@ Catalogul din pachet este sursa capabilităților noi. Deoarece
 combină cu cel din pachet. O generație nouă din pachet înlocuiește ID-urile vechi
 generate, dar păstrează ID-urile locale suplimentare; catalogul local aflat la
 generația curentă poate suprascrie ID-urile din pachet.
+Când `GR_SNMP_TEMPLATES` este setat explicit pentru o validare sau recuperare
+temporară, acesta este autoritar și nu este combinat cu catalogul persistent
+configurat.
 
 ## Rapoarte și LibreNMS
 

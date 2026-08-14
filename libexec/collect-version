@@ -11,6 +11,7 @@ import sys
 import select
 import subprocess
 import time
+import tty
 
 GR_PATH = os.environ.get("GR_PATH", "/usr/local/bin/gr")
 def load_gr():
@@ -144,6 +145,22 @@ def report_command_summary(items):
 def run_interactive_device(item, password, command, read_fd, login_driver_class,
                            version_commands, cleanup_command_values, timeout=50):
     master_fd, slave_fd = os.openpty()
+    # Some Cisco Business firmware redraws long editable CLI lines when the
+    # PTY is only 80 columns wide.  Those redraws can resemble fresh prompts
+    # to an interactive state machine.  A driver may request a wider remote
+    # terminal while ordinary collection retains the operating-system default.
+    pty_columns = int(getattr(login_driver_class, "GR_PTY_COLUMNS", 0) or 0)
+    if pty_columns:
+        import fcntl
+        import struct
+        import termios
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ,
+                    struct.pack("HHHH", 24, pty_columns, 0, 0))
+    # Contextual-help probes need literal control characters (for example
+    # Ctrl-C to cancel an incomplete CLI line).  Limit raw PTY mode to login
+    # drivers that opt in explicitly; ordinary collection remains unchanged.
+    if getattr(login_driver_class, "GR_RAW_PTY", False):
+        tty.setraw(slave_fd)
     command = command[:-1]
     command.insert(command.index("-p"), "-tt")
     process = subprocess.Popen(command, stdin=slave_fd, stdout=slave_fd, stderr=subprocess.PIPE,

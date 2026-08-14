@@ -20,7 +20,8 @@ import urllib.parse
 import urllib.request
 
 GR_PATH = os.environ.get("GR_PATH", "/usr/local/bin/gr")
-DEFAULT_TEMPLATES = os.environ.get("GR_SNMP_TEMPLATES", "/usr/local/share/gr/snmp/templates.json")
+TEMPLATES_OVERRIDE = os.environ.get("GR_SNMP_TEMPLATES")
+DEFAULT_TEMPLATES = TEMPLATES_OVERRIDE or "/usr/local/share/gr/snmp/templates.json"
 COLLECT_VERSION_PATH = os.environ.get("GR_COLLECT_VERSION", "/usr/local/libexec/gr/collect-version")
 COLLECT_CONFIG_PATH = os.environ.get("GR_COLLECT_CONFIG", "/usr/local/libexec/gr/collect-config")
 HANDLERS_PATH = os.environ.get("GR_SNMP_HANDLERS", "/usr/local/libexec/gr/snmp-handlers")
@@ -43,7 +44,11 @@ def custom(row, name):
 
 
 def load_templates(cfg):
-    path = gr.expand(cfg.get("snmp_template_file") or DEFAULT_TEMPLATES)
+    # An explicit process-level override is authoritative. This is required by
+    # temporary validation and recovery workflows that must not silently fall
+    # back to an installed site catalog from the user's persistent config.
+    path = DEFAULT_TEMPLATES if TEMPLATES_OVERRIDE else gr.expand(
+        cfg.get("snmp_template_file") or DEFAULT_TEMPLATES)
     if not os.path.isfile(path):
         path = DEFAULT_TEMPLATES
     def read_catalog(catalog_path):
@@ -76,6 +81,20 @@ def load_templates(cfg):
                 order.append(template_id)
             merged[template_id] = template
     return "{} + {}".format(DEFAULT_TEMPLATES, path), [merged[item] for item in order]
+
+
+def implicit_privacy_probe_candidate(template, checks):
+    """Allow AES128 SNMPGET to resolve an unreliable CLI privacy label.
+
+    This never authorizes save by itself. The caller must still require both
+    local and monitoring-server authPriv tests to succeed.
+    """
+    if str(template.get("privacy_protocol_implicit") or "").upper() != "AES128":
+        return False
+    required = ["engine", "view", "group", "user", "auth_sha"]
+    if template.get("verify_server_enabled"):
+        required.append("server_enabled")
+    return all(bool(checks.get(name)) for name in required)
 
 
 def row_ip(row):
@@ -272,18 +291,9 @@ def snmpget(ip, credentials, timeout=5):
     with tempfile.TemporaryDirectory(prefix="gr-snmp-") as directory:
         os.chmod(directory, 0o700)
         config = os.path.join(directory, "snmp.conf")
-        def quoted(value):
-            return '"{}"'.format(str(value).replace("\\", "\\\\").replace('"', '\\"'))
-
         with open(config, "w", encoding="utf-8") as handle:
-            if credentials.get("source_address"):
-                handle.write("clientaddr {}\n".format(credentials["source_address"]))
-            handle.write("defSecurityLevel authPriv\n")
-            handle.write("defSecurityName {}\n".format(credentials["username"]))
-            handle.write("defAuthType {}\n".format(credentials["auth_protocol"]))
-            handle.write("defAuthPassphrase {}\n".format(quoted(credentials["auth_password"])))
-            handle.write("defPrivType {}\n".format(credentials["privacy_protocol"]))
-            handle.write("defPrivPassphrase {}\n".format(quoted(credentials["privacy_password"])))
+            handle.write(snmp_config_text(
+                credentials, source_address=credentials.get("source_address") or ""))
         os.chmod(config, 0o600)
         environment = os.environ.copy()
         environment["SNMPCONFPATH"] = directory
@@ -292,6 +302,90 @@ def snmpget(ip, credentials, timeout=5):
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 universal_newlines=True, timeout=timeout + 3, env=environment)
     return result.returncode, result.stderr.strip()
+
+
+def snmp_config_text(credentials, source_address=""):
+    def quoted(value):
+        return '"{}"'.format(str(value).replace("\\", "\\\\").replace('"', '\\"'))
+    lines = []
+    if source_address:
+        lines.append("clientaddr {}".format(source_address))
+    security_level = str(credentials.get("security_level") or "authPriv")
+    lines.extend((
+        "defSecurityLevel {}".format(security_level),
+        "defSecurityName {}".format(quoted(credentials["username"])),
+        "defAuthType {}".format(credentials["auth_protocol"]),
+        "defAuthPassphrase {}".format(quoted(credentials["auth_password"])),
+    ))
+    if security_level.lower() == "authpriv":
+        lines.extend((
+            "defPrivType {}".format(credentials["privacy_protocol"]),
+            "defPrivPassphrase {}".format(quoted(credentials["privacy_password"])),
+        ))
+    return "\n".join(lines) + "\n"
+
+
+def remote_snmpget(cfg, monitoring_profile_name, ip, credentials, timeout=5):
+    """Test from the monitoring host without placing SNMP secrets in argv."""
+    monitoring_profile = cfg.get("monitoring_profiles", {}).get(
+        monitoring_profile_name, {})
+    host = str(monitoring_profile.get("host") or "").strip()
+    if not host:
+        raise gr.GrError(
+            "Monitoring profile {} has no execution host".format(monitoring_profile_name))
+    with gr.api_session(cfg, prompt=False) as api:
+        matches = [row for row in inventory_rows(api)
+                   if row_ip(row) == host or
+                   str(row.get("hostname") or "").lower() == host.lower()]
+    if len(matches) != 1:
+        raise gr.GrError(
+            "Monitoring execution host {} must match one phpIPAM address".format(host))
+    row = matches[0]
+    meta = gr.phpipam_ssh_metadata(row)
+    if not meta["enabled"] or not meta["profile"] or not meta["user"]:
+        raise gr.GrError("Incomplete SSH metadata for monitoring host {}".format(host))
+    ssh_password = gr.read_vault_password(gr.vault_secret_name(cfg, meta["profile"]))
+    config_text = snmp_config_text(credentials)
+    # The complete script travels over stdin. Neither passphrase occurs in
+    # the local or remote process argument list, and the quoted heredoc keeps
+    # shell expansion disabled while writing the mode-0600 temporary file.
+    script = """set -eu
+umask 077
+d=$(mktemp -d /tmp/gr-snmp-test.XXXXXX)
+trap 'rm -rf "$d"' EXIT HUP INT TERM
+cat > "$d/snmp.conf" <<'GR_SNMP_CONFIG_EOF'
+{config}GR_SNMP_CONFIG_EOF
+SNMPCONFPATH="$d" MIBS='' /usr/bin/snmpget -v3 -t {timeout} -r 0 -On {target} .1.3.6.1.2.1.1.5.0
+""".format(config=config_text, timeout=int(timeout),
+           target=str(ipaddress.ip_address(ip)))
+    payload = script.encode("utf-8")
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, (ssh_password + "\n").encode("utf-8"))
+        os.close(write_fd); write_fd = None
+        client = "/usr/bin/ssh1" if meta.get("client") == "legacy" else "ssh"
+        strict = "no" if meta.get("client") == "legacy" else "accept-new"
+        command = ["sshpass", "-d", str(read_fd), client, "-F", "/dev/null",
+                   "-o", "StrictHostKeyChecking={}".format(strict),
+                   "-o", "UserKnownHostsFile={}".format(gr.ensure_known_hosts(cfg)),
+                   "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
+                   "-p", str(meta.get("port") or 22),
+                   "{}@{}".format(meta["user"], row_ip(row)), "/bin/sh", "-s"]
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, pass_fds=(read_fd,))
+        _stdout, stderr = process.communicate(payload, timeout=timeout + 30)
+    except subprocess.TimeoutExpired:
+        process.kill(); process.wait()
+        return 1, "Timeout while testing from monitoring host"
+    finally:
+        if write_fd is not None:
+            os.close(write_fd)
+        os.close(read_fd)
+    detail = stderr.decode("utf-8", "replace").strip()
+    for secret in (ssh_password, credentials["auth_password"],
+                   credentials["privacy_password"]):
+        detail = detail.replace(secret, "[REDACTED]")
+    return process.returncode, detail
 
 
 def snmp_test_status(returncode, detail):
@@ -456,9 +550,105 @@ def command_templates(cfg, templates, args):
     return 0
 
 
+def validate_capability_commands(commands):
+    """Refuse a capability probe that could become a configuration change."""
+    navigation = {"configure terminal", "config", "end", "exit", "quit",
+                  "terminal datadump", "terminal length 0", "no page"}
+    for command in commands:
+        probe_command = command[:-1] if command.endswith("\x03") else command
+        normalized = probe_command.strip().lower()
+        if normalized in navigation or normalized.startswith("show "):
+            continue
+        if (command.endswith("\x03") and normalized.startswith("snmp-server ") and
+                normalized.endswith("?")):
+            continue
+        raise gr.GrError(
+            "Unsafe SNMP capability command in template: {}".format(command))
+
+
+def sanitized_capability_output(output):
+    """Make contextual help safe for parsing and terminal display."""
+    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", str(output or ""))
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return "".join(character for character in text
+                   if character in "\n\t" or ord(character) >= 32)
+
+
+def safe_apply_diagnostics(output, values):
+    """Return device diagnostics without ever returning echoed secret commands.
+
+    Cisco Business line editing can repaint a long command in fragments.  A
+    full-value replacement is therefore insufficient: an individual repaint
+    can contain only a prefix or suffix of a secret.  Reject every echoed
+    prompt/command line and retain only standalone device error/warning lines.
+    """
+    text = sanitized_capability_output(output)
+    for key in ("auth_password", "privacy_password"):
+        secret = str(values.get(key) or "")
+        if secret:
+            text = text.replace(secret, "[REDACTED]")
+    selected = []
+    diagnostic = re.compile(
+        r"^(?:%\s*)?(?:error|warning|invalid|wrong|failed|password|privacy)\b|"
+        r"\b(?:error|warning|invalid|wrong|failed|complexity|minimum|maximum)\b",
+        re.I)
+    for line in text.splitlines():
+        line = " ".join(line.split())
+        lower = line.lower()
+        if (not line or "snmp-server user" in lower or "[redacted]" in lower or
+                re.search(r"[>#]\s*", line) or lower.startswith("password:")):
+            continue
+        if diagnostic.search(line):
+            selected.append(re.sub(r"\S{32,}", "[VALUE_REDACTED]", line)[:240])
+    return selected[-12:]
+
+
+def command_capabilities(cfg, templates, args):
+    """Inspect incomplete contextual help without creating SNMP objects."""
+    with gr.api_session(cfg, prompt=False) as api:
+        rows = select_rows(inventory_rows(api), args, require_enabled=False)
+    failed = False
+    for row in rows:
+        template, source = resolve_template(templates, row)
+        commands = render_commands(template, "capability", {}, redact=False)
+        if not commands:
+            print("TARGET={} TEMPLATE={} RESOLUTION={} CAPABILITY_STATUS=not_defined".format(
+                row_ip(row), template["id"], source))
+            failed = True
+            continue
+        validate_capability_commands(commands)
+        session = run_device_commands(
+            cfg, row, commands, template=template, values={"capability_probe": True})
+        capability_output = sanitized_capability_output(session["output"])
+        checks = snmp_handlers.capabilities(template, capability_output)
+        confirmed = bool(checks.get("confirmed"))
+        session_ok = session["complete"] and not session["timeout"]
+        status = "confirmed" if confirmed and session_ok else "attention"
+        print("TARGET={} TEMPLATE={} RESOLUTION={} READ_ONLY=True STATUS={}".format(
+            row_ip(row), template["id"], source, status))
+        print("CAPABILITIES={}".format(json.dumps(checks, sort_keys=True)))
+        print("SESSION rc={} complete={} timeout={} cli_errors={}".format(
+            session["rc"], session["complete"], session["timeout"],
+            len(session["cli_errors"])))
+        if not session["complete"] and session["error"]:
+            print("SESSION_ERROR={}".format(session["error"].splitlines()[-1][:200]))
+        if status != "confirmed":
+            safe_help = capability_output.replace("GrProbeAuth9", "[DUMMY]")
+            print("SAFE_CAPABILITY_HELP_BEGIN")
+            print(safe_help[-12000:].strip())
+            print("SAFE_CAPABILITY_HELP_END")
+        failed = failed or status != "confirmed"
+    print("CAPABILITY_PROBE_OBJECTS_CREATED=False")
+    return 2 if failed else 0
+
+
 def command_plan_or_apply(cfg, templates, args):
     with gr.api_session(cfg, prompt=False) as api:
-        rows = select_rows(inventory_rows(api), args, require_enabled=True)
+        rows = select_rows(
+            inventory_rows(api), args, require_enabled=not args.include_disabled)
+    if args.include_disabled and (not args.ip or len(rows) != 1):
+        raise gr.GrError(
+            "--include-disabled is restricted to one explicit --ip pilot target")
     failed = False
     for row in rows:
         template, source = resolve_template(templates, row)
@@ -472,6 +662,9 @@ def command_plan_or_apply(cfg, templates, args):
             continue
         print("TARGET={} TEMPLATE={} RESOLUTION={} ACTION={} APPLY_SUPPORTED={}".format(
             row_ip(row), template["id"], source, args.action, bool(template.get("apply_supported"))))
+        print("TEMPLATE_POLICY implicit_privacy={} monitoring_test_required={}".format(
+            template.get("privacy_protocol_implicit") or "none",
+            bool(template.get("require_monitoring_test"))))
         supported_actions = template.get("supported_actions") or (
             ["configure", "rotate", "cleanup"] if template.get("apply_supported") else [])
         if args.action not in supported_actions:
@@ -490,6 +683,11 @@ def command_plan_or_apply(cfg, templates, args):
             continue
         if template.get("workflow") != "transactional-cli-v1":
             print("ERROR=Template has no reviewed transactional workflow; no commands sent")
+            failed = True
+            continue
+        monitoring_required = bool(template.get("require_monitoring_test"))
+        if monitoring_required and not args.monitoring_profile:
+            print("ERROR=Template requires --monitoring-profile for a pre-save remote SNMP test")
             failed = True
             continue
         if args.action == "rotate" and not args.previous_profile:
@@ -540,15 +738,44 @@ def command_plan_or_apply(cfg, templates, args):
             template=template, values=values)
         terms_ok, normalized_checks = snmp_handlers.verify(
             template, verification["output"], values, args.action)
-        structurally_ok = (session["complete"] and not session["timeout"] and
-                           not session["cli_errors"] and verification["complete"] and
-                           not verification["timeout"] and not verification["cli_errors"] and
-                           terms_ok)
+        cli_verification_ok = (session["complete"] and not session["timeout"] and
+                               not session["cli_errors"] and verification["complete"] and
+                               not verification["timeout"] and not verification["cli_errors"])
+        structurally_ok = cli_verification_ok and terms_ok
+        privacy_probe = (cli_verification_ok and args.action != "cleanup" and
+                         implicit_privacy_probe_candidate(template, normalized_checks))
+        probe_allowed = structurally_ok or privacy_probe
         print("CLI_APPLY_COMPLETE={} CLI_ERRORS={} STRUCTURAL_VERIFY={}".format(
             session["complete"], len(session["cli_errors"]), structurally_ok))
+        print("CLI_SAFE_DIAGNOSTICS={}".format(json.dumps(
+            safe_apply_diagnostics(session["output"], values))))
         print("NORMALIZED_CHECKS={}".format(json.dumps(normalized_checks, sort_keys=True)))
-        test_rc, test_error = snmpget(row_ip(row), credentials, args.timeout) if structurally_ok else (1, "CLI verification failed")
-        if structurally_ok and test_rc == 0:
+        print("FUNCTIONAL_PRIVACY_PROBE={}".format(privacy_probe and not structurally_ok))
+        test_rc, test_error = snmpget(
+            row_ip(row), credentials, args.timeout) if probe_allowed else (
+                1, "CLI verification failed")
+        print("SHADOW_SNMP_TEST={}".format("success" if test_rc == 0 else "failed"))
+        if privacy_probe and test_rc != 0:
+            auth_only_credentials = dict(credentials, security_level="authNoPriv")
+            auth_only_rc, _auth_only_error = snmpget(
+                row_ip(row), auth_only_credentials, args.timeout)
+            print("DIAGNOSTIC_AUTHNOPRIV_TEST={}".format(
+                "success" if auth_only_rc == 0 else "failed"))
+        monitoring_rc, monitoring_error = (0, "")
+        if probe_allowed and test_rc == 0 and args.monitoring_profile:
+            try:
+                monitoring_rc, monitoring_error = remote_snmpget(
+                    cfg, args.monitoring_profile, row_ip(row), credentials, args.timeout)
+            except gr.GrError as exc:
+                monitoring_rc, monitoring_error = 1, str(exc)
+            print("MONITORING_SNMP_TEST={}".format(
+                "success" if monitoring_rc == 0 else "failed"))
+        elif monitoring_required:
+            monitoring_rc, monitoring_error = 1, "Skipped because an earlier validation failed"
+            print("MONITORING_SNMP_TEST=failed")
+        effective_structure_ok = structurally_ok or (
+            privacy_probe and test_rc == 0 and monitoring_rc == 0)
+        if effective_structure_ok and test_rc == 0 and monitoring_rc == 0:
             saved = run_device_commands(
                 cfg, row, render_commands(template, "save", values, redact=False),
                 template=template, values=values)
@@ -570,6 +797,9 @@ def command_plan_or_apply(cfg, templates, args):
                 "success" if rollback_ok else "failed", "failed" if test_rc else "success"))
             if test_error:
                 print("SNMP_ERROR={}".format(test_error.splitlines()[-1][:200]))
+            if monitoring_error:
+                print("MONITORING_SNMP_ERROR={}".format(
+                    monitoring_error.splitlines()[-1][:200]))
             failed = True
     if not args.apply:
         print("DRY_RUN=True Re-run with --apply only after reviewing the selected templates and commands.")
@@ -927,14 +1157,23 @@ def build_parser():
     parser.add_argument("--config")
     sub = parser.add_subparsers(dest="action", required=True)
     templates = sub.add_parser("templates"); templates.add_argument("--target")
+    capabilities = sub.add_parser(
+        "capabilities", help="read-only contextual-help probe for candidate handlers")
+    add_selectors(capabilities)
     for action in ("configure", "rotate", "cleanup"):
         command = sub.add_parser(action); add_selectors(command)
         command.add_argument("--apply", action="store_true")
+        command.add_argument(
+            "--include-disabled", action="store_true",
+            help="pilot one explicit --ip before SNMP intent is enabled in phpIPAM")
         command.add_argument("--profile"); command.add_argument("--username")
         command.add_argument("--prompt-credentials", action="store_true")
         command.add_argument("--previous-profile",
                              help="vault-backed old profile required for recoverable rotation")
         command.add_argument("--timeout", type=int, default=5)
+        command.add_argument(
+            "--monitoring-profile",
+            help="SSH execution host used for the pre-save remote SNMP test")
         command.add_argument("--source", action="append")
         command.add_argument("--group")
         command.add_argument("--view")
@@ -982,6 +1221,8 @@ def main(argv=None):
     _path, templates = load_templates(cfg)
     if args.action == "templates":
         return command_templates(cfg, templates, args)
+    if args.action == "capabilities":
+        return command_capabilities(cfg, templates, args)
     if args.action in ("configure", "rotate", "cleanup"):
         return command_plan_or_apply(cfg, templates, args)
     if args.action == "test":
