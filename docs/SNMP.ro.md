@@ -91,11 +91,15 @@ conține `v3`, iar verificarea folosește `show snmp-server ...` și
 cu parole neîncadrate în ghilimele și fără spații. Vezi
 [referința Cisco Business 350](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbms/CBS_250_350/CLI/cbs-350-cli-/snmp-commands.html)
 și [referința Cisco 220](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbss/CBS220/CLI-Guide/b_220CLI/snmp_commands.html).
-SG350X/SG350XG cu firmware 2.5.0.83 și SG350X-24PD cu firmware 2.3.0.130 sunt
+SG350X/SG350XG cu firmware 2.5.0.83, SG350X-24PD cu firmware 2.3.0.130 și
+SG350X-48MP cu firmware 2.4.0.91 sunt
 reprezentate de template-uri SHA/DES restrânse. Handlerele sunt activate
-tranzacțional după ce sw64/sw65/sw67, respectiv sw66/sw68/sw69, au trecut
+tranzacțional după ce sw64/sw65/sw67, sw66/sw68/sw69, respectiv sw51, au trecut
 probele authPriv din shadow și LibreNMS, save-ul condiționat, arhivarea finală
-și poll-ul LibreNMS. Restul combinațiilor Cisco Business 2.x rămân
+și poll-ul LibreNMS. Template-ul sw51 trimite confirmările engine ID cu newline
+și așteaptă două secunde înainte de verificarea structurală, reproducând ritmul
+pilotului manual reușit și permițând stabilizarea bazei userilor SNMPv3. Restul
+combinațiilor Cisco Business 2.x rămân
 blocate deoarece dialectul privacy nu poate fi dedus numai din familie.
 Help-ul contextual care acceptă o parolă privacy implicită este raportat drept
 `implicit-unverified`; nu este considerat dovadă AES, deoarece același format
@@ -137,7 +141,7 @@ Catalogul inițial include concluziile piloților:
 | Cisco SG/SF 250/350 firmware 2.x | handler blocat, report/test | SG350XG-2F10 2.5.0.83 a acceptat comanda documentată, dar a creat `Privacy Method: None`; atât cheia de 32 hex, cât și passphrase-ul alfanumeric de 16 caractere au eșuat pragul AES128 local și au fost retrase fără save, înaintea testului din LibreNMS |
 | Cisco SG350X/SG350XG 2.5.0.83 | configure/rotate tranzacțional SHA/DES | sw64, sw65 și sw67 au trecut ambele probe authPriv; sw65/sw67 au validat și save-ul cu prompt, arhiva finală și poll-ul LibreNMS |
 | Cisco SG350X-24PD 2.3.0.130 | configure/rotate tranzacțional SHA/DES | sw66, sw68 și sw69 au trecut ambele probe authPriv, save-ul cu prompt, arhiva finală și poll-ul LibreNMS |
-| Cisco SG350X-48MP 2.4.0.91 | handler exact blocat, report/test | sw51 nu a creat userul SHA/DES cu sintaxa verificată; rollback-ul a reușit și nu s-a salvat nimic |
+| Cisco SG350X-48MP 2.4.0.91 | configure/rotate tranzacțional SHA/DES | sw51 a trecut verificarea structurală SHA/DES, ambele probe authPriv, save-ul condiționat, arhivarea, asocierea phpIPAM și poll-ul LibreNMS |
 | Cisco SG/SF 220 firmware 1.1.3.1 | handler distinct blocat, report/test | sw15 a creat DES în loc de AES; rollback-ul și verificarea stării curate au reușit fără save |
 | Restul Cisco Business | report/test | nu există încă handler validat pe model/firmware |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | inițializare adaptivă, SHA/AES și v3-only validate |

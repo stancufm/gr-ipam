@@ -128,10 +128,14 @@ the `v3` token from the user command and uses `show snmp-server ...` plus
 candidate handlers with unquoted, whitespace-free password encoding. See the
 [Cisco Business 350 SNMP command reference](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbms/CBS_250_350/CLI/cbs-350-cli-/snmp-commands.html)
 and [Cisco 220 SNMP command reference](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbss/CBS220/CLI-Guide/b_220CLI/snmp_commands.html).
-SG350X/SG350XG firmware 2.5.0.83 and SG350X-24PD firmware 2.3.0.130 are
+SG350X/SG350XG firmware 2.5.0.83, SG350X-24PD firmware 2.3.0.130 and
+SG350X-48MP firmware 2.4.0.91 are
 represented by narrower SHA/DES templates. The handlers are transactionally
-enabled after sw64/sw65/sw67 and sw66/sw68/sw69 respectively passed local and
-LibreNMS authPriv probes, conditional save, final archive and LibreNMS poll.
+enabled after sw64/sw65/sw67, sw66/sw68/sw69 and sw51 respectively passed local
+and LibreNMS authPriv probes, conditional save, final archive and LibreNMS poll.
+The sw51 template submits engine-ID confirmations with a newline and waits two
+seconds before structural verification, matching the pacing of the successful
+manual pilot and allowing the SNMPv3 user database to settle.
 Other Cisco Business 2.x combinations remain blocked because their privacy
 dialect cannot be inferred from the product family alone.
 Contextual help that accepts an implicit privacy password is reported as
@@ -173,7 +177,7 @@ The initial catalog incorporates the pilot evidence:
 | Cisco SG/SF 250/350 firmware 2.x | blocked handler, report/test | SG350XG-2F10 2.5.0.83 accepted the documented command but created `Privacy Method: None`; 32-hex and 16-character alphanumeric privacy inputs both failed the local AES128 gate and rolled back without save, before the monitoring test |
 | Cisco SG350X/SG350XG 2.5.0.83 | transactional SHA/DES configure/rotate | sw64, sw65 and sw67 passed both authPriv probes; sw65/sw67 also validated prompted save, final archive and LibreNMS poll |
 | Cisco SG350X-24PD 2.3.0.130 | transactional SHA/DES configure/rotate | sw66, sw68 and sw69 passed both authPriv probes, prompted save, final archive and LibreNMS poll |
-| Cisco SG350X-48MP 2.4.0.91 | exact blocked handler, report/test | sw51 did not create the SHA/DES user with the reviewed command; rollback succeeded and nothing was saved |
+| Cisco SG350X-48MP 2.4.0.91 | transactional SHA/DES configure/rotate | sw51 passed structural SHA/DES verification, both authPriv probes, conditional save, archive, phpIPAM association and LibreNMS poll |
 | Cisco SG/SF 220 firmware 1.1.3.1 | distinct blocked handler, report/test | sw15 created DES rather than the required AES; rollback and clean-state verification succeeded without save |
 | Other Cisco Business | report/test | no reviewed model/firmware-specific handler |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | adaptive initialization, SHA/AES and v3-only validated |
