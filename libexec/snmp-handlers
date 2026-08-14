@@ -326,7 +326,7 @@ def _capabilities_cbs_2x(output):
     }
     checks["confirmed"] = all(checks.values())
     checks["syntax_family"] = "cisco-business-2x"
-    checks["privacy_algorithm"] = "AES128-implicit" if checks["privacy_password"] else "unknown"
+    checks["privacy_algorithm"] = "implicit-unverified" if checks["privacy_password"] else "unknown"
     return checks
 
 
@@ -342,7 +342,7 @@ def _capabilities_cbs_220(output):
     }
     checks["confirmed"] = all(checks.values())
     checks["syntax_family"] = "cisco-business-220-1.1"
-    checks["privacy_algorithm"] = "AES128-implicit" if checks["privacy_password"] else "unknown"
+    checks["privacy_algorithm"] = "implicit-unverified" if checks["privacy_password"] else "unknown"
     return checks
 
 

@@ -97,6 +97,12 @@ class ConfigShowTests(unittest.TestCase):
         smb_login = GR.CiscoSmallBusinessLogin("cisco", "secret")
         smb_login.state = "ready"
         self.assertEqual(smb_login.feed(b"--More--"), [("credential", b" ")])
+        smb_login.state = "prompt"
+        self.assertEqual(
+            smb_login.feed(
+                b"Do you want to change the password now (Y/N)[N] \x1b[30;120R?"),
+            [("credential", b"n\n")])
+        self.assertEqual(smb_login.state, "prompt")
         self.assertTrue(planet["interactive_cli"])
         self.assertEqual(planet["version_commands"], ("enable", "show version"))
         self.assertIs(GR.device_login_driver("planet-sgs"), GR.PlanetSgsLogin)

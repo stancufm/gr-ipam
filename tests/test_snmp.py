@@ -87,7 +87,7 @@ class SnmpManagerTests(unittest.TestCase):
 
     def test_cisco_business_2x_selects_family_candidate(self):
         template, _source = SNMP.resolve_template(
-            self.templates, row("cisco-small-business", "SG350X-48MP", version="2.4.0.91"))
+            self.templates, row("cisco-small-business", "SG350-28P", version="2.4.0.94"))
         self.assertEqual(template["id"], "cisco-business-sx2xx-sx3xx-2x-v3")
         self.assertEqual(template["handler"], "cisco-business-2x")
         self.assertFalse(template["apply_supported"])
@@ -103,12 +103,64 @@ class SnmpManagerTests(unittest.TestCase):
             self.assertTrue(template["apply_supported"])
             self.assertEqual(template["pilot_status"], "transactionally-validated")
 
+    def test_sg350x_24091_selects_blocked_exact_template(self):
+        template, _source = SNMP.resolve_template(
+            self.templates,
+            row("cisco-small-business", "SG350X-48MP", version="2.4.0.91"))
+        self.assertEqual(template["id"], "cisco-business-sg350x-2.4.0.91-des-v3")
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertFalse(template["apply_supported"])
+        self.assertEqual(template["pilot_status"], "blocked-user-syntax-unconfirmed")
+        self.assertTrue(template["preserve_preexisting_engine"])
+
+    def test_sg350x_230130_selects_narrow_des_pilot(self):
+        template, _source = SNMP.resolve_template(
+            self.templates,
+            row("cisco-small-business", "SG350X-24PD", version="2.3.0.130"))
+        self.assertEqual(template["id"], "cisco-business-sg350x-2.3.0.130-des-v3")
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertTrue(template["apply_supported"])
+        self.assertEqual(template["pilot_status"], "transactionally-validated")
+
     def test_cisco_business_220_selects_distinct_candidate(self):
         template, _source = SNMP.resolve_template(
             self.templates, row("cisco-small-business", "SG220-50P", version="1.1.3.1"))
-        self.assertEqual(template["id"], "cisco-business-sg-sf220-1.1-v3")
+        self.assertEqual(template["id"], "cisco-business-sg-sf220-1.1.3-aes-v3")
         self.assertEqual(template["handler"], "cisco-business-220")
         self.assertFalse(template["apply_supported"])
+        self.assertEqual(template["pilot_status"], "blocked-privacy-des")
+
+    def test_cisco_business_220_other_firmware_remains_blocked(self):
+        template, _source = SNMP.resolve_template(
+            self.templates, row("cisco-small-business", "SG220-50P", version="1.1.2.0"))
+        self.assertEqual(template["id"], "cisco-business-sg-sf220-1.1-v3")
+        self.assertFalse(template["apply_supported"])
+
+    def test_cbs_220_pilot_uses_user_syntax_without_v3_or_aes_token(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sg-sf220-1.1.3-aes-v3")
+        command = next(item for item in template["configure_commands"]
+                       if item.startswith("snmp-server user "))
+        self.assertIn(" auth sha {auth_cli} priv {privacy_cli}", command)
+        self.assertNotIn(" v3 auth ", command)
+        self.assertNotIn(" priv aes ", command)
+        self.assertTrue(template["preserve_preexisting_engine"])
+        self.assertTrue(template["preserve_preexisting_server"])
+
+    def test_preexisting_cbs_server_and_engine_are_not_owned_by_rollback(self):
+        template = {"preserve_preexisting_engine": True,
+                    "preserve_preexisting_server": True}
+        commands = ["configure terminal", "snmp-server engineid default",
+                    "snmp-server", "end"]
+        rollback = ["configure terminal", "no snmp-server",
+                    "no snmp-server engineid", "end"]
+        output = "SNMP agent is enabled\nLocal SNMP engineID: 800000090300001122334455\n"
+        actual, undo = SNMP.preserve_preexisting_snmp_state(
+            template, output, commands, rollback)
+        self.assertNotIn("snmp-server engineid default", actual)
+        self.assertNotIn("snmp-server", actual)
+        self.assertNotIn("no snmp-server engineid", undo)
+        self.assertNotIn("no snmp-server", undo)
 
     def test_unknown_cisco_business_remains_report_only(self):
         template, _source = SNMP.resolve_template(
@@ -411,9 +463,9 @@ Authentication Method : SHA
     def test_capability_probe_accepts_only_incomplete_snmp_commands(self):
         SNMP.validate_capability_commands([
             "terminal datadump", "configure terminal",
-            "snmp-server user GRcapProbe GR_CAP_GROUP v3 auth sha ?\x03", "end"])
+            "snmp-server user GRcapProbe GR_CAP_GROUP v3 auth sha ?", "end"])
 
-    def test_cbs_2x_capability_normalizer_confirms_implicit_aes(self):
+    def test_cbs_2x_capability_normalizer_does_not_guess_implicit_algorithm(self):
         template = next(item for item in self.templates
                         if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
         output = """default -- Create default engine ID
@@ -424,7 +476,7 @@ WORD<1-32> Specify the privacy password
 """
         checks = SNMP.snmp_handlers.capabilities(template, output)
         self.assertTrue(checks["confirmed"])
-        self.assertEqual(checks["privacy_algorithm"], "AES128-implicit")
+        self.assertEqual(checks["privacy_algorithm"], "implicit-unverified")
 
     def test_cbs_220_capability_normalizer_matches_live_help(self):
         template = next(item for item in self.templates
@@ -676,9 +728,23 @@ rule 30 permit source 192.0.2.3 0
     def test_applied_change_requires_successful_configuration_backup(self):
         completed = types.SimpleNamespace(returncode=2, stdout="", stderr="collector failed")
         with mock.patch.object(SNMP.os.path, "isfile", return_value=True), \
-                mock.patch.object(SNMP.subprocess, "run", return_value=completed):
+                mock.patch.object(SNMP.subprocess, "run", return_value=completed), \
+                mock.patch.object(SNMP.time, "sleep"):
             with self.assertRaises(SNMP.gr.GrError):
                 SNMP.backup_configuration("192.0.2.10")
+
+    def test_configuration_backup_retries_transient_collection_failure(self):
+        failed = types.SimpleNamespace(returncode=2, stdout="RESULT test failed\n", stderr="")
+        passed = types.SimpleNamespace(
+            returncode=0,
+            stdout='SUMMARY={"success": 1}\nARCHIVE=/archive\nCOMMIT=unchanged\n',
+            stderr="")
+        with mock.patch.object(SNMP.os.path, "isfile", return_value=True), \
+                mock.patch.object(SNMP.subprocess, "run", side_effect=[failed, passed]) as run, \
+                mock.patch.object(SNMP.time, "sleep") as sleep:
+            SNMP.backup_configuration("192.0.2.10")
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
 
     def test_monitor_poll_is_explicit_and_applied(self):
         args = SNMP.build_parser().parse_args([

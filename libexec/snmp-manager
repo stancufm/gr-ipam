@@ -15,6 +15,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -285,6 +286,29 @@ def render_commands(template, action, values, redact=True):
     return commands
 
 
+def preserve_preexisting_snmp_state(template, preflight_output, commands, rollback_commands):
+    """Avoid claiming ownership of a pre-existing global server or engine ID."""
+    commands = list(commands)
+    rollback_commands = list(rollback_commands)
+    if template.get("preserve_preexisting_engine"):
+        engine_present = bool(re.search(
+            r"(?im)(?:local\s+snmp(?:v3)?\s+engine\s*id|local\s+snmp\s+engineid).*?[0-9a-f]{10,}",
+            preflight_output or ""))
+        if engine_present:
+            commands = [item for item in commands if not re.match(
+                r"(?i)^\s*snmp-server\s+engineid\s+(?:local\s+)?default\s*$", item)]
+            rollback_commands = [item for item in rollback_commands if not re.match(
+                r"(?i)^\s*no\s+snmp-server\s+engineid(?:\s+local)?\s*$", item)]
+    if template.get("preserve_preexisting_server"):
+        server_enabled = bool(re.search(
+            r"(?im)^\s*SNMP(?:\s+agent)?\s+is\s+enabled\b", preflight_output or ""))
+        if server_enabled:
+            commands = [item for item in commands if item.strip().lower() != "snmp-server"]
+            rollback_commands = [item for item in rollback_commands
+                                 if item.strip().lower() != "no snmp-server"]
+    return commands, rollback_commands
+
+
 def snmpget(ip, credentials, timeout=5):
     # Net-SNMP normally exposes -A/-X passphrases in the process list.  A
     # private, short-lived snmp.conf keeps credentials out of argv and reports.
@@ -506,16 +530,25 @@ def report_path(cfg, name):
     return os.path.join(root, "{}-{}".format(stamp, name))
 
 
-def backup_configuration(ip):
+def backup_configuration(ip, attempts=3):
     if not os.path.isfile(COLLECT_CONFIG_PATH):
         raise gr.GrError("Missing configuration backup helper: {}".format(COLLECT_CONFIG_PATH))
-    result = subprocess.run([sys.executable, COLLECT_CONFIG_PATH, "--ip", ip,
-                             "--workers", "1"], stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, universal_newlines=True)
+    result = None
+    for attempt in range(1, max(1, int(attempts)) + 1):
+        result = subprocess.run([sys.executable, COLLECT_CONFIG_PATH, "--ip", ip,
+                                 "--workers", "1"], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, universal_newlines=True)
+        if result.returncode == 0:
+            break
+        if attempt < max(1, int(attempts)):
+            print("BACKUP_RETRY={} target={}".format(attempt, ip))
+            time.sleep(2)
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip().splitlines()
-        raise gr.GrError("Pre-change backup failed for {}: {}".format(
-            ip, detail[-1][:240] if detail else "collector exit {}".format(result.returncode)))
+        lines = (result.stderr or result.stdout).strip().splitlines()
+        preferred = [line for line in lines if line.startswith(("RESULT ", "Archive failed:"))]
+        detail = preferred[-1] if preferred else (
+            lines[-1] if lines else "collector exit {}".format(result.returncode))
+        raise gr.GrError("Pre-change backup failed for {}: {}".format(ip, detail[:240]))
     summary = [line for line in result.stdout.splitlines()
                if line.startswith(("SUMMARY=", "ARCHIVE=", "COMMIT="))]
     print("BACKUP_STATUS=success {}".format(" ".join(summary)))
@@ -563,7 +596,7 @@ def validate_capability_commands(commands):
         normalized = probe_command.strip().lower()
         if normalized in navigation or normalized.startswith("show "):
             continue
-        if (command.endswith("\x03") and normalized.startswith("snmp-server ") and
+        if (normalized.startswith("snmp-server ") and
                 normalized.endswith("?")):
             continue
         raise gr.GrError(
@@ -721,6 +754,9 @@ def command_plan_or_apply(cfg, templates, args):
             continue
         actual_commands = render_commands(template, args.action, values, redact=False)
         rollback_commands = render_commands(template, args.action + "_rollback", values, redact=False)
+        if args.action == "configure":
+            actual_commands, rollback_commands = preserve_preexisting_snmp_state(
+                template, preflight["output"], actual_commands, rollback_commands)
         if args.action == "cleanup":
             inspection = run_device_commands(
                 cfg, row, render_commands(template, "inspect", values, redact=False),
