@@ -39,6 +39,33 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["id"], "cisco-ios-v3")
         self.assertEqual(source, "ip-override")
 
+    def test_environment_template_override_precedes_persistent_config(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            stale_path = os.path.join(temporary, "stale-templates.json")
+            with open(stale_path, "w", encoding="utf-8") as handle:
+                json.dump({"schema_version": 1, "catalog_version": 999,
+                           "templates": [{"id": "stale-only", "match": {}}]}, handle)
+            source, templates = SNMP.load_templates({"snmp_template_file": stale_path})
+            self.assertEqual(os.path.abspath(source),
+                             os.path.abspath(os.environ["GR_SNMP_TEMPLATES"]))
+            self.assertIn("cisco-business-sx2xx-sx3xx-2x-v3",
+                          {item["id"] for item in templates})
+            self.assertNotIn("stale-only", {item["id"] for item in templates})
+
+    def test_implicit_privacy_probe_requires_all_non_privacy_checks(self):
+        template = {"privacy_protocol_implicit": "AES128", "verify_server_enabled": True}
+        checks = {"engine": True, "view": True, "group": True, "user": True,
+                  "auth_sha": True, "privacy_aes128": False,
+                  "privacy_explicit_non_aes": True, "server_enabled": True}
+        self.assertTrue(SNMP.implicit_privacy_probe_candidate(template, checks))
+        checks["auth_sha"] = False
+        self.assertFalse(SNMP.implicit_privacy_probe_candidate(template, checks))
+
+    def test_implicit_privacy_probe_requires_explicit_template_policy(self):
+        checks = {"engine": True, "view": True, "group": True, "user": True,
+                  "auth_sha": True}
+        self.assertFalse(SNMP.implicit_privacy_probe_candidate({}, checks))
+
     def test_template_resolution_uses_driver_and_model(self):
         template, source = SNMP.resolve_template(self.templates, row())
         self.assertEqual(template["id"], "cisco-ios-v3")
@@ -58,9 +85,25 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["id"], "planet-sgs-6310-2.2-v3")
         self.assertTrue(template["apply_supported"])
 
-    def test_unreviewed_cbs_firmware_remains_report_only(self):
+    def test_cisco_business_2x_selects_family_candidate(self):
         template, _source = SNMP.resolve_template(
             self.templates, row("cisco-small-business", "SG350X-48MP", version="2.5.0.83"))
+        self.assertEqual(template["id"], "cisco-business-sx2xx-sx3xx-2x-v3")
+        self.assertEqual(template["handler"], "cisco-business-2x")
+        self.assertFalse(template["apply_supported"])
+        self.assertEqual(template["pilot_status"], "blocked-privacy-none")
+        self.assertEqual(template["pilot_evidence"]["os_version"], "2.5.0.83")
+
+    def test_cisco_business_220_selects_distinct_candidate(self):
+        template, _source = SNMP.resolve_template(
+            self.templates, row("cisco-small-business", "SG220-50P", version="1.1.3.1"))
+        self.assertEqual(template["id"], "cisco-business-sg-sf220-1.1-v3")
+        self.assertEqual(template["handler"], "cisco-business-220")
+        self.assertFalse(template["apply_supported"])
+
+    def test_unknown_cisco_business_remains_report_only(self):
+        template, _source = SNMP.resolve_template(
+            self.templates, row("cisco-small-business", "Unknown", version=""))
         self.assertEqual(template["id"], "cisco-business-report-only")
         self.assertFalse(template["apply_supported"])
 
@@ -122,6 +165,201 @@ monitoringUser ver3 ManagerPriv
         session = driver("operator", "ssh-password")
         self.assertEqual(session.feed(b"Do you wish to continue ? (Y/N)[N]"),
                          [("credential", b"y")])
+
+    def test_cbs_capability_handler_clears_retained_help_line(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        driver = SNMP.snmp_handlers.login_driver(
+            SNMP.gr, template,
+            {"driver": "cisco-small-business", "values": {"capability_probe": True}})
+        self.assertTrue(driver.GR_RAW_PTY)
+        session = driver("operator", "ssh-password")
+        session.state = "ready"
+        self.assertEqual(
+            session.feed(b"read  Specify a read view\r\nSw(config)#snmp-server group X v3 priv \x03"),
+            [("credential", b"\x03")])
+
+    def test_cbs_handler_declines_expired_ssh_password_change(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        driver = SNMP.snmp_handlers.login_driver(
+            SNMP.gr, template, {"driver": "cisco-small-business", "values": {}})
+        session = driver("operator", "ssh-password")
+        session.state = "prompt"
+        self.assertEqual(driver.GR_PTY_COLUMNS, 512)
+        self.assertEqual(
+            session.feed(b"Do you want to change it now (Y/N)[N] \x1b[30;120R?"),
+            [("credential", b"n\n")])
+
+    def test_capability_output_removes_terminal_cursor_controls(self):
+        output = "before\x1b[30;120Rafter\rnext\x03"
+        self.assertEqual(SNMP.sanitized_capability_output(output), "beforeafter\nnext")
+
+    def test_safe_apply_diagnostics_redacts_both_snmp_secrets(self):
+        output = ("Sw(config)#$ user monitor group v3 auth sha AuthSecret9 "
+                  "priv PrivSec\n"
+                  "Sw(config)#$ret9\n"
+                  "Warning: privacy password failed complexity")
+        lines = SNMP.safe_apply_diagnostics(
+            output, {"auth_password": "AuthSecret9", "privacy_password": "PrivSecret9"})
+        rendered = "\n".join(lines)
+        self.assertNotIn("AuthSecret9", rendered)
+        self.assertNotIn("PrivSecret9", rendered)
+        self.assertNotIn("PrivSec", rendered)
+        self.assertNotIn("ret9", rendered)
+        self.assertIn("failed complexity", rendered)
+
+    def test_cbs_2x_handler_does_not_quote_cli_secrets(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        prepared = SNMP.snmp_handlers.prepare(
+            template, row("cisco-small-business", "SG350X-48MP", version="2.5.0.83"),
+            {"auth_password": "AuthSecret9", "privacy_password": "PrivSecret9"},
+            applying=True)
+        self.assertEqual(prepared["auth_cli"], "AuthSecret9")
+        self.assertEqual(prepared["privacy_cli"], "PrivSecret9")
+
+    def test_cbs_authpriv_verifier_requires_reported_sha_and_aes128(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """SNMP is enabled
+Local SNMP engineID is 800000090300001122334455
+SNMP_DEFAULT_VIEW iso included
+SNMP_DEFAULT_GROUP V3 priv
+User name : monitor
+Authentication Method : SHA
+Privacy Method : AES-128
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertTrue(ok)
+        self.assertTrue(checks["privacy_aes128"])
+
+    def test_cbs_authpriv_verifier_accepts_template_declared_implicit_aes128(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """SNMP is enabled
+Local SNMP engineID is 800000090300001122334455
+SNMP_DEFAULT_VIEW iso included
+SNMP_DEFAULT_GROUP V3 priv
+User name : monitor
+Authentication Method : SHA
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertTrue(ok)
+        self.assertTrue(checks["privacy_aes128"])
+
+    def test_cbs_server_verifier_accepts_agent_word_and_punctuation(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """SNMP agent is enabled.
+Local SNMP engineID is 800000090300001122334455
+SNMP_DEFAULT_VIEW iso included
+SNMP_DEFAULT_GROUP V3 priv
+User name : monitor
+Authentication Method : SHA
+Privacy Method : AES-128
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertTrue(ok)
+        self.assertTrue(checks["server_enabled"])
+        self.assertFalse(checks["server_disabled_explicit"])
+
+    def test_cbs_authpriv_verifier_rejects_explicit_des(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """SNMP is enabled
+Local SNMP engineID is 800000090300001122334455
+SNMP_DEFAULT_VIEW iso included
+SNMP_DEFAULT_GROUP V3 priv
+User name : monitor
+Authentication Method : SHA
+Privacy Method : DES
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertFalse(ok)
+        self.assertFalse(checks["privacy_aes128"])
+
+    def test_cbs_authpriv_verifier_scopes_privacy_to_target_user(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """SNMP is enabled
+Local SNMP engineID is 800000090300001122334455
+SNMP_DEFAULT_VIEW iso included
+SNMP_DEFAULT_GROUP V3 priv
+User name : unrelated
+Authentication Method : None
+Privacy Method : None
+User name : monitor
+Authentication Method : SHA
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertTrue(ok)
+        self.assertFalse(checks["privacy_explicit_non_aes"])
+        self.assertTrue(checks["privacy_implicit_policy"])
+
+    def test_auth_no_priv_config_omits_privacy_credentials(self):
+        credentials = {"security_level": "authNoPriv", "username": "monitor",
+                       "auth_protocol": "SHA", "auth_password": "AuthSecret9",
+                       "privacy_protocol": "AES", "privacy_password": "PrivSecret9"}
+        output = SNMP.snmp_config_text(credentials)
+        self.assertIn("defSecurityLevel authNoPriv", output)
+        self.assertNotIn("defPrivType", output)
+        self.assertNotIn("PrivSecret9", output)
+
+    def test_cbs_2x_rollback_removes_view_without_create_qualifiers(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        self.assertIn("no snmp-server view {view}",
+                      template["configure_rollback_commands"])
+        self.assertNotIn("no snmp-server view {view} iso included",
+                         template["configure_rollback_commands"])
+
+    def test_capability_probe_rejects_mutating_template_command(self):
+        with self.assertRaises(SNMP.gr.GrError):
+            SNMP.validate_capability_commands([
+                "configure terminal", "snmp-server engineID local default", "end"])
+
+    def test_capability_probe_accepts_only_incomplete_snmp_commands(self):
+        SNMP.validate_capability_commands([
+            "terminal datadump", "configure terminal",
+            "snmp-server user GRcapProbe GR_CAP_GROUP v3 auth sha ?\x03", "end"])
+
+    def test_cbs_2x_capability_normalizer_confirms_implicit_aes(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        output = """default -- Create default engine ID
+read -- Specify a read view
+sha -- Use HMAC SHA algorithm
+WORD<1-32> Specify the authentication password
+WORD<1-32> Specify the privacy password
+"""
+        checks = SNMP.snmp_handlers.capabilities(template, output)
+        self.assertTrue(checks["confirmed"])
+        self.assertEqual(checks["privacy_algorithm"], "AES128-implicit")
+
+    def test_cbs_220_capability_normalizer_matches_live_help(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sg-sf220-1.1-v3")
+        output = """default local engine ID default octet string (mac address)
+read-view specify a read view for the group
+md5 Use HMAC MD5 algorithm for authentication
+sha Use HMAC SHA algorithm for authentication
+AUTHPASSWD Authentication password for user (length 8~32)
+PRIVPASSWD Privacy password for user (length 8~64)
+"""
+        checks = SNMP.snmp_handlers.capabilities(template, output)
+        self.assertTrue(checks["confirmed"])
+        self.assertEqual(checks["syntax_family"], "cisco-business-220-1.1")
 
     def test_comware_normalizer_checks_process_acl_sources(self):
         template = next(item for item in self.templates if item["id"] == "hpe-comware7-v3")
@@ -186,6 +424,67 @@ rule 30 permit source 192.0.2.3 0
         for mode in ("inventory", "live", "offline", "ports"):
             args = SNMP.build_parser().parse_args(["report", "--ip", "192.0.2.10", "--mode", mode])
             self.assertEqual(args.mode, mode)
+
+    def test_parser_supports_read_only_capability_probe(self):
+        args = SNMP.build_parser().parse_args([
+            "capabilities", "--ip", "192.0.2.10"])
+        self.assertEqual(args.action, "capabilities")
+
+    def test_configure_pilot_options_are_explicit(self):
+        args = SNMP.build_parser().parse_args([
+            "configure", "--ip", "192.0.2.10", "--include-disabled",
+            "--monitoring-profile", "librenms"])
+        self.assertTrue(args.include_disabled)
+        self.assertEqual(args.monitoring_profile, "librenms")
+
+    def test_remote_snmpget_keeps_secrets_out_of_argv(self):
+        monitor = {"ip": "192.0.2.20", "hostname": "monitor",
+                   "custom_ssh_enabled": 1, "custom_ssh_user": "operator",
+                   "custom_ssh_port": "22", "custom_ssh_profile": "linux",
+                   "custom_ssh_client": "normal"}
+
+        class Api:
+            def addresses(self):
+                return [monitor]
+            def request(self, _method, _path, payload=None):
+                return {"data": []}
+
+        class Session:
+            def __enter__(self):
+                return Api()
+            def __exit__(self, *_args):
+                return False
+
+        credentials = {"username": "snmp-user", "auth_protocol": "SHA",
+                       "privacy_protocol": "AES", "auth_password": "auth-secret",
+                       "privacy_password": "priv-secret"}
+
+        class Process:
+            returncode = 0
+            def communicate(self, payload, timeout=None):
+                self.payload = payload
+                self.assert_payload(payload)
+                return b"", b""
+            def assert_payload(self, payload):
+                self_test.assertIn(b"auth-secret", payload)
+                self_test.assertIn(b"priv-secret", payload)
+
+        self_test = self
+        def popen(command, **_kwargs):
+            joined = " ".join(command)
+            self.assertNotIn("auth-secret", joined)
+            self.assertNotIn("priv-secret", joined)
+            self.assertEqual(command[-2:], ["/bin/sh", "-s"])
+            return Process()
+
+        cfg = {"monitoring_profiles": {"librenms": {"host": "192.0.2.20"}}}
+        with mock.patch.object(SNMP.gr, "api_session", return_value=Session()), \
+                mock.patch.object(SNMP.gr, "read_vault_password", return_value="ssh-secret"), \
+                mock.patch.object(SNMP.gr, "ensure_known_hosts", return_value="/tmp/known"), \
+                mock.patch.object(SNMP.subprocess, "Popen", side_effect=popen):
+            self.assertEqual(
+                SNMP.remote_snmpget(cfg, "librenms", "192.0.2.10", credentials),
+                (0, ""))
 
     def test_ports_report_accepts_source_profile(self):
         args = SNMP.build_parser().parse_args([

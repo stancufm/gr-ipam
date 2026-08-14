@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": 3,
+  "catalog_version": 4,
   "templates": [
     {
       "id": "cisco-ios-v3",
@@ -37,11 +37,83 @@
       "rotate_rollback_commands": []
     },
     {
+      "id": "cisco-business-sx2xx-sx3xx-2x-v3",
+      "match": {
+        "driver": "cisco-small-business",
+        "model_regex": "^S[FG](?:250|350)",
+        "os_version_regex": "^2\\."
+      },
+      "handler": "cisco-business-2x",
+      "defaults": {"group": "SNMP_DEFAULT_GROUP", "view": "SNMP_DEFAULT_VIEW"},
+      "privacy_protocol_implicit": "AES128",
+      "verify_server_enabled": true,
+      "apply_supported": false,
+      "require_monitoring_test": true,
+      "supported_actions": ["configure", "rotate", "cleanup"],
+      "reason": "Apply remains disabled: the SG350XG-2F10 2.5.0.83 transactional pilot accepted the documented CLI but created the requested user with Privacy Method None; the local AES128 gate failed before the monitoring test and rollback succeeded.",
+      "pilot_status": "blocked-privacy-none",
+      "pilot_evidence": {
+        "model": "SG350XG-2F10",
+        "os_version": "2.5.0.83",
+        "result": "documented-priv-syntax-accepted-but-privacy-none"
+      },
+      "workflow": "transactional-cli-v1",
+      "capability_commands": [
+        "terminal datadump",
+        "configure terminal",
+        "snmp-server engineID local ?\u0003",
+        "snmp-server group GR_CAP_GROUP v3 priv ?\u0003",
+        "snmp-server user GRcapProbe GR_CAP_GROUP v3 auth ?\u0003",
+        "snmp-server user GRcapProbe GR_CAP_GROUP v3 auth sha ?\u0003",
+        "snmp-server user GRcapProbe GR_CAP_GROUP v3 auth sha GrProbeAuth9 priv ?\u0003",
+        "end"
+      ],
+      "inspect_commands": ["terminal datadump", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],
+      "configure_commands": ["terminal datadump", "configure terminal", "snmp-server engineID local default", "snmp-server view {view} iso included", "snmp-server group {group} v3 priv read {view}", "snmp-server server", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "rotate_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "verify_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views {view}", "show snmp groups {group}", "show snmp users {username}"],
+      "save_commands": ["terminal datadump", "copy running-config startup-config"],
+      "configure_rollback_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "no snmp-server group {group} v3 priv", "no snmp-server view {view}", "no snmp-server server", "no snmp-server engineID local", "end"],
+      "rotate_rollback_commands": []
+    },
+    {
+      "id": "cisco-business-sg-sf220-1.1-v3",
+      "match": {
+        "driver": "cisco-small-business",
+        "model_regex": "^S[FG]220-",
+        "os_version_regex": "^1\\.1\\."
+      },
+      "handler": "cisco-business-220",
+      "defaults": {"group": "SNMP_DEFAULT_GROUP", "view": "SNMP_DEFAULT_VIEW", "write_view": "SNMP_NO_WRITE"},
+      "privacy_protocol_implicit": "AES128",
+      "apply_supported": false,
+      "require_monitoring_test": true,
+      "supported_actions": ["configure", "rotate", "cleanup"],
+      "reason": "The SG/SF220 1.1 CLI omits the v3 keyword from snmp-server user. Apply remains disabled until read-only contextual help and a transactional representative pilot confirm authPriv AES128.",
+      "workflow": "transactional-cli-v1",
+      "capability_commands": [
+        "configure terminal",
+        "snmp-server engineid ?\u0003",
+        "snmp-server group GR_CAP_GROUP v3 priv ?\u0003",
+        "snmp-server user GRcapProbe GR_CAP_GROUP auth ?\u0003",
+        "snmp-server user GRcapProbe GR_CAP_GROUP auth sha ?\u0003",
+        "snmp-server user GRcapProbe GR_CAP_GROUP auth sha GrProbeAuth9 priv ?\u0003",
+        "end"
+      ],
+      "inspect_commands": ["show snmp-server", "show snmp-server engineid", "show snmp-server view", "show snmp-server group", "show snmp-server user", "show snmp-server community"],
+      "configure_commands": ["configure terminal", "snmp-server engineid default", "snmp-server view {view} 1 included", "snmp-server view {write_view} 1 excluded", "snmp-server group {group} v3 priv read-view {view} write-view {write_view}", "snmp-server", "snmp-server user {username} {group} auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "rotate_commands": ["configure terminal", "no snmp-server user {username}", "snmp-server user {username} {group} auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "verify_commands": ["show snmp-server engineid", "show snmp-server view", "show snmp-server group", "show snmp-server user"],
+      "save_commands": ["copy running-config startup-config"],
+      "configure_rollback_commands": ["configure terminal", "no snmp-server user {username}", "no snmp-server group {group} v3 priv", "no snmp-server view {view}", "no snmp-server view {write_view}", "no snmp-server", "no snmp-server engineid", "end"],
+      "rotate_rollback_commands": []
+    },
+    {
       "id": "cisco-business-report-only",
       "match": {"driver": "cisco-small-business"},
       "handler": "cisco-business-3x",
       "apply_supported": false,
-      "reason": "Only CBS250-8T-D 3.1.1.7 completed the reviewed SHA/AES pilot. SG/SF 220/250/350 generations remain report/test-only until model-specific AES syntax is validated.",
+      "reason": "No reviewed model/firmware-specific handler matches this Cisco Business device.",
       "inspect_commands": ["terminal datadump", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"]
     },
     {

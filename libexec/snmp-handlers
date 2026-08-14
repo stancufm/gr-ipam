@@ -62,14 +62,33 @@ def _generic_login(gr, _context):
 
 
 def _cbs_login(gr, _context):
+    capability_probe = bool((_context.get("values") or {}).get("capability_probe"))
+
     class CiscoBusinessConfirmLogin(gr.CiscoSmallBusinessLogin):
+        GR_RAW_PTY = capability_probe
+        GR_PTY_COLUMNS = 512
+        ANSI_RE = re.compile(br"\x1b\[[0-?]*[ -/]*[@-~]")
         CONFIRM_RE = re.compile(br"(?:do|do you wish)\s+to\s+continue\s*\??\s*\(y/n\)\s*\[n\]\s*$", re.I)
+        PASSWORD_CHANGE_RE = re.compile(
+            br"do you want to change (?:it|the password) now\s*\(y/n\)\s*\[n\]\s*\?\s*$",
+            re.I)
+        RETAINED_HELP_RE = re.compile(
+            br"(?:^|[\r\n])[^\r\n]{0,128}[>#]\s*snmp-server[^\r\n]*$", re.I)
 
         def feed(self, data):
-            visible = (self.buffer + data)[-4096:]
-            if self.CONFIRM_RE.search(visible):
+            visible = self.ANSI_RE.sub(b"", (self.buffer + data)[-4096:])
+            prompt_visible = re.sub(br"[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]", b"", visible)
+            if self.PASSWORD_CHANGE_RE.search(prompt_visible):
+                self.buffer = b""
+                return [("credential", b"n\n")]
+            if self.CONFIRM_RE.search(prompt_visible):
                 self.buffer = b""
                 return [("credential", b"y")]
+            if (capability_probe and self.state == "ready" and
+                    not prompt_visible.rstrip().endswith(b"?") and
+                    self.RETAINED_HELP_RE.search(prompt_visible)):
+                self.buffer = b""
+                return [("credential", b"\x03")]
             return super().feed(data)
 
     return CiscoBusinessConfirmLogin
@@ -134,6 +153,17 @@ def _prepare_generic(_row, values, _applying):
 
 def _prepare_quoted(_row, values, _applying):
     return _base_values(_row, values, quoted=True)
+
+
+def _prepare_cbs_unquoted(_row, values, _applying):
+    """Encode Sx2xx/Sx3xx secrets as CLI words, not quoted strings.
+
+    Firmware 2.x and 1.1 parse the SNMP password positions as WORD/LINE
+    parameters.  Quoting was accepted by the 3.x CBS250 pilot, but older
+    firmware may localize the quote characters as part of the key material.
+    Rejecting whitespace is safer than silently producing unusable users.
+    """
+    return _base_values(_row, values, quoted=False)
 
 
 def _prepare_planet(row, values, _applying):
@@ -201,6 +231,90 @@ def _verify_planet(_template, output, values, action):
     return all(checks.values()), checks
 
 
+def _verify_cbs_authpriv(template, output, values, action):
+    if action == "cleanup":
+        return not bool(re.search(r"(?im)^\s*snmp-server\s+community\b", output)), {}
+    user_header = re.compile(
+        r"(?im)^\s*user\s+name\s*:\s*{}\s*$".format(re.escape(values["username"])))
+    user_match = user_header.search(output)
+    user_present = bool(user_match)
+    user_output = output
+    if user_match:
+        next_user = re.search(r"(?im)^\s*user\s+name\s*:", output[user_match.end():])
+        end = user_match.end() + next_user.start() if next_user else len(output)
+        user_output = output[user_match.start():end]
+    auth_sha = bool(re.search(
+        r"(?im)(?:authentication\s+(?:method|protocol)|auth\.?\s*protocol)\s*:?\s*sha\b",
+        user_output))
+    privacy_explicit_aes128 = bool(re.search(
+        r"(?im)(?:privacy\s+method|encryption\s+protocol|privacy\s+protocol)\s*:?\s*"
+        r"(?:cfb-)?aes(?:[- ]?128)?\b", user_output))
+    privacy_explicit_non_aes = bool(re.search(
+        r"(?im)(?:privacy\s+method|encryption\s+protocol|privacy\s+protocol)\s*:?\s*"
+        r"(?:none|no[_ -]?priv(?:acy)?|des)\b", user_output))
+    privacy_implicit_policy = (
+        str(template.get("privacy_protocol_implicit") or "").upper() == "AES128")
+    privacy_aes128 = privacy_explicit_aes128 or (
+        privacy_implicit_policy and user_present and auth_sha and not privacy_explicit_non_aes)
+    engine_present = not bool(re.search(r"local\s+snmp\s+engineid\s+is\s+not\s+configured", output, re.I))
+    engine_present = engine_present and bool(re.search(
+        r"(?im)(?:local\s+snmp(?:v3)?\s+engine\s*id|local\s+snmp\s+engineid).*?[0-9a-f]{10,}",
+        output))
+    checks = {
+        "engine": engine_present,
+        "view": values["view"].lower() in output.lower(),
+        "group": values["group"].lower() in output.lower(),
+        "user": user_present,
+        "auth_sha": auth_sha,
+        "privacy_aes128": privacy_aes128,
+        "privacy_explicit_aes128": privacy_explicit_aes128,
+        "privacy_explicit_non_aes": privacy_explicit_non_aes,
+        "privacy_implicit_policy": privacy_implicit_policy,
+    }
+    required = ["engine", "view", "group", "user", "auth_sha", "privacy_aes128"]
+    if template.get("verify_server_enabled"):
+        checks["server_enabled"] = bool(re.search(
+            r"(?im)^\s*SNMP(?:\s+agent)?\s+is\s+enabled\b", output))
+        checks["server_disabled_explicit"] = bool(re.search(
+            r"(?im)^\s*SNMP(?:\s+agent)?\s+is\s+disabled\b", output))
+        required.append("server_enabled")
+    return all(checks[name] for name in required), checks
+
+
+def _capabilities_cbs_2x(output):
+    checks = {
+        "engine_default": bool(re.search(r"(?im)^\s*default\s+.*engine", output)),
+        "group_v3_priv": bool(re.search(r"(?im)^\s*(?:read|write|notify)\s+", output)),
+        "user_v3": bool(re.search(r"(?im)specif(?:y|ies).*authentication\s+(?:method|password)", output)),
+        "auth_sha": bool(re.search(r"(?im)^\s*sha\s+.*(?:HMAC|Secure Hash|algorithm)", output)),
+        "privacy_password": bool(re.search(r"(?im)(?:privacy|private)\s+password", output)),
+    }
+    checks["confirmed"] = all(checks.values())
+    checks["syntax_family"] = "cisco-business-2x"
+    checks["privacy_algorithm"] = "AES128-implicit" if checks["privacy_password"] else "unknown"
+    return checks
+
+
+def _capabilities_cbs_220(output):
+    checks = {
+        "engine_default": bool(re.search(r"(?im)^\s*default\s+.*engine", output)),
+        "group_v3_priv": bool(re.search(r"(?im)(?:read-view|write-view|packet authentication with encryption)", output)),
+        "user_without_v3": bool(
+            re.search(r"(?im)^\s*md5\s+.*HMAC\s+MD5", output) and
+            re.search(r"(?im)^\s*sha\s+.*HMAC\s+SHA", output)),
+        "auth_sha": bool(re.search(r"(?im)^\s*sha\s+.*(?:HMAC|Secure Hash|algorithm)", output)),
+        "privacy_password": bool(re.search(r"(?im)(?:privacy|private)\s+password", output)),
+    }
+    checks["confirmed"] = all(checks.values())
+    checks["syntax_family"] = "cisco-business-220-1.1"
+    checks["privacy_algorithm"] = "AES128-implicit" if checks["privacy_password"] else "unknown"
+    return checks
+
+
+def _capabilities_unknown(_output):
+    return {"confirmed": False, "syntax_family": "not-reviewed"}
+
+
 def _cleanup_ios(output, _values):
     lines = [line.strip() for line in output.splitlines()
              if re.match(r"^snmp-server\s+community\s+", line.strip(), re.I)]
@@ -234,7 +348,16 @@ HANDLERS = {
                   "verify": _base_verify, "cleanup": _cleanup_ios, "exits": ["exit"]},
     "cisco-business-3x": {"login": _cbs_login, "prepare": _prepare_quoted,
                           "verify": _base_verify, "cleanup": _cleanup_ios,
+                          "capabilities": _capabilities_unknown,
                           "exits": ["exit", "exit"]},
+    "cisco-business-2x": {"login": _cbs_login, "prepare": _prepare_cbs_unquoted,
+                          "verify": _verify_cbs_authpriv, "cleanup": _cleanup_ios,
+                          "capabilities": _capabilities_cbs_2x,
+                          "exits": ["exit", "exit"]},
+    "cisco-business-220": {"login": _cbs_login, "prepare": _prepare_cbs_unquoted,
+                           "verify": _verify_cbs_authpriv, "cleanup": _cleanup_ios,
+                           "capabilities": _capabilities_cbs_220,
+                           "exits": ["exit", "exit"]},
     "arubaos-switch-adaptive": {"login": _aruba_login, "prepare": _prepare_quoted,
                                 "verify": _verify_aruba, "cleanup": _cleanup_aruba,
                                 "exits": ["exit", "exit"]},
@@ -248,6 +371,9 @@ HANDLERS = {
                        "verify": _verify_planet, "cleanup": _cleanup_planet,
                        "exits": ["exit", "exit", "exit"]},
 }
+
+for _handler in HANDLERS.values():
+    _handler.setdefault("capabilities", _capabilities_unknown)
 
 
 def get(template):
@@ -275,3 +401,7 @@ def verify(template, output, values, action):
 
 def exit_commands(template):
     return list(get(template)["exits"])
+
+
+def capabilities(template, output):
+    return get(template)["capabilities"](output)

@@ -68,6 +68,7 @@ gr config set snmp_profiles.monitoring-v3.source_address 192.0.2.20
 
 ```text
 gr snmp templates --target 192.0.2.10
+gr snmp capabilities --ip 192.0.2.10
 gr snmp assign --ip 192.0.2.10 --profile monitoring-v3 --apply
 gr snmp inventory-sync --report ~/.local/state/gr/device-version/REPORT.json
 gr snmp configure --ip 192.0.2.10 --source 192.0.2.20 --source 192.0.2.21 --source 192.0.2.22
@@ -110,13 +111,55 @@ Firmware families with inconsistent AES support or unsafe ACL semantics remain
 report/test-only. A template never infers control-plane, interface or global
 management ACLs.
 
+`gr snmp capabilities` is a read-only gate for candidate handlers. It enters
+configuration mode only to request contextual help from deliberately incomplete
+`snmp-server ... ?` commands. A static safety validator refuses any candidate
+command that could create an object, and the command reports normalized
+capabilities rather than a complete configuration. It does not read SNMP
+credentials. Candidate templates remain `apply_supported: false` until this
+probe and a complete transactional pilot succeed on a representative device.
+
+Cisco Business uses two older CLI dialects that must not be treated as IOS.
+Cisco's 250/350 documentation defines firmware 2.x users as
+`... v3 auth sha AUTH priv PRIV`; the `priv` password selects AES-128 implicitly,
+so the IOS tokens `priv aes 128` are invalid. Cisco's 220 documentation omits
+the `v3` token from the user command and uses `show snmp-server ...` plus
+`snmp-server engineid`. The package therefore contains separate 2.x and 220/1.1
+candidate handlers with unquoted, whitespace-free password encoding. See the
+[Cisco Business 350 SNMP command reference](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbms/CBS_250_350/CLI/cbs-350-cli-/snmp-commands.html)
+and [Cisco 220 SNMP command reference](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbss/CBS220/CLI-Guide/b_220CLI/snmp_commands.html).
+Interactive Cisco Business sessions request a 512-column PTY. This prevents
+firmware line-editor redraws of long SNMP user commands from resembling fresh
+prompts and advancing the transactional command queue prematurely.
+For only these explicitly marked templates, structural verification accepts an
+omitted privacy-algorithm label as AES128 when the user and SHA authentication
+are present; an explicit DES or no-privacy label is rejected. The shadow and
+monitoring-server authPriv tests are still mandatory before save.
+Verification scopes authentication and privacy labels to the requested user's
+output block, so unrelated no-privacy users cannot affect the decision.
+If an explicitly marked implicit-AES template reports an unreliable privacy
+label while engine, view, group, user and SHA are all verified, gr may run the
+AES128 authPriv tests as a functional probe. It saves only when both the local
+and monitoring-server probes succeed; any failure triggers rollback.
+For diagnostics, the 2.x handler also verifies `show snmp` reports the agent as
+enabled. After a failed AES128 probe it may attempt one authNoPriv read to
+distinguish an auth-only user from an unreachable/disabled agent; this result
+never authorizes save.
+Transactional output includes only a bounded `CLI_SAFE_DIAGNOSTICS` list of
+standalone device warnings and errors. Echoed prompt/command lines are always
+discarded because terminal repaint fragments may contain only part of a secret
+and cannot be made safe by full-value replacement. Complete or sensitive
+transcripts are not kept.
+
 The initial catalog incorporates the pilot evidence:
 
 | Family | Handler/action policy | Evidence boundary |
 |---|---|---|
 | Cisco IOS/IOS XE | transactional SHA/AES128, group ACL | consistent CLI, rollback and save verified |
 | Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | six-device rollout and engine confirmation validated; legacy cleanup not exercised |
-| Cisco SG/SF 220/250/350 and other CBS | report/test | several releases created users but did not validate AES |
+| Cisco SG/SF 250/350 firmware 2.x | blocked handler, report/test | SG350XG-2F10 2.5.0.83 accepted the documented command but created `Privacy Method: None`; 32-hex and 16-character alphanumeric privacy inputs both failed the local AES128 gate and rolled back without save, before the monitoring test |
+| Cisco SG/SF 220 firmware 1.1 | distinct candidate handler, report/test | user syntax omits `v3`; contextual-help gate and representative transactional pilot still required |
+| Other Cisco Business | report/test | no reviewed model/firmware-specific handler |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | adaptive initialization, SHA/AES and v3-only validated |
 | HPE Comware 7 | configure/rotate, process ACL | system-view workflow validated on the three pilot devices |
 | Dell OS10 | rotate only, no ACL | user replacement and SNMP proof validated; blank-state group/view creation was not |
@@ -131,6 +174,9 @@ The package catalog is the source for new handler capabilities. Because
 merges it with the packaged catalog. Newer packaged generations replace stale
 generated IDs while retaining site-only IDs; a local catalog at the current
 generation may override package IDs.
+When `GR_SNMP_TEMPLATES` is set explicitly for a temporary validation or
+recovery run, it is authoritative and does not merge the persistent configured
+catalog.
 
 ## Reports and monitoring
 
