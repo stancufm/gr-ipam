@@ -87,12 +87,21 @@ class SnmpManagerTests(unittest.TestCase):
 
     def test_cisco_business_2x_selects_family_candidate(self):
         template, _source = SNMP.resolve_template(
-            self.templates, row("cisco-small-business", "SG350X-48MP", version="2.5.0.83"))
+            self.templates, row("cisco-small-business", "SG350X-48MP", version="2.4.0.91"))
         self.assertEqual(template["id"], "cisco-business-sx2xx-sx3xx-2x-v3")
         self.assertEqual(template["handler"], "cisco-business-2x")
         self.assertFalse(template["apply_supported"])
         self.assertEqual(template["pilot_status"], "blocked-privacy-none")
         self.assertEqual(template["pilot_evidence"]["os_version"], "2.5.0.83")
+
+    def test_cisco_business_250_des_candidate_precedes_generic_family(self):
+        for model in ("SG350XG-2F10", "SG350X-48MP"):
+            template, _source = SNMP.resolve_template(
+                self.templates, row("cisco-small-business", model, version="2.5.0.83"))
+            self.assertEqual(template["id"], "cisco-business-sg350x-2.5.0-des-v3")
+            self.assertEqual(template["privacy_protocol_required"], "DES")
+            self.assertFalse(template["apply_supported"])
+            self.assertEqual(template["pilot_status"], "manual-des-live-validated")
 
     def test_cisco_business_220_selects_distinct_candidate(self):
         template, _source = SNMP.resolve_template(
@@ -178,6 +187,19 @@ monitoringUser ver3 ManagerPriv
         self.assertEqual(
             session.feed(b"read  Specify a read view\r\nSw(config)#snmp-server group X v3 priv \x03"),
             [("credential", b"\x03")])
+
+    def test_cbs_capability_handler_accepts_repainted_inline_prompt(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        driver = SNMP.snmp_handlers.login_driver(
+            SNMP.gr, template,
+            {"driver": "cisco-small-business", "values": {"capability_probe": True}})
+        session = driver("operator", "ssh-password")
+        session.state = "ready"
+        self.assertEqual(
+            session.feed(
+                b"SW-64(config)#snmp-server group GR_CAP_GROUP v3 priv SW-64(config)#"),
+            [("prompt", b"")])
 
     def test_cbs_handler_declines_expired_ssh_password_change(self):
         template = next(item for item in self.templates
@@ -286,6 +308,24 @@ Privacy Method : DES
         ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
         self.assertFalse(ok)
         self.assertFalse(checks["privacy_aes128"])
+
+    def test_cbs_des_candidate_accepts_reported_sha_and_des(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sg350x-2.5.0-des-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """Local SNMP engineID is 800000090300001122334455
+SNMP_DEFAULT_VIEW iso included
+SNMP_DEFAULT_GROUP V3 priv
+User name : monitor
+Authentication Protocol : SHA
+Privacy Protocol : DES
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertTrue(ok)
+        self.assertTrue(checks["privacy_des"])
+        self.assertTrue(checks["privacy_expected"])
+        self.assertEqual(checks["privacy_required"], "DES")
 
     def test_cbs_authpriv_verifier_scopes_privacy_to_target_user(self):
         template = next(item for item in self.templates
