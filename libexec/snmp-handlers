@@ -74,6 +74,8 @@ def _cbs_login(gr, _context):
             re.I)
         RETAINED_HELP_RE = re.compile(
             br"(?:^|[\r\n])[^\r\n]{0,128}[>#]\s*snmp-server[^\r\n]*$", re.I)
+        INLINE_PROMPT_RE = re.compile(
+            br"[a-z0-9_.-]{1,64}(?:\([a-z0-9_.-]+\))?[>#]\s*$", re.I)
 
         def feed(self, data):
             visible = self.ANSI_RE.sub(b"", (self.buffer + data)[-4096:])
@@ -84,6 +86,14 @@ def _cbs_login(gr, _context):
             if self.CONFIRM_RE.search(prompt_visible):
                 self.buffer = b""
                 return [("credential", b"y")]
+            # Firmware 2.x can repaint the fresh prompt on the same physical
+            # line as the aborted contextual-help command.  The base driver
+            # deliberately requires a newline, so recognize only the narrow
+            # hostname/(config) prompt suffix for capability probes.
+            if (capability_probe and self.state == "ready" and
+                    self.INLINE_PROMPT_RE.search(prompt_visible)):
+                self.buffer = b""
+                return [("prompt", b"")]
             if (capability_probe and self.state == "ready" and
                     not prompt_visible.rstrip().endswith(b"?") and
                     self.RETAINED_HELP_RE.search(prompt_visible)):
@@ -249,6 +259,9 @@ def _verify_cbs_authpriv(template, output, values, action):
     privacy_explicit_aes128 = bool(re.search(
         r"(?im)(?:privacy\s+method|encryption\s+protocol|privacy\s+protocol)\s*:?\s*"
         r"(?:cfb-)?aes(?:[- ]?128)?\b", user_output))
+    privacy_explicit_des = bool(re.search(
+        r"(?im)(?:privacy\s+method|encryption\s+protocol|privacy\s+protocol)\s*:?\s*des\b",
+        user_output))
     privacy_explicit_non_aes = bool(re.search(
         r"(?im)(?:privacy\s+method|encryption\s+protocol|privacy\s+protocol)\s*:?\s*"
         r"(?:none|no[_ -]?priv(?:acy)?|des)\b", user_output))
@@ -256,6 +269,8 @@ def _verify_cbs_authpriv(template, output, values, action):
         str(template.get("privacy_protocol_implicit") or "").upper() == "AES128")
     privacy_aes128 = privacy_explicit_aes128 or (
         privacy_implicit_policy and user_present and auth_sha and not privacy_explicit_non_aes)
+    required_privacy = str(template.get("privacy_protocol_required") or "AES128").upper()
+    privacy_expected = privacy_explicit_des if required_privacy == "DES" else privacy_aes128
     engine_present = not bool(re.search(r"local\s+snmp\s+engineid\s+is\s+not\s+configured", output, re.I))
     engine_present = engine_present and bool(re.search(
         r"(?im)(?:local\s+snmp(?:v3)?\s+engine\s*id|local\s+snmp\s+engineid).*?[0-9a-f]{10,}",
@@ -267,11 +282,14 @@ def _verify_cbs_authpriv(template, output, values, action):
         "user": user_present,
         "auth_sha": auth_sha,
         "privacy_aes128": privacy_aes128,
+        "privacy_des": privacy_explicit_des,
+        "privacy_expected": privacy_expected,
+        "privacy_required": required_privacy,
         "privacy_explicit_aes128": privacy_explicit_aes128,
         "privacy_explicit_non_aes": privacy_explicit_non_aes,
         "privacy_implicit_policy": privacy_implicit_policy,
     }
-    required = ["engine", "view", "group", "user", "auth_sha", "privacy_aes128"]
+    required = ["engine", "view", "group", "user", "auth_sha", "privacy_expected"]
     if template.get("verify_server_enabled"):
         checks["server_enabled"] = bool(re.search(
             r"(?im)^\s*SNMP(?:\s+agent)?\s+is\s+enabled\b", output))

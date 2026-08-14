@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": 4,
+  "catalog_version": 5,
   "templates": [
     {
       "id": "cisco-ios-v3",
@@ -35,6 +35,27 @@
       "save_commands": ["copy running-config startup-config"],
       "configure_rollback_commands": ["configure terminal", "no snmp-server user {username} {group} v3", "no snmp-server group {group} v3 priv", "no snmp-server view {view} iso included", "no snmp-server server", "no snmp-server engineID local", "end"],
       "rotate_rollback_commands": []
+    },
+    {
+      "id": "cisco-business-sg350x-2.5.0-des-v3",
+      "match": {
+        "driver": "cisco-small-business",
+        "model_regex": "^SG350X(?:G-2F10|-48MP)$",
+        "os_version_regex": "^2\\.5\\.0\\.83$"
+      },
+      "handler": "cisco-business-2x",
+      "privacy_protocol_required": "DES",
+      "recommended_profile": "monitoring-v3-cbs2x",
+      "apply_supported": false,
+      "supported_actions": ["report", "test"],
+      "reason": "SHA/DES was confirmed on SG350XG-2F10 2.5.0.83 by successful shadow and LibreNMS authPriv probes and a successful LibreNMS poll. Automatic configure/rollback/save remains blocked pending a representative transactional pilot on SG350X-48MP.",
+      "pilot_status": "manual-des-live-validated",
+      "pilot_evidence": {
+        "model": "SG350XG-2F10",
+        "os_version": "2.5.0.83",
+        "result": "sha-des-shadow-librenms-poll-success"
+      },
+      "workflow": "manual-config-live-validated"
     },
     {
       "id": "cisco-business-sx2xx-sx3xx-2x-v3",

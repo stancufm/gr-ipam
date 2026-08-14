@@ -128,6 +128,11 @@ the `v3` token from the user command and uses `show snmp-server ...` plus
 candidate handlers with unquoted, whitespace-free password encoding. See the
 [Cisco Business 350 SNMP command reference](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbms/CBS_250_350/CLI/cbs-350-cli-/snmp-commands.html)
 and [Cisco 220 SNMP command reference](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbss/CBS220/CLI-Guide/b_220CLI/snmp_commands.html).
+SG350X/SG350XG firmware 2.5.0.83 is represented by a narrower SHA/DES template.
+The template is report/test-only: sw64 passed authenticated probes from shadow
+and LibreNMS plus an immediate LibreNMS poll, but automatic configure/save is
+blocked until a second representative device completes transactional rollback
+and persistence validation.
 Interactive Cisco Business sessions request a 512-column PTY. This prevents
 firmware line-editor redraws of long SNMP user commands from resembling fresh
 prompts and advancing the transactional command queue prematurely.
@@ -158,6 +163,7 @@ The initial catalog incorporates the pilot evidence:
 | Cisco IOS/IOS XE | transactional SHA/AES128, group ACL | consistent CLI, rollback and save verified |
 | Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | six-device rollout and engine confirmation validated; legacy cleanup not exercised |
 | Cisco SG/SF 250/350 firmware 2.x | blocked handler, report/test | SG350XG-2F10 2.5.0.83 accepted the documented command but created `Privacy Method: None`; 32-hex and 16-character alphanumeric privacy inputs both failed the local AES128 gate and rolled back without save, before the monitoring test |
+| Cisco SG350X/SG350XG 2.5.0.83 | SHA/DES report/test candidate | sw64 passed shadow and LibreNMS authPriv tests and a LibreNMS poll; automatic configuration remains blocked pending a transactional SG350X-48MP pilot |
 | Cisco SG/SF 220 firmware 1.1 | distinct candidate handler, report/test | user syntax omits `v3`; contextual-help gate and representative transactional pilot still required |
 | Other Cisco Business | report/test | no reviewed model/firmware-specific handler |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | adaptive initialization, SHA/AES and v3-only validated |
