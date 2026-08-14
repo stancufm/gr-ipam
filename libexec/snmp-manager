@@ -450,7 +450,11 @@ def run_device_commands(cfg, row, commands, timeout=70, template=None, values=No
         raise gr.GrError("Incomplete SSH metadata for {}".format(row_ip(row)))
     driver = gr.resolve_device_driver(row)
     template = template or {"handler": "generic-cli"}
-    context = {"driver": driver, "row": row, "values": values or {}}
+    handler_values = dict(values or {})
+    handler_values["save_session"] = any(
+        re.search(r"(?i)^\s*(?:copy\s+running-config\s+startup-config|write\s+(?:memory|startup-config))\s*$",
+                  command or "") for command in commands)
+    context = {"driver": driver, "row": row, "values": handler_values}
     try:
         login = snmp_handlers.login_driver(gr, template, context)
     except snmp_handlers.HandlerError as exc:
@@ -779,16 +783,30 @@ def command_plan_or_apply(cfg, templates, args):
             saved = run_device_commands(
                 cfg, row, render_commands(template, "save", values, redact=False),
                 template=template, values=values)
-            success = saved["complete"] and not saved["timeout"] and not saved["cli_errors"]
-            if success:
+            save_ok = saved["complete"] and not saved["timeout"] and not saved["cli_errors"]
+            print("SAVE_SESSION complete={} timeout={} cli_errors={}".format(
+                saved["complete"], saved["timeout"], len(saved["cli_errors"])))
+            if not save_ok:
+                rollback = run_device_commands(
+                    cfg, row, rollback_commands, template=template,
+                    values=values) if rollback_commands else None
+                rollback_ok = bool(rollback and rollback["complete"] and
+                                   not rollback["timeout"] and not rollback["cli_errors"])
+                print("RESULT=save_failed SAVED=False ROLLBACK={}".format(
+                    "success" if rollback_ok else "failed"))
+                failed = True
+                continue
+            archive_ok = True
+            if save_ok:
                 try:
                     backup_configuration(row_ip(row))
                     print("FINAL_ARCHIVE_STATUS=success")
                 except gr.GrError as exc:
                     print("FINAL_ARCHIVE_STATUS=failed ERROR={}".format(exc))
-                    success = False
-            print("RESULT={} SAVED={}".format("success" if success else "save_failed", success))
-            failed = failed or not success
+                    archive_ok = False
+            print("RESULT={} SAVED=True".format(
+                "success" if archive_ok else "archive_failed"))
+            failed = failed or not archive_ok
         else:
             rollback = run_device_commands(
                 cfg, row, rollback_commands, template=template, values=values) if rollback_commands else None

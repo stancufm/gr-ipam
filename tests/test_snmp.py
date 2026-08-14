@@ -91,7 +91,7 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["id"], "cisco-business-sx2xx-sx3xx-2x-v3")
         self.assertEqual(template["handler"], "cisco-business-2x")
         self.assertFalse(template["apply_supported"])
-        self.assertEqual(template["pilot_status"], "blocked-privacy-none")
+        self.assertEqual(template["pilot_status"], "blocked-unclassified-privacy-dialect")
         self.assertEqual(template["pilot_evidence"]["os_version"], "2.5.0.83")
 
     def test_cisco_business_250_des_candidate_precedes_generic_family(self):
@@ -100,8 +100,8 @@ class SnmpManagerTests(unittest.TestCase):
                 self.templates, row("cisco-small-business", model, version="2.5.0.83"))
             self.assertEqual(template["id"], "cisco-business-sg350x-2.5.0-des-v3")
             self.assertEqual(template["privacy_protocol_required"], "DES")
-            self.assertFalse(template["apply_supported"])
-            self.assertEqual(template["pilot_status"], "manual-des-live-validated")
+            self.assertTrue(template["apply_supported"])
+            self.assertEqual(template["pilot_status"], "transactionally-validated")
 
     def test_cisco_business_220_selects_distinct_candidate(self):
         template, _source = SNMP.resolve_template(
@@ -174,6 +174,23 @@ monitoringUser ver3 ManagerPriv
         session = driver("operator", "ssh-password")
         self.assertEqual(session.feed(b"Do you wish to continue ? (Y/N)[N]"),
                          [("credential", b"y")])
+
+    def test_cbs_handler_answers_save_prompts_only_in_save_session(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        driver = SNMP.snmp_handlers.login_driver(
+            SNMP.gr, template,
+            {"driver": "cisco-small-business", "values": {"save_session": True}})
+        session = driver("operator", "ssh-password")
+        self.assertEqual(session.feed(b"Destination filename [startup-config]?"),
+                         [("credential", b"\n")])
+        self.assertEqual(session.feed(b"Overwrite file [startup-config] ? [Y/N]:"),
+                         [("credential", b"y\n")])
+
+        ordinary_driver = SNMP.snmp_handlers.login_driver(
+            SNMP.gr, template, {"driver": "cisco-small-business", "values": {}})
+        ordinary = ordinary_driver("operator", "ssh-password")
+        self.assertEqual(ordinary.feed(b"Overwrite file [startup-config] ? [Y/N]:"), [])
 
     def test_cbs_capability_handler_clears_retained_help_line(self):
         template = next(item for item in self.templates
@@ -314,7 +331,8 @@ Privacy Method : DES
                         if item["id"] == "cisco-business-sg350x-2.5.0-des-v3")
         values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
                   "view": "SNMP_DEFAULT_VIEW"}
-        output = """Local SNMP engineID is 800000090300001122334455
+        output = """SNMP is enabled
+Local SNMP engineID is 800000090300001122334455
 SNMP_DEFAULT_VIEW iso included
 SNMP_DEFAULT_GROUP V3 priv
 User name : monitor
@@ -326,6 +344,27 @@ Privacy Protocol : DES
         self.assertTrue(checks["privacy_des"])
         self.assertTrue(checks["privacy_expected"])
         self.assertEqual(checks["privacy_required"], "DES")
+
+    def test_cbs_des_candidate_has_transactional_commands(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sg350x-2.5.0-des-v3")
+        self.assertTrue(template["apply_supported"])
+        self.assertEqual(template["workflow"], "transactional-cli-v1")
+        self.assertTrue(template["require_monitoring_test"])
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertIn("configure", template["supported_actions"])
+        self.assertIn("rotate", template["supported_actions"])
+        create_user = next(command for command in template["configure_commands"]
+                           if command.startswith("snmp-server user "))
+        self.assertIn(" auth sha {auth_cli} priv {privacy_cli}", create_user)
+        self.assertNotIn(" priv aes ", create_user)
+        self.assertTrue(template["configure_rollback_commands"])
+        self.assertTrue(template["save_commands"])
+
+    def test_generic_cbs_2x_apply_remains_blocked(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sx2xx-sx3xx-2x-v3")
+        self.assertFalse(template["apply_supported"])
 
     def test_cbs_authpriv_verifier_scopes_privacy_to_target_user(self):
         template = next(item for item in self.templates

@@ -44,18 +44,29 @@
         "os_version_regex": "^2\\.5\\.0\\.83$"
       },
       "handler": "cisco-business-2x",
+      "defaults": {"group": "SNMP_DEFAULT_GROUP", "view": "SNMP_DEFAULT_VIEW"},
       "privacy_protocol_required": "DES",
       "recommended_profile": "monitoring-v3-cbs2x",
-      "apply_supported": false,
-      "supported_actions": ["report", "test"],
-      "reason": "SHA/DES was confirmed on SG350XG-2F10 2.5.0.83 by successful shadow and LibreNMS authPriv probes and a successful LibreNMS poll. Automatic configure/rollback/save remains blocked pending a representative transactional pilot on SG350X-48MP.",
-      "pilot_status": "manual-des-live-validated",
+      "apply_supported": true,
+      "require_monitoring_test": true,
+      "verify_server_enabled": true,
+      "supported_actions": ["configure", "rotate"],
+      "reason": "SHA/DES is the transactionally validated authPriv dialect for SG350X/SG350XG 2.5.0.83. Apply requires local and monitoring probes before save.",
+      "pilot_status": "transactionally-validated",
       "pilot_evidence": {
-        "model": "SG350XG-2F10",
+        "models": ["SG350XG-2F10", "SG350X-48MP"],
         "os_version": "2.5.0.83",
-        "result": "sha-des-shadow-librenms-poll-success"
+        "targets": ["sw64", "sw65", "sw67"],
+        "result": "sha-des-two-source-save-archive-librenms-poll-success"
       },
-      "workflow": "manual-config-live-validated"
+      "workflow": "transactional-cli-v1",
+      "inspect_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],
+      "configure_commands": ["terminal datadump", "configure terminal", "snmp-server engineID local default", "snmp-server view {view} iso included", "snmp-server group {group} v3 priv read {view}", "snmp-server server", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "rotate_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "verify_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views {view}", "show snmp groups {group}", "show snmp users {username}"],
+      "save_commands": ["terminal datadump", "copy running-config startup-config"],
+      "configure_rollback_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "no snmp-server group {group} v3 priv", "no snmp-server view {view}", "no snmp-server server", "no snmp-server engineID local", "end"],
+      "rotate_rollback_commands": []
     },
     {
       "id": "cisco-business-sx2xx-sx3xx-2x-v3",
@@ -71,8 +82,8 @@
       "apply_supported": false,
       "require_monitoring_test": true,
       "supported_actions": ["configure", "rotate", "cleanup"],
-      "reason": "Apply remains disabled: the SG350XG-2F10 2.5.0.83 transactional pilot accepted the documented CLI but created the requested user with Privacy Method None; the local AES128 gate failed before the monitoring test and rollback succeeded.",
-      "pilot_status": "blocked-privacy-none",
+      "reason": "Apply remains disabled because privacy syntax varies by model and firmware. Only the exact SG350X/SG350XG 2.5.0.83 SHA/DES template is transactionally enabled.",
+      "pilot_status": "blocked-unclassified-privacy-dialect",
       "pilot_evidence": {
         "model": "SG350XG-2F10",
         "os_version": "2.5.0.83",
