@@ -772,6 +772,10 @@ def command_plan_or_apply(cfg, templates, args):
             previous_values = snmp_handlers.prepare(template, row, previous_values, applying=True)
             rollback_commands = render_commands(template, "rotate", previous_values, redact=False)
         session = run_device_commands(cfg, row, actual_commands, template=template, values=values)
+        settle_seconds = max(0, min(10, int(template.get("post_apply_settle_seconds") or 0)))
+        if settle_seconds:
+            print("POST_APPLY_SETTLE_SECONDS={}".format(settle_seconds))
+            time.sleep(settle_seconds)
         verify_action = "inspect" if args.action == "cleanup" else "verify"
         verification = run_device_commands(
             cfg, row, render_commands(template, verify_action, values, redact=False),

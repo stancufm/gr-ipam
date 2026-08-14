@@ -102,7 +102,11 @@ def _cbs_login(gr, _context):
                 return [("credential", b"y\n")]
             if self.CONFIRM_RE.search(prompt_visible):
                 self.buffer = b""
-                return [("credential", b"y")]
+                # Match the successful SG350X 2.4 manual transaction by
+                # submitting the answer with CR/LF.  On firmware that consumes
+                # the single character immediately, the trailing newline is
+                # only an empty command at the next prompt and is harmless.
+                return [("credential", b"y\n")]
             # Firmware 2.x can repaint the fresh prompt on the same physical
             # line as the aborted contextual-help command.  The base driver
             # deliberately requires a newline, so recognize only the narrow

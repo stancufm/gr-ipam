@@ -103,14 +103,14 @@ class SnmpManagerTests(unittest.TestCase):
             self.assertTrue(template["apply_supported"])
             self.assertEqual(template["pilot_status"], "transactionally-validated")
 
-    def test_sg350x_24091_selects_blocked_exact_template(self):
+    def test_sg350x_24091_selects_validated_exact_template(self):
         template, _source = SNMP.resolve_template(
             self.templates,
             row("cisco-small-business", "SG350X-48MP", version="2.4.0.91"))
         self.assertEqual(template["id"], "cisco-business-sg350x-2.4.0.91-des-v3")
         self.assertEqual(template["privacy_protocol_required"], "DES")
-        self.assertFalse(template["apply_supported"])
-        self.assertEqual(template["pilot_status"], "blocked-user-syntax-unconfirmed")
+        self.assertTrue(template["apply_supported"])
+        self.assertEqual(template["pilot_status"], "transactionally-validated")
         self.assertTrue(template["preserve_preexisting_engine"])
 
     def test_sg350x_230130_selects_narrow_des_pilot(self):
@@ -225,7 +225,7 @@ monitoringUser ver3 ManagerPriv
             SNMP.gr, template, {"driver": "cisco-small-business"})
         session = driver("operator", "ssh-password")
         self.assertEqual(session.feed(b"Do you wish to continue ? (Y/N)[N]"),
-                         [("credential", b"y")])
+                         [("credential", b"y\n")])
 
     def test_cbs_handler_answers_save_prompts_only_in_save_session(self):
         template = next(item for item in self.templates
@@ -412,6 +412,15 @@ Privacy Protocol : DES
         self.assertNotIn(" priv aes ", create_user)
         self.assertTrue(template["configure_rollback_commands"])
         self.assertTrue(template["save_commands"])
+
+    def test_sw51_exact_des_template_is_transactional_after_live_pilot(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sg350x-2.4.0.91-des-v3")
+        self.assertTrue(template["apply_supported"])
+        self.assertEqual(template["pilot_status"], "transactionally-validated")
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertEqual(template["post_apply_settle_seconds"], 2)
+        self.assertTrue(template["require_monitoring_test"])
 
     def test_generic_cbs_2x_apply_remains_blocked(self):
         template = next(item for item in self.templates
