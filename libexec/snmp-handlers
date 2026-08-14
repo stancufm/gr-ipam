@@ -63,6 +63,7 @@ def _generic_login(gr, _context):
 
 def _cbs_login(gr, _context):
     capability_probe = bool((_context.get("values") or {}).get("capability_probe"))
+    save_session = bool((_context.get("values") or {}).get("save_session"))
 
     class CiscoBusinessConfirmLogin(gr.CiscoSmallBusinessLogin):
         GR_RAW_PTY = capability_probe
@@ -72,6 +73,12 @@ def _cbs_login(gr, _context):
         PASSWORD_CHANGE_RE = re.compile(
             br"do you want to change (?:it|the password) now\s*\(y/n\)\s*\[n\]\s*\?\s*$",
             re.I)
+        SAVE_DESTINATION_RE = re.compile(
+            br"destination\s+(?:file\s*)?name\s*(?:\[[^\]\r\n]+\])?\s*[?:]?\s*$",
+            re.I)
+        SAVE_OVERWRITE_RE = re.compile(
+            br"(?:overwrite|replace)\b[^\r\n]{0,160}"
+            br"(?:\(y/n\)|\[y/n\]|\[confirm\]|[?:])\s*$", re.I)
         RETAINED_HELP_RE = re.compile(
             br"(?:^|[\r\n])[^\r\n]{0,128}[>#]\s*snmp-server[^\r\n]*$", re.I)
         INLINE_PROMPT_RE = re.compile(
@@ -83,6 +90,16 @@ def _cbs_login(gr, _context):
             if self.PASSWORD_CHANGE_RE.search(prompt_visible):
                 self.buffer = b""
                 return [("credential", b"n\n")]
+            # ``copy running-config startup-config`` is interactive on parts
+            # of the Cisco Business family.  Replies are enabled only for a
+            # manager-declared save session so similar text can never approve
+            # an unrelated configuration operation.
+            if save_session and self.SAVE_DESTINATION_RE.search(prompt_visible):
+                self.buffer = b""
+                return [("credential", b"\n")]
+            if save_session and self.SAVE_OVERWRITE_RE.search(prompt_visible):
+                self.buffer = b""
+                return [("credential", b"y\n")]
             if self.CONFIRM_RE.search(prompt_visible):
                 self.buffer = b""
                 return [("credential", b"y")]

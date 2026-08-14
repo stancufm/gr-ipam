@@ -92,13 +92,17 @@ cu parole neîncadrate în ghilimele și fără spații. Vezi
 [referința Cisco Business 350](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbms/CBS_250_350/CLI/cbs-350-cli-/snmp-commands.html)
 și [referința Cisco 220](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbss/CBS220/CLI-Guide/b_220CLI/snmp_commands.html).
 SG350X/SG350XG cu firmware 2.5.0.83 este reprezentat de un template SHA/DES mai
-restrâns. Template-ul este numai report/test: sw64 a trecut probele autentificate
-din shadow și LibreNMS plus un poll LibreNMS imediat, dar configure/save automat
-rămâne blocat până când un al doilea echipament reprezentativ validează
-tranzacțional rollback-ul și persistența.
+restrâns. Handlerul este activat tranzacțional după ce sw64, sw65 și sw67 au
+trecut probele authPriv din shadow și LibreNMS, save-ul condiționat, arhivarea
+finală și poll-ul LibreNMS. Restul combinațiilor Cisco Business 2.x rămân
+blocate deoarece dialectul privacy nu poate fi dedus numai din familie.
 Sesiunile interactive Cisco Business solicită un PTY de 512 coloane. Astfel,
 redesenarea comenzilor SNMP lungi de către editorul CLI nu mai poate semăna cu
 un prompt nou și nu poate avansa prematur coada tranzacțională de comenzi.
+Sesiunile de save recunosc numai prompturile restrânse de destinație/suprascriere
+emise de `copy running-config startup-config`. Un save eșuat retrage acum
+configurația running nesalvată; un eșec de arhivare după save confirmat este
+raportat separat și nu mai apare incorect drept eșec de save.
 Numai pentru aceste template-uri marcate explicit, verificarea structurală
 acceptă lipsa etichetei algoritmului privacy ca AES128 dacă userul și
 autentificarea SHA sunt prezente; o etichetă explicită DES sau fără privacy este
@@ -127,7 +131,7 @@ Catalogul inițial include concluziile piloților:
 | Cisco IOS/IOS XE | tranzacțional SHA/AES128, ACL pe grup | CLI, rollback și save validate |
 | Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | rollout pe șase echipamente și confirmarea engine validate; cleanup legacy neprobat |
 | Cisco SG/SF 250/350 firmware 2.x | handler blocat, report/test | SG350XG-2F10 2.5.0.83 a acceptat comanda documentată, dar a creat `Privacy Method: None`; atât cheia de 32 hex, cât și passphrase-ul alfanumeric de 16 caractere au eșuat pragul AES128 local și au fost retrase fără save, înaintea testului din LibreNMS |
-| Cisco SG350X/SG350XG 2.5.0.83 | candidat SHA/DES report/test | sw64 a trecut testele authPriv din shadow și LibreNMS și poll-ul LibreNMS; configurarea automată rămâne blocată până la un pilot tranzacțional SG350X-48MP |
+| Cisco SG350X/SG350XG 2.5.0.83 | configure/rotate tranzacțional SHA/DES | sw64, sw65 și sw67 au trecut ambele probe authPriv; sw65/sw67 au validat și save-ul cu prompt, arhiva finală și poll-ul LibreNMS |
 | Cisco SG/SF 220 firmware 1.1 | handler candidat distinct, report/test | sintaxa userului omite `v3`; mai sunt necesare help-ul contextual și un pilot tranzacțional reprezentativ |
 | Restul Cisco Business | report/test | nu există încă handler validat pe model/firmware |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | inițializare adaptivă, SHA/AES și v3-only validate |
