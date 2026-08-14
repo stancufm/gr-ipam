@@ -44,7 +44,7 @@ CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SNMP_MANAGER = "/usr/local/libexec/gr/snmp-manager"
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.8.2"
+GR_VERSION = "2.8.3"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -1136,6 +1136,10 @@ class CiscoSmallBusinessLogin:
     PASSWORD_RE = re.compile(br"password\s*:\s*$", re.I)
     PROMPT_RE = re.compile(br"(?:^|[\r\n])[^\r\n]{0,128}[>#]\s*$")
     PAGER_RE = re.compile(br"(?:--\s*more\s*--|more\s*[:>])", re.I)
+    ANSI_RE = re.compile(br"\x1b\[[0-?]*[ -/]*[@-~]")
+    PASSWORD_CHANGE_RE = re.compile(
+        br"do you want to change (?:it|the password) now\s*\(y/n\)\s*\[n\]\s*\?\s*$",
+        re.I)
 
     def __init__(self, username, password):
         self.username = str(username).encode("utf-8")
@@ -1145,26 +1149,33 @@ class CiscoSmallBusinessLogin:
 
     def feed(self, data):
         self.buffer = (self.buffer + data)[-4096:]
-        if self.state == "ready" and self.PAGER_RE.search(self.buffer):
+        visible = self.ANSI_RE.sub(b"", self.buffer)
+        # Several Cisco Business releases stop after authentication at an
+        # advisory password-expiry prompt.  Declining that optional change is
+        # required for read-only collectors as well as SNMP sessions.
+        if self.PASSWORD_CHANGE_RE.search(visible):
+            self.buffer = b""
+            return [("credential", b"n\n")]
+        if self.state == "ready" and self.PAGER_RE.search(visible):
             self.buffer = b""
             return [("credential", b" ")]
-        if self.state == "username" and self.PROMPT_RE.search(self.buffer):
+        if self.state == "username" and self.PROMPT_RE.search(visible):
             self.state = "ready"
             self.buffer = b""
             return [("ready", b"")]
-        if self.state == "username" and self.USERNAME_RE.search(self.buffer):
+        if self.state == "username" and self.USERNAME_RE.search(visible):
             self.state = "password"
             self.buffer = b""
             return [("credential", self.username + b"\n")]
-        if self.state == "password" and self.PASSWORD_RE.search(self.buffer):
+        if self.state == "password" and self.PASSWORD_RE.search(visible):
             self.state = "prompt"
             self.buffer = b""
             return [("credential", self.password + b"\n")]
-        if self.state == "prompt" and self.PROMPT_RE.search(self.buffer):
+        if self.state == "prompt" and self.PROMPT_RE.search(visible):
             self.state = "ready"
             self.buffer = b""
             return [("ready", b"")]
-        if self.state == "ready" and self.PROMPT_RE.search(self.buffer):
+        if self.state == "ready" and self.PROMPT_RE.search(visible):
             self.buffer = b""
             return [("prompt", b"")]
         return []
