@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": 12,
+  "catalog_version": 13,
   "templates": [
     {
       "id": "cisco-ios-v3",
@@ -139,7 +139,7 @@
       "id": "cisco-business-2.4.0.94-des-pilot-v3",
       "match": {
         "driver": "cisco-small-business",
-        "model_regex": "^(?:SG350-28P|SG250X-24P|SG250-08HP)$",
+        "model_regex": "^(?:SG350-28P|SF350-24P|SG250X-24P|SG250-08HP)$",
         "os_version_regex": "^2\\.4\\.0\\.94$"
       },
       "handler": "cisco-business-2x",
@@ -152,14 +152,15 @@
       "post_apply_settle_seconds": 2,
       "preserve_preexisting_engine": true,
       "preserve_preexisting_server": true,
+      "reconcile_preexisting_managed": true,
       "supported_actions": ["configure", "rotate", "cleanup"],
-      "reason": "Transactionally validated SHA/DES workflow for SG350-28P, SG250X-24P and SG250-08HP firmware 2.4.0.94. Local and LibreNMS probes are mandatory before save; cleanup removes Cisco Business communities by token and retains the exact line for rollback.",
+      "reason": "Transactionally validated SHA/DES workflow for SG350-28P, SF350-24P, SG250X-24P and SG250-08HP firmware 2.4.0.94. Local and LibreNMS probes are mandatory before save; cleanup removes Cisco Business communities by token and retains the exact line for rollback. A conforming manually prepared state may be adopted without configuration commands.",
       "pilot_status": "transactionally-validated",
       "pilot_evidence": {
-        "targets": ["sw20", "sw30", "sw31"],
-        "models": ["SG350-28P", "SG250X-24P", "SG250-08HP"],
+        "targets": ["sw20", "sw26", "sw30", "sw31"],
+        "models": ["SG350-28P", "SF350-24P", "SG250X-24P", "SG250-08HP"],
         "os_version": "2.4.0.94",
-        "result": "sha-des-two-source-legacy-cleanup-save-archive-librenms-poll-success"
+        "result": "sha-des-two-source-adopt-cleanup-save-archive-librenms-poll-success"
       },
       "workflow": "transactional-cli-v1",
       "inspect_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],
