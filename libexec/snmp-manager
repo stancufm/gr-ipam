@@ -476,6 +476,12 @@ def cli_error_lines(output):
             if any(re.search(pattern, line, re.I) for pattern in patterns)]
 
 
+def commands_include_save(commands):
+    return any(re.search(
+        r"(?i)^\s*(?:copy\s+running-config\s+startup-config|write(?:\s+(?:memory|startup-config))?)\s*$",
+        command or "") for command in commands)
+
+
 def run_device_commands(cfg, row, commands, timeout=70, template=None, values=None):
     if not commands:
         return {"rc": 0, "output": "", "error": "", "timeout": False,
@@ -489,9 +495,7 @@ def run_device_commands(cfg, row, commands, timeout=70, template=None, values=No
     driver = gr.resolve_device_driver(row)
     template = template or {"handler": "generic-cli"}
     handler_values = dict(values or {})
-    handler_values["save_session"] = any(
-        re.search(r"(?i)^\s*(?:copy\s+running-config\s+startup-config|write\s+(?:memory|startup-config))\s*$",
-                  command or "") for command in commands)
+    handler_values["save_session"] = commands_include_save(commands)
     context = {"driver": driver, "row": row, "values": handler_values}
     try:
         login = snmp_handlers.login_driver(gr, template, context)
