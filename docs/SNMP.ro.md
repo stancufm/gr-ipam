@@ -164,7 +164,7 @@ Catalogul inițial include concluziile piloților:
 |---|---|---|
 | Cisco IOS/IOS XE | tranzacțional SHA/AES128, ACL pe grup | CLI, rollback și save validate |
 | Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | rollout pe șase echipamente și confirmarea engine validate; cleanup legacy neprobat |
-| Cisco CBS350-48P-4G 3.0.0.69 | pilot de adoptare/cleanup tranzacțional SHA/DES | sw49 raportează userul/grupul dorit cu SHA/DES explicit și a trecut proba authPriv din shadow; save-ul rămâne condiționat de proba LibreNMS |
+| Cisco CBS350-48P-4G 3.0.0.69 | configure/rotate/cleanup tranzacțional SHA/DES | sw49 a trecut adoptarea sigură fără comenzi de configurare, verificarea structurală explicită, ambele probe authPriv, save-ul condiționat, arhiva, asocierea phpIPAM și poll-ul LibreNMS; nu existau community legacy |
 | Cisco SG/SF 250/350 firmware 2.x | handler blocat, report/test | SG350XG-2F10 2.5.0.83 a acceptat comanda documentată, dar a creat `Privacy Method: None`; atât cheia de 32 hex, cât și passphrase-ul alfanumeric de 16 caractere au eșuat pragul AES128 local și au fost retrase fără save, înaintea testului din LibreNMS |
 | Cisco SG350X/SG350XG 2.5.0.83 | configure/rotate tranzacțional SHA/DES | sw64, sw65 și sw67 au trecut ambele probe authPriv; sw65/sw67 au validat și save-ul cu prompt, arhiva finală și poll-ul LibreNMS |
 | Cisco SG350X-24PD 2.3.0.130 | configure/rotate tranzacțional SHA/DES | sw66, sw68 și sw69 au trecut ambele probe authPriv, save-ul cu prompt, arhiva finală și poll-ul LibreNMS |

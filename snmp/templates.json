@@ -55,13 +55,13 @@
       "preserve_preexisting_server": true,
       "reconcile_preexisting_managed": true,
       "supported_actions": ["configure", "rotate", "cleanup"],
-      "reason": "CBS350-48P-4G firmware 3.0.0.69 reports SHA/DES for the Cisco Business v3 user grammar. sw49 confirmed the structural state and authenticated shadow probe; adoption still requires the monitoring probe before save.",
-      "pilot_status": "manual-state-validated-pending-transactional-finalization",
+      "reason": "CBS350-48P-4G firmware 3.0.0.69 reports SHA/DES for the Cisco Business v3 user grammar. sw49 passed safe adoption, explicit structural verification, both authenticated probes, conditional save, archive, phpIPAM association and LibreNMS poll.",
+      "pilot_status": "transactionally-validated",
       "pilot_evidence": {
         "target": "sw49",
         "model": "CBS350-48P-4G",
         "os_version": "3.0.0.69",
-        "result": "manual-sha-des-state-shadow-authpriv-success-librenms-pending"
+        "result": "sha-des-adopt-dual-authpriv-save-archive-phpipam-librenms-poll-success"
       },
       "workflow": "transactional-cli-v1",
       "inspect_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],
