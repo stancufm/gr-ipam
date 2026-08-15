@@ -92,6 +92,21 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["handler"], "cisco-business-3x")
         self.assertTrue(template["apply_supported"])
 
+    def test_cbs350_30069_selects_strict_des_reconciliation_template(self):
+        template, source = SNMP.resolve_template(
+            self.templates,
+            row("cisco-small-business", "CBS350-48P-4G", version="3.0.0.69"))
+        self.assertEqual(
+            template["id"],
+            "cisco-business-cbs350-48p-4g-3.0.0.69-des-pilot-v3")
+        self.assertEqual(source, "selector")
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertEqual(template["handler"], "cisco-business-2x")
+        self.assertTrue(template["apply_supported"])
+        self.assertTrue(template["reconcile_preexisting_managed"])
+        self.assertTrue(template["require_monitoring_test"])
+        self.assertIn("cleanup", template["supported_actions"])
+
     def test_reviewed_planet_build_suffix_selects_apply_handler(self):
         template, _source = SNMP.resolve_template(
             self.templates,
