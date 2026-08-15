@@ -144,6 +144,31 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["pilot_status"], "transactionally-validated")
         self.assertTrue(template["preserve_preexisting_engine"])
 
+    def test_sg250_26hp_sw24_selects_validated_des_template(self):
+        device = row("cisco-small-business", "SG250-26HP", version="2.4.0.91")
+        device["ip"] = "192.0.2.24"
+        template, source = SNMP.resolve_template(self.templates, device)
+        self.assertEqual(
+            template["id"],
+            "cisco-business-sg250-26hp-2.4.0.91-des-pilot-v3")
+        self.assertEqual(source, "selector")
+        self.assertTrue(template["apply_supported"])
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertEqual(template["pilot_status"], "transactionally-validated")
+        self.assertNotIn("ip_in", template["match"])
+        self.assertTrue(template["require_monitoring_test"])
+        self.assertIn("cleanup", template["supported_actions"])
+
+    def test_sg250_26hp_sw38_selects_validated_des_template(self):
+        device = row("cisco-small-business", "SG250-26HP", version="2.4.0.91")
+        device["ip"] = "192.0.2.38"
+        template, _source = SNMP.resolve_template(self.templates, device)
+        self.assertEqual(
+            template["id"],
+            "cisco-business-sg250-26hp-2.4.0.91-des-pilot-v3")
+        self.assertTrue(template["apply_supported"])
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+
     def test_sg350x_230130_selects_narrow_des_pilot(self):
         template, _source = SNMP.resolve_template(
             self.templates,
@@ -308,6 +333,31 @@ Privacy Protocol : DES
         self.assertTrue(ok)
         self.assertTrue(checks["privacy_des"])
         self.assertTrue(checks["privacy_expected"])
+
+    def test_sg250_26hp_pilot_requires_explicit_sha_des_state(self):
+        template = next(item for item in self.templates if item["id"] ==
+                        "cisco-business-sg250-26hp-2.4.0.91-des-pilot-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """SNMP is enabled.
+Local SNMP engineID: 800000090300001122334455
+SNMP_DEFAULT_VIEW iso included
+SNMP_DEFAULT_GROUP v3 priv
+User name : monitor
+Authentication Protocol : SHA
+Privacy Protocol : DES
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertTrue(ok)
+        self.assertTrue(checks["privacy_des"])
+        self.assertTrue(checks["privacy_expected"])
+        self.assertFalse(checks["privacy_aes128"])
+
+        wrong_privacy = output.replace("Privacy Protocol : DES", "Privacy Protocol : AES128")
+        ok, checks = SNMP.snmp_handlers.verify(
+            template, wrong_privacy, values, "configure")
+        self.assertFalse(ok)
+        self.assertFalse(checks["privacy_expected"])
 
     def test_cbs_220_verifier_accepts_compact_username_header(self):
         template = next(item for item in self.templates
