@@ -297,6 +297,9 @@ def _verify_cbs_authpriv(template, output, values, action):
     engine_present = engine_present and bool(re.search(
         r"(?im)(?:local\s+snmp(?:v3)?\s+engine\s*id|local\s+snmp\s+engineid).*?[0-9a-f]{10,}",
         output))
+    if template.get("verify_engineid_default_config"):
+        engine_present = engine_present or bool(re.search(
+            r"(?im)^\s*snmp-server\s+engineid\s+default\s*$", output))
     checks = {
         "engine": engine_present,
         "view": values["view"].lower() in output.lower(),

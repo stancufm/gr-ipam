@@ -142,6 +142,22 @@ def report_command_summary(items):
                       for driver, commands in descriptions)
 
 
+def write_interactive_command(master_fd, command):
+    """Send contextual help, then cancel the editable line before newline.
+
+    A combined ``?``/Ctrl-C write is too fast for some Sx220 firmware and can
+    suppress the help text.  A newline after a complete help candidate can
+    execute it.  Send the question mark first, allow the device to render its
+    help, and then send Ctrl-C without a newline.
+    """
+    if command.endswith(b"?\x03\n"):
+        os.write(master_fd, command[:-2])
+        time.sleep(0.35)
+        os.write(master_fd, b"\x03")
+        return
+    os.write(master_fd, command)
+
+
 def run_interactive_device(item, password, command, read_fd, login_driver_class,
                            version_commands, cleanup_command_values, timeout=50):
     master_fd, slave_fd = os.openpty()
@@ -207,7 +223,7 @@ def run_interactive_device(item, password, command, read_fd, login_driver_class,
                                 pending_commands, cleanup_commands)
                             collection_complete = collection_complete or completed
                             if next_command is not None:
-                                os.write(master_fd, next_command)
+                                write_interactive_command(master_fd, next_command)
         if timed_out:
             process.wait()
         else:

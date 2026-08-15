@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 GR = importlib.machinery.SourceFileLoader("gr_collect_test_module", "bin/gr").load_module()
 COLLECTOR = importlib.machinery.SourceFileLoader(
@@ -13,6 +14,16 @@ COLLECTOR = importlib.machinery.SourceFileLoader(
 
 
 class CollectVersionCliTests(unittest.TestCase):
+    def test_contextual_help_is_rendered_before_control_c_without_newline(self):
+        with mock.patch.object(COLLECTOR.os, "write") as write, \
+                mock.patch.object(COLLECTOR.time, "sleep") as sleep:
+            COLLECTOR.write_interactive_command(7, b"snmp-server ?\x03\n")
+        self.assertEqual(write.call_args_list, [
+            mock.call(7, b"snmp-server ?"),
+            mock.call(7, b"\x03"),
+        ])
+        sleep.assert_called_once_with(0.35)
+
     def test_report_command_uses_actual_driver_commands(self):
         fortigate = [{"device_driver": "fortigate-fortios",
                       "_version_commands": ("get system status",)}]
