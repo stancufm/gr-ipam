@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": 5,
+  "catalog_version": 6,
   "templates": [
     {
       "id": "cisco-ios-v3",
@@ -128,6 +128,42 @@
       },
       "workflow": "transactional-cli-v1",
       "inspect_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],
+      "configure_commands": ["terminal datadump", "configure terminal", "snmp-server engineID local default", "snmp-server view {view} iso included", "snmp-server group {group} v3 priv read {view}", "snmp-server server", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "rotate_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "verify_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views {view}", "show snmp groups {group}", "show snmp users {username}"],
+      "save_commands": ["terminal datadump", "copy running-config startup-config"],
+      "configure_rollback_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "no snmp-server group {group} v3 priv", "no snmp-server view {view}", "no snmp-server server", "no snmp-server engineID local", "end"],
+      "rotate_rollback_commands": []
+    },
+    {
+      "id": "cisco-business-2.4.0.94-des-pilot-v3",
+      "match": {
+        "driver": "cisco-small-business",
+        "model_regex": "^(?:SG350-28P|SG250X-24P|SG250-08HP)$",
+        "os_version_regex": "^2\\.4\\.0\\.94$"
+      },
+      "handler": "cisco-business-2x",
+      "defaults": {"group": "SNMP_DEFAULT_GROUP", "view": "SNMP_DEFAULT_VIEW"},
+      "privacy_protocol_required": "DES",
+      "recommended_profile": "monitoring-v3-cbs2x",
+      "apply_supported": true,
+      "require_monitoring_test": true,
+      "verify_server_enabled": true,
+      "post_apply_settle_seconds": 2,
+      "preserve_preexisting_engine": true,
+      "preserve_preexisting_server": true,
+      "supported_actions": ["configure", "rotate", "cleanup"],
+      "reason": "Transactionally validated SHA/DES workflow for SG350-28P, SG250X-24P and SG250-08HP firmware 2.4.0.94. Local and LibreNMS probes are mandatory before save; cleanup removes Cisco Business communities by token and retains the exact line for rollback.",
+      "pilot_status": "transactionally-validated",
+      "pilot_evidence": {
+        "targets": ["sw20", "sw30", "sw31"],
+        "models": ["SG350-28P", "SG250X-24P", "SG250-08HP"],
+        "os_version": "2.4.0.94",
+        "result": "sha-des-two-source-legacy-cleanup-save-archive-librenms-poll-success"
+      },
+      "workflow": "transactional-cli-v1",
+      "inspect_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],
+      "cleanup_inspect_commands": ["terminal datadump", "show running-config"],
       "configure_commands": ["terminal datadump", "configure terminal", "snmp-server engineID local default", "snmp-server view {view} iso included", "snmp-server group {group} v3 priv read {view}", "snmp-server server", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
       "rotate_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
       "verify_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views {view}", "show snmp groups {group}", "show snmp users {username}"],

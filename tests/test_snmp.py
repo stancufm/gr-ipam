@@ -39,6 +39,14 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["id"], "cisco-ios-v3")
         self.assertEqual(source, "ip-override")
 
+    def test_template_match_supports_an_explicit_ip_allowlist(self):
+        template = {"match": {"driver": "cisco-ios",
+                              "ip_in": ["192.0.2.10", "192.0.2.11"]}}
+        self.assertTrue(SNMP.template_matches(template, row()))
+        other = row()
+        other["ip"] = "192.0.2.12"
+        self.assertFalse(SNMP.template_matches(template, other))
+
     def test_environment_template_override_precedes_persistent_config(self):
         with tempfile.TemporaryDirectory() as temporary:
             stale_path = os.path.join(temporary, "stale-templates.json")
@@ -85,14 +93,37 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["id"], "planet-sgs-6310-2.2-v3")
         self.assertTrue(template["apply_supported"])
 
-    def test_cisco_business_2x_selects_family_candidate(self):
+    def test_unreviewed_cisco_business_2x_selects_family_candidate(self):
         template, _source = SNMP.resolve_template(
-            self.templates, row("cisco-small-business", "SG350-28P", version="2.4.0.94"))
+            self.templates, row("cisco-small-business", "SF350-24P", version="2.4.0.94"))
         self.assertEqual(template["id"], "cisco-business-sx2xx-sx3xx-2x-v3")
         self.assertEqual(template["handler"], "cisco-business-2x")
         self.assertFalse(template["apply_supported"])
         self.assertEqual(template["pilot_status"], "blocked-unclassified-privacy-dialect")
         self.assertEqual(template["pilot_evidence"]["os_version"], "2.5.0.83")
+
+    def test_validated_24094_models_select_sha_des_template(self):
+        for ip, model in (("10.22.10.23", "SG350-28P"),
+                          ("10.22.10.36", "SG250X-24P"),
+                          ("10.22.10.47", "SG250-08HP")):
+            device = row("cisco-small-business", model, version="2.4.0.94")
+            device["ip"] = ip
+            template, source = SNMP.resolve_template(self.templates, device)
+            self.assertEqual(
+                template["id"],
+                "cisco-business-2.4.0.94-des-pilot-v3")
+            self.assertEqual(source, "selector")
+            self.assertEqual(template["privacy_protocol_required"], "DES")
+            self.assertEqual(template["pilot_status"], "transactionally-validated")
+            self.assertTrue(template["apply_supported"])
+            self.assertTrue(template["require_monitoring_test"])
+            self.assertTrue(template["preserve_preexisting_engine"])
+            self.assertTrue(template["preserve_preexisting_server"])
+
+            self.assertIn("cleanup", template["supported_actions"])
+            self.assertEqual(
+                template["cleanup_inspect_commands"],
+                ["terminal datadump", "show running-config"])
 
     def test_cisco_business_250_des_candidate_precedes_generic_family(self):
         for model in ("SG350XG-2F10", "SG350X-48MP"):
@@ -526,6 +557,17 @@ rule 30 permit source 192.0.2.3 0
             template, "snmp-server community encrypted-value RO\n", {})
         self.assertIn("no snmp-server community encrypted-value RO", apply_commands)
         self.assertIn("snmp-server community encrypted-value RO", rollback_commands)
+
+    def test_cisco_business_cleanup_removes_only_community_token(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-2.4.0.94-des-pilot-v3")
+        apply_commands, rollback_commands = SNMP.snmp_handlers.cleanup_plan(
+            template, 'snmp-server community "legacy value" ro view Default\n', {})
+        self.assertIn('no snmp-server community "legacy value"', apply_commands)
+        self.assertNotIn(
+            'no snmp-server community "legacy value" ro view Default', apply_commands)
+        self.assertIn(
+            'snmp-server community "legacy value" ro view Default', rollback_commands)
 
     def test_snmpget_does_not_put_secrets_in_process_argv(self):
         credentials = {"username": "snmp-user", "auth_protocol": "SHA",

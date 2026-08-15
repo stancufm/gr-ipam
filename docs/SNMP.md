@@ -121,18 +121,21 @@ probe and a complete transactional pilot succeed on a representative device.
 
 Cisco Business uses two older CLI dialects that must not be treated as IOS.
 Cisco's 250/350 documentation defines firmware 2.x users as
-`... v3 auth sha AUTH priv PRIV`; the `priv` password selects AES-128 implicitly,
-so the IOS tokens `priv aes 128` are invalid. Cisco's 220 documentation omits
+`... v3 auth sha AUTH priv PRIV`; the privacy algorithm is implicit and varies
+by model/firmware, so the IOS tokens `priv aes 128` are invalid. Cisco's 220 documentation omits
 the `v3` token from the user command and uses `show snmp-server ...` plus
 `snmp-server engineid`. The package therefore contains separate 2.x and 220/1.1
 candidate handlers with unquoted, whitespace-free password encoding. See the
 [Cisco Business 350 SNMP command reference](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbms/CBS_250_350/CLI/cbs-350-cli-/snmp-commands.html)
 and [Cisco 220 SNMP command reference](https://www.cisco.com/c/en/us/td/docs/switches/lan/csbss/CBS220/CLI-Guide/b_220CLI/snmp_commands.html).
 SG350X/SG350XG firmware 2.5.0.83, SG350X-24PD firmware 2.3.0.130 and
-SG350X-48MP firmware 2.4.0.91 are
+SG350X-48MP firmware 2.4.0.91, plus SG350-28P, SG250X-24P and SG250-08HP
+firmware 2.4.0.94, are
 represented by narrower SHA/DES templates. The handlers are transactionally
 enabled after sw64/sw65/sw67, sw66/sw68/sw69 and sw51 respectively passed local
 and LibreNMS authPriv probes, conditional save, final archive and LibreNMS poll.
+The 2.4.0.94 pilots on sw20, sw30 and sw31 also validated removal of legacy
+communities, post-cleanup probes and token-only Cisco Business removal syntax.
 The sw51 template submits engine-ID confirmations with a newline and waits two
 seconds before structural verification, matching the pacing of the successful
 manual pilot and allowing the SNMPv3 user database to settle.
@@ -178,6 +181,7 @@ The initial catalog incorporates the pilot evidence:
 | Cisco SG350X/SG350XG 2.5.0.83 | transactional SHA/DES configure/rotate | sw64, sw65 and sw67 passed both authPriv probes; sw65/sw67 also validated prompted save, final archive and LibreNMS poll |
 | Cisco SG350X-24PD 2.3.0.130 | transactional SHA/DES configure/rotate | sw66, sw68 and sw69 passed both authPriv probes, prompted save, final archive and LibreNMS poll |
 | Cisco SG350X-48MP 2.4.0.91 | transactional SHA/DES configure/rotate | sw51 passed structural SHA/DES verification, both authPriv probes, conditional save, archive, phpIPAM association and LibreNMS poll |
+| Cisco SG350-28P, SG250X-24P and SG250-08HP 2.4.0.94 | transactional SHA/DES configure/rotate/cleanup | sw20, sw30 and sw31 passed structural and two-source authPriv verification, conditional save, archive and LibreNMS poll; sw20/sw30 also validated legacy-community removal and post-cleanup probes |
 | Cisco SG/SF 220 firmware 1.1.3.1 | distinct blocked handler, report/test | sw15 created DES rather than the required AES; rollback and clean-state verification succeeded without save |
 | Other Cisco Business | report/test | no reviewed model/firmware-specific handler |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | adaptive initialization, SHA/AES and v3-only validated |
