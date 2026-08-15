@@ -630,8 +630,10 @@ def safe_apply_diagnostics(output, values):
             text = text.replace(secret, "[REDACTED]")
     selected = []
     diagnostic = re.compile(
-        r"^(?:%\s*)?(?:error|warning|invalid|wrong|failed|password|privacy)\b|"
-        r"\b(?:error|warning|invalid|wrong|failed|complexity|minimum|maximum)\b",
+        r"^(?:%\s*)?(?:error|warning|invalid|wrong|failed|incomplete|unknown|"
+        r"unrecognized|password|privacy)\b|"
+        r"\b(?:error|warning|invalid|wrong|failed|incomplete|unknown|unrecognized|"
+        r"complexity|minimum|maximum)\b",
         re.I)
     for line in text.splitlines():
         line = " ".join(line.split())
@@ -658,8 +660,17 @@ def command_capabilities(cfg, templates, args):
             failed = True
             continue
         validate_capability_commands(commands)
+        # A trailing question mark may expose <cr> as a valid completion.  The
+        # interactive helper normally appends a newline to every command, so a
+        # fully specified probe could otherwise execute after showing help.
+        # Ctrl-C cancels the editable line before that newline is sent.
+        safe_commands = [
+            command + "\x03" if command.rstrip().endswith("?") else command
+            for command in commands
+        ]
         session = run_device_commands(
-            cfg, row, commands, template=template, values={"capability_probe": True})
+            cfg, row, safe_commands, template=template,
+            values={"capability_probe": True})
         capability_output = sanitized_capability_output(session["output"])
         checks = snmp_handlers.capabilities(template, capability_output)
         confirmed = bool(checks.get("confirmed"))
@@ -673,7 +684,7 @@ def command_capabilities(cfg, templates, args):
             len(session["cli_errors"])))
         if not session["complete"] and session["error"]:
             print("SESSION_ERROR={}".format(session["error"].splitlines()[-1][:200]))
-        if status != "confirmed":
+        if status != "confirmed" or getattr(args, "show_help", False):
             safe_help = capability_output.replace("GrProbeAuth9", "[DUMMY]")
             print("SAFE_CAPABILITY_HELP_BEGIN")
             print(safe_help[-12000:].strip())
@@ -896,6 +907,43 @@ def command_test(cfg, templates, args):
     return 0 if all(item["status"] == "success" for item in results) else 2
 
 
+def safe_live_summary(output):
+    """Return structural SNMP facts without retaining device-provided values."""
+    text = sanitized_capability_output(output)
+
+    def section_total(keyword):
+        pattern = re.compile(
+            r"(?ims)^[^\n]*[>#]\s*show\s+[^\n]*\b{}\b[^\n]*\n"
+            r"(.*?)(?=^[^\n]*[>#]\s*(?:show|exit|end|quit)\b|\Z)".format(
+                re.escape(keyword)))
+        totals = []
+        for section in pattern.findall(text):
+            match = re.search(r"(?im)^\s*total\s+entries\s*:\s*(\d+)\s*$", section)
+            if match:
+                totals.append(int(match.group(1)))
+        return max(totals) if totals else None
+
+    configured_communities = len(re.findall(
+        r"(?im)^\s*(?:snmp-server|snmp-agent)\s+community\b", text))
+    community_total = section_total("community")
+    if community_total is None:
+        community_total = configured_communities
+    user_total = section_total("user")
+    group_total = section_total("group")
+    view_total = section_total("view")
+    return {
+        "communities": community_total,
+        "legacy_detected": bool(community_total),
+        "users": user_total,
+        "groups": group_total,
+        "views": view_total,
+        "engine_present": bool(re.search(
+            r"(?im)(?:engine\s*id|engineid).*?[0-9a-f]{10,}", text)),
+        "server_enabled": bool(re.search(
+            r"(?im)^\s*SNMP(?:\s+agent)?\s+is\s+enabled\b", text)),
+    }
+
+
 def command_report(cfg, templates, args):
     with gr.api_session(cfg, prompt=False) as api:
         rows = select_rows(inventory_rows(api), args, require_enabled=False)
@@ -938,7 +986,10 @@ def command_report(cfg, templates, args):
                                                                       redact=False),
                                            template=template, values=values)
                 record.update({"live_complete": live["complete"], "live_timeout": live["timeout"],
-                               "live_cli_errors": live["cli_errors"], "snmp_output": live["output"]})
+                               "live_cli_errors": live["cli_errors"],
+                               "live_summary": safe_live_summary(live["output"]),
+                               "live_output_stored": False,
+                               "sensitive_values_stored": False})
             except gr.GrError as exc:
                 record.update({"live_complete": False, "live_error": str(exc)})
         elif args.mode == "ports":
@@ -1227,6 +1278,9 @@ def build_parser():
     capabilities = sub.add_parser(
         "capabilities", help="read-only contextual-help probe for candidate handlers")
     add_selectors(capabilities)
+    capabilities.add_argument(
+        "--show-help", action="store_true",
+        help="print sanitized contextual help even when the dialect is confirmed")
     for action in ("configure", "rotate", "cleanup"):
         command = sub.add_parser(action); add_selectors(command)
         command.add_argument("--apply", action="store_true")

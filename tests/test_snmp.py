@@ -153,13 +153,24 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertTrue(template["apply_supported"])
         self.assertEqual(template["pilot_status"], "transactionally-validated")
 
-    def test_cisco_business_220_selects_distinct_candidate(self):
-        template, _source = SNMP.resolve_template(
-            self.templates, row("cisco-small-business", "SG220-50P", version="1.1.3.1"))
-        self.assertEqual(template["id"], "cisco-business-sg-sf220-1.1.3-aes-v3")
+    def test_cisco_business_220_sg220_50p_selects_validated_des_template(self):
+        device = row("cisco-small-business", "SG220-50P", version="1.1.3.1")
+        device["ip"] = "10.22.10.12"
+        template, source = SNMP.resolve_template(self.templates, device)
+        self.assertEqual(template["id"], "cisco-business-sg220-50p-1.1.3-des-v3")
         self.assertEqual(template["handler"], "cisco-business-220")
+        self.assertEqual(source, "selector")
+        self.assertTrue(template["apply_supported"])
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertEqual(template["pilot_status"], "transactionally-validated")
+        self.assertNotIn("ip_in", template["match"])
+
+    def test_cisco_business_sg220_26p_remains_blocked(self):
+        device = row("cisco-small-business", "SG220-26P", version="1.1.3.1")
+        device["ip"] = "10.22.10.16"
+        template, _source = SNMP.resolve_template(self.templates, device)
+        self.assertEqual(template["id"], "cisco-business-sg-sf220-1.1-v3")
         self.assertFalse(template["apply_supported"])
-        self.assertEqual(template["pilot_status"], "blocked-privacy-des")
 
     def test_cisco_business_220_other_firmware_remains_blocked(self):
         template, _source = SNMP.resolve_template(
@@ -169,14 +180,101 @@ class SnmpManagerTests(unittest.TestCase):
 
     def test_cbs_220_pilot_uses_user_syntax_without_v3_or_aes_token(self):
         template = next(item for item in self.templates
-                        if item["id"] == "cisco-business-sg-sf220-1.1.3-aes-v3")
+                        if item["id"] == "cisco-business-sg220-50p-1.1.3-des-v3")
         command = next(item for item in template["configure_commands"]
                        if item.startswith("snmp-server user "))
         self.assertIn(" auth sha {auth_cli} priv {privacy_cli}", command)
         self.assertNotIn(" v3 auth ", command)
         self.assertNotIn(" priv aes ", command)
+        group = next(item for item in template["configure_commands"]
+                     if item.startswith("snmp-server group "))
+        self.assertIn(" read-view {view}", group)
+        self.assertIn(" write-view SNMP_NO_WRITE", group)
+        self.assertIn("snmp-server view {view} subtree 1 oid-mask all viewtype included",
+                      template["configure_commands"])
+        self.assertIn("snmp-server view SNMP_NO_WRITE subtree 1 oid-mask all viewtype excluded",
+                      template["configure_commands"])
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertTrue(template["require_monitoring_test"])
+        self.assertIn("cleanup", template["supported_actions"])
+        self.assertEqual(template["cleanup_inspect_commands"], ["show running-config"])
         self.assertTrue(template["preserve_preexisting_engine"])
         self.assertTrue(template["preserve_preexisting_server"])
+        SNMP.validate_capability_commands(template["capability_commands"])
+        self.assertIn("snmp-server view GR_CAP_VIEW subtree 1 oid-mask all viewtype ?",
+                      template["capability_commands"])
+        self.assertIn("snmp-server group GR_CAP_GROUP v3 priv read-view GR_CAP_VIEW ?",
+                      template["capability_commands"])
+
+    def test_capabilities_can_request_sanitized_help_for_confirmed_dialect(self):
+        parser = SNMP.build_parser()
+        args = parser.parse_args(["capabilities", "--ip", "192.0.2.10", "--show-help"])
+        self.assertTrue(args.show_help)
+
+    def test_capability_commands_accept_control_c_cancel_suffix(self):
+        SNMP.validate_capability_commands([
+            "configure terminal",
+            "snmp-server group GR_CAP_GROUP v3 priv ?\x03",
+            "end",
+        ])
+
+    def test_cbs_220_des_pilot_accepts_reported_sha_and_des(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sg220-50p-1.1.3-des-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """Local SNMP engineID: 800000090300001122334455
+SNMP_DEFAULT_VIEW 1 included
+SNMP_DEFAULT_GROUP V3 priv
+User name monitor
+Authentication Protocol : SHA
+Privacy Protocol : DES
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertTrue(ok)
+        self.assertTrue(checks["privacy_des"])
+        self.assertTrue(checks["privacy_expected"])
+
+    def test_cbs_220_verifier_accepts_compact_username_header(self):
+        template = next(item for item in self.templates
+                        if item["id"] == "cisco-business-sg220-50p-1.1.3-des-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """Local SNMPV3 Engine id: 800000090300001122334455
+SNMP_DEFAULT_VIEW 1 included
+SNMP_DEFAULT_GROUP v3 priv
+Username: monitor
+Authentication Protocol: SHA
+Privacy Protocol: DES
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertTrue(ok)
+        self.assertTrue(checks["user"])
+
+    def test_live_summary_keeps_counts_but_never_raw_values(self):
+        output = """Sw#show snmp-server
+SNMP is enabled.
+Sw#show snmp-server community
+Community Name      Group Name
+legacy-sensitive    all
+Total Entries: 1
+Sw#show snmp-server user
+User name monitor
+Auth (Encrypted) : encrypted-sensitive
+Total Entries: 1
+Sw#show snmp-server engineid
+Local SNMPV3 Engine id: 800000090300001122334455
+Sw#exit
+"""
+        summary = SNMP.safe_live_summary(output)
+        rendered = json.dumps(summary, sort_keys=True)
+        self.assertEqual(summary["communities"], 1)
+        self.assertEqual(summary["users"], 1)
+        self.assertTrue(summary["legacy_detected"])
+        self.assertTrue(summary["engine_present"])
+        self.assertTrue(summary["server_enabled"])
+        self.assertNotIn("legacy-sensitive", rendered)
+        self.assertNotIn("encrypted-sensitive", rendered)
 
     def test_preexisting_cbs_server_and_engine_are_not_owned_by_rollback(self):
         template = {"preserve_preexisting_engine": True,

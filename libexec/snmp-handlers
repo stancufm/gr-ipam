@@ -266,12 +266,13 @@ def _verify_cbs_authpriv(template, output, values, action):
     if action == "cleanup":
         return not bool(re.search(r"(?im)^\s*snmp-server\s+community\b", output)), {}
     user_header = re.compile(
-        r"(?im)^\s*user\s+name\s*:\s*{}\s*$".format(re.escape(values["username"])))
+        r"(?im)^\s*user\s*name\s*(?::\s*|\s+){}\s*$".format(
+            re.escape(values["username"])))
     user_match = user_header.search(output)
     user_present = bool(user_match)
     user_output = output
     if user_match:
-        next_user = re.search(r"(?im)^\s*user\s+name\s*:", output[user_match.end():])
+        next_user = re.search(r"(?im)^\s*user\s*name\s*:", output[user_match.end():])
         end = user_match.end() + next_user.start() if next_user else len(output)
         user_output = output[user_match.start():end]
     auth_sha = bool(re.search(
