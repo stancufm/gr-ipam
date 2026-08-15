@@ -168,7 +168,7 @@ Catalogul inițial include concluziile piloților:
 | Cisco SG220-50P firmware 1.1.3.1 | configure/rotate/cleanup tranzacțional SHA/DES | sw15 a trecut verificarea structurală, probele authPriv din ambele surse, save-ul condiționat, eliminarea community legacy, arhivarea, asocierea phpIPAM și poll-ul LibreNMS |
 | Cisco SG220-26P firmware 1.1.3.1, dialect sw16 | configure/rotate/cleanup tranzacțional SHA/DES limitat pe IP | sw16 a confirmat dialectul CLI simplu, a trecut ambele probe authPriv înainte și după cleanup legacy, a salvat/arhivat starea finală și a finalizat asocierea phpIPAM plus poll-ul LibreNMS |
 | Cisco SG220-26P firmware 1.1.3.1, dialect sw21/sw37 | configure/rotate/cleanup tranzacțional SHA/DES limitat pe IP | ambele ținte au confirmat prin help contextual nemodificator gramatica subtree/read-view/write-view de tip SG220-50P; sw21 a trecut ambele probe authPriv înainte și după cleanup legacy, a salvat/arhivat starea finală și a finalizat asocierea phpIPAM plus poll-ul LibreNMS |
-| Cisco SF220-24P firmware 1.1.3.1 | handler distinct blocat, report/test | este necesar încă un pilot tranzacțional pe modelul exact |
+| Cisco SF220-24P firmware 1.1.3.1 | configure/rotate/cleanup tranzacțional SHA/DES | help-ul contextual pe sw17, sw18 și sw19 a confirmat același dialect; sw17 a trecut verificarea structurală, ambele probe authPriv, save-ul condiționat, cleanup-ul legacy și retestarea, arhiva finală, asocierea phpIPAM și poll-ul LibreNMS |
 | Restul Cisco Business | report/test | nu există încă handler validat pe model/firmware |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | inițializare adaptivă, SHA/AES și v3-only validate |
 | HPE Comware 7 | configure/rotate, ACL pe proces | workflow system-view validat pe cele trei piloturi |
