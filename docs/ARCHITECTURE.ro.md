@@ -54,4 +54,9 @@ Pentru o țintă generică, operatorul poate aproba o singură reîncercare prin
 promptul OpenSSH, fără salvarea parolei. Driverele automatizate se opresc până
 la corectarea profilului Vault, deoarece handlerul lor necesită credențiala.
 
+Pentru orice alt status nenul, dovezile stderr sunt clasificate și se afișează
+un `SSH_DIAGNOSTIC` fără secrete. Clientul normal acceptă numai cheile host
+văzute prima dată în magazinul privat gr, refuză cheile schimbate și folosește
+încercări de conectare limitate plus keepalive.
+
 Actualizările phpIPAM folosesc aplicația de scriere numai după `--apply`, verifică rezultatul prin GET și produc rapoarte private. Registrele IEEE sunt actualizate atomic și sunt căutate prin longest-prefix matching.

@@ -56,6 +56,30 @@ stop instead, because their login handler requires the encrypted credential.
 Use `gr vault test PROFILE` to verify decryption and `gr vault set PROFILE` only
 after independently confirming the replacement password.
 
+Every non-zero managed SSH result now emits a secret-free `SSH_DIAGNOSTIC` with
+the exit status and an evidence-based category. It distinguishes rejected
+authentication, DNS/route/refused/timeout failures, host-key changes,
+algorithm negotiation, connection closure, PTY/shell rejection, remote-command
+exit, unusable local identities, incompatible authentication methods, policy
+denial, exhausted session/resources and otherwise ambiguous session exits.
+Interactive diagnosis also considers the bounded tail of terminal output, which
+allows device-side CLI session limits and login rejection to be explained. A code alone is not used to accuse
+the Vault credential: status 6, for example, can be produced by `sshpass` host
+key handling or by a remote command/session that itself returns 6.
+
+Normal clients use `StrictHostKeyChecking=accept-new` with the private
+`~/.local/state/gr/known_hosts` store. This accepts a first-seen key, reports it
+through OpenSSH, and still refuses a changed key. Connection attempts are
+bounded and use SSH keepalives, so unreachable or broken transports eventually
+return an actionable diagnostic instead of waiting silently. An interactive
+connection that receives no server bytes for 15 seconds prints a waiting
+notice while those limits remain active. The isolated
+legacy client retains its compatibility policy.
+
+Native-prompt sessions (`--no-vault --no-audit`) also remain inside the PTY
+relay so `gr` can interpret their final status. Their typed password is not
+persisted because audit is disabled.
+
 If an abandoned GPG pinentry blocks later `gr` commands, close that terminal
 and run `gr vault reset-agent PROFILE`. It restarts only the current Unix user's
 GPG agent, does not modify the password store, and optionally tests the named

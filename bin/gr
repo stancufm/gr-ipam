@@ -44,7 +44,7 @@ CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SNMP_MANAGER = os.environ.get("GR_SNMP_MANAGER", "/usr/local/libexec/gr/snmp-manager")
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.8.13"
+GR_VERSION = "2.8.14"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -1331,7 +1331,8 @@ def write_all(descriptor, data):
         offset += os.write(descriptor, data[offset:])
 
 
-def run_pty_ssh(command, audit=None, inherited_fd=None, login_driver=None):
+def run_pty_ssh(command, audit=None, inherited_fd=None, login_driver=None,
+                diagnostics=None):
     if not sys.stdin.isatty() or not sys.stdout.isatty() or not sys.stderr.isatty():
         raise GrError("PTY SSH sessions require an interactive terminal")
     master_fd, slave_fd = os.openpty()
@@ -1371,10 +1372,22 @@ def run_pty_ssh(command, audit=None, inherited_fd=None, login_driver=None):
     streams = {master_fd: ("stdout", sys.stdout.fileno()),
                stderr_read: ("stderr", sys.stderr.fileno()),
                sys.stdin.fileno(): ("stdin", master_fd)}
+    waiting_since = time.monotonic()
+    remote_output_seen = False
+    waiting_notice_shown = False
     try:
         tty.setraw(sys.stdin.fileno())
         while master_fd in streams or stderr_read in streams:
-            ready, _, _ = select.select(list(streams), [], [])
+            ready, _, _ = select.select(list(streams), [], [], 1.0)
+            if (not ready and not remote_output_seen and not waiting_notice_shown and
+                    time.monotonic() - waiting_since >= 15):
+                notice = ("\r\ngr: SSH is still waiting for the first server response; "
+                          "the connection timeout and keepalive policy remain active.\r\n")
+                write_all(sys.stderr.fileno(), notice.encode("utf-8"))
+                waiting_notice_shown = True
+                if diagnostics is not None:
+                    diagnostics["waiting_notice"] = True
+                continue
             for source in ready:
                 stream, destination = streams[source]
                 try:
@@ -1391,6 +1404,12 @@ def run_pty_ssh(command, audit=None, inherited_fd=None, login_driver=None):
                     continue
                 if audit is not None:
                     audit.record(stream, data)
+                if diagnostics is not None and stream in ("stdout", "stderr"):
+                    diagnostics["frames"] = diagnostics.get("frames", 0) + 1
+                    previous = diagnostics.get(stream, b"")
+                    diagnostics[stream] = (previous + data)[-16384:]
+                if stream in ("stdout", "stderr"):
+                    remote_output_seen = True
                 write_all(destination, data)
                 if source == master_fd and login_driver is not None:
                     for action, response in login_driver.feed(data):
@@ -1407,6 +1426,8 @@ def run_pty_ssh(command, audit=None, inherited_fd=None, login_driver=None):
     _, status = os.waitpid(pid, 0)
     exit_status = os.waitstatus_to_exitcode(status) if hasattr(os, "waitstatus_to_exitcode") else (
         os.WEXITSTATUS(status) if os.WIFEXITED(status) else 128 + os.WTERMSIG(status))
+    if diagnostics is not None:
+        diagnostics["exit_status"] = exit_status
     if audit is not None:
         audit.close(exit_status)
         print("\nSSH audit: {}".format(audit.path), file=sys.stderr)
@@ -1442,6 +1463,124 @@ def retry_rejected_vault_password(exit_status, target, profile, retry_callback,
     print("Retrying without Vault. The entered password will not be saved by gr.",
           file=sys.stderr)
     return retry_callback()
+
+
+def classify_ssh_failure(exit_status, stderr_data=b"", remote_command=False,
+                         used_sshpass=False):
+    """Classify an SSH failure from evidence; never infer a bad password from rc alone."""
+    if isinstance(stderr_data, bytes):
+        detail = stderr_data.decode("utf-8", "replace").lower()
+    else:
+        detail = str(stderr_data or "").lower()
+    evidence = (
+        ("host-key-changed", ("remote host identification has changed",
+                              "offending host key")),
+        ("host-key-verification", ("host key verification failed",
+                                   "failed to add the host to the list of known hosts",
+                                   "known_hosts is not a regular file")),
+        ("host-key-algorithm", ("no matching host key type found",
+                                "no matching key exchange method found")),
+        ("local-identity", ("unprotected private key file", "bad permissions",
+                            "invalid format", "sign_and_send_pubkey: signing failed",
+                            "error loading key", "load key")),
+        ("dns", ("could not resolve hostname", "temporary failure in name resolution")),
+        ("no-route", ("no route to host", "network is unreachable")),
+        ("connection-refused", ("connection refused",)),
+        ("timeout", ("connection timed out", "operation timed out")),
+        ("authentication-unavailable", ("no supported authentication methods available",
+                                        "no authentication methods available")),
+        ("authentication-rejected", ("permission denied", "authentication failed",
+                                      "too many authentication failures", "login incorrect",
+                                      "invalid password")),
+        ("policy-rejected", ("administratively prohibited", "open failed")),
+        ("resource-exhausted", ("too many open files", "cannot fork",
+                                "resource temporarily unavailable",
+                                "maximum cli session", "maximum number of sessions")),
+        ("connection-closed", ("connection closed", "connection reset",
+                               "kex_exchange_identification", "banner exchange")),
+        ("remote-shell", ("shell request failed", "pty allocation request failed",
+                          "shell access is not enabled")),
+    )
+    for category, terms in evidence:
+        if any(term in detail for term in terms):
+            return category
+    if remote_command and exit_status not in (255,):
+        return "remote-command-exit"
+    if used_sshpass and exit_status == 5:
+        return "authentication-rejected"
+    if used_sshpass and exit_status == 6:
+        return "sshpass-exit-6-ambiguous"
+    if used_sshpass and exit_status == 7:
+        return "host-key-changed"
+    if exit_status == 255:
+        return "transport"
+    return "session-exit"
+
+
+def report_ssh_failure(exit_status, target, profile, known_hosts, stderr_data=b"",
+                       remote_command=False, used_sshpass=False):
+    """Emit an actionable, secret-free diagnostic for every non-zero SSH result."""
+    if exit_status == 0:
+        return "success"
+    category = classify_ssh_failure(
+        exit_status, stderr_data, remote_command=remote_command,
+        used_sshpass=used_sshpass)
+    print("\nSSH_DIAGNOSTIC category={} exit_status={} target={} profile={}".format(
+        category, exit_status, target, profile or "-"), file=sys.stderr)
+    if category == "authentication-rejected":
+        print("SSH authentication was rejected. Validate the selected secret with "
+              "'gr vault test {}'; replace it only after independently confirming the "
+              "correct credential.".format(profile), file=sys.stderr)
+    elif category == "host-key-changed":
+        print("The stored host key changed. Verify the new fingerprint through a trusted "
+              "channel before editing {}. gr will not replace it automatically.".format(
+                  known_hosts), file=sys.stderr)
+    elif category == "host-key-verification":
+        print("OpenSSH could not verify or update the exact gr host-key store {}. Check "
+              "its type, ownership and permissions; do not bypass a changed key."
+              .format(known_hosts), file=sys.stderr)
+    elif category == "host-key-algorithm":
+        print("The client and server could not agree on a host-key or key-exchange "
+              "algorithm. Check the selected normal/legacy SSH client metadata.",
+              file=sys.stderr)
+    elif category == "local-identity":
+        print("The configured local SSH identity could not be loaded or used. Check the "
+              "identity file format, ownership, permissions and signing agent.",
+              file=sys.stderr)
+    elif category == "authentication-unavailable":
+        print("The client and server have no usable authentication method in common. "
+              "Check account policy, allowed methods and the selected key/password "
+              "profile; this is not classified as a rejected password.", file=sys.stderr)
+    elif category in ("dns", "no-route", "connection-refused", "timeout",
+                      "connection-closed"):
+        print("SSH transport failed before a usable terminal was established. Check name "
+              "resolution, route/firewall, target port and server availability; this does "
+              "not prove that the Vault password is wrong.", file=sys.stderr)
+    elif category == "remote-shell":
+        print("Authentication reached the server, but the PTY or remote shell request was "
+              "rejected. Check the account shell and SSH server policy.", file=sys.stderr)
+    elif category == "policy-rejected":
+        print("SSH authentication may have succeeded, but the requested channel or jump "
+              "forwarding was prohibited by policy.", file=sys.stderr)
+    elif category == "resource-exhausted":
+        print("The client or server reported an exhausted process, file-descriptor or "
+              "session limit. Close abandoned sessions and inspect system capacity.",
+              file=sys.stderr)
+    elif category == "remote-command-exit":
+        print("SSH reached the remote command, which returned status {}. This is not "
+              "classified as an authentication failure.".format(exit_status),
+              file=sys.stderr)
+    elif category == "sshpass-exit-6-ambiguous":
+        print("Status 6 alone is ambiguous: sshpass uses it when a host key cannot be "
+              "accepted, while a remote session may also return 6. gr found no decisive "
+              "terminal evidence. Check the exact gr store {} and retry; the password is "
+              "not classified as rejected.".format(known_hosts), file=sys.stderr)
+    else:
+        print("The SSH session ended with status {} without a recognized diagnostic. "
+              "The Vault password is not classified as rejected; an incorrect password "
+              "normally produces explicit authentication evidence or sshpass status 5."
+              .format(exit_status), file=sys.stderr)
+    return category
 
 
 def audit_replay_streams(include_stdin=False, stream=None):
@@ -1540,9 +1679,19 @@ def command_audit_replay(path, streams=None, use_pager=True):
         if exit_status == 5:
             message = ("No terminal stream data was recorded. SSH password authentication "
                        "was rejected (sshpass exit 5); validate the selected Vault profile.\n")
+        elif exit_status == 6:
+            message = ("No terminal stream data was recorded (exit status 6). This status "
+                       "alone is ambiguous: sshpass uses it for a host key it cannot accept, "
+                       "while a remote session can also return 6. Check the exact gr "
+                       "known_hosts store; the Vault password is not classified as rejected.\n")
+        elif exit_status == 7:
+            message = ("No terminal stream data was recorded. sshpass reported a changed "
+                       "host key (exit status 7). Verify the fingerprint through a trusted "
+                       "channel; the Vault password was not rejected.\n")
         else:
-            message = ("No terminal stream data was recorded (session exit status: {}).\n".format(
-                exit_status))
+            message = ("No terminal stream data was recorded (session exit status: {}). "
+                       "The failure was not classified as a rejected Vault password.\n".format(
+                           exit_status))
         destination = getattr(sys.stderr, "buffer", sys.stderr)
         if destination is sys.stderr:
             destination.write(message)
@@ -2220,6 +2369,18 @@ def ensure_known_hosts(cfg):
     return path
 
 
+def ssh_connection_options(client="normal"):
+    """Bound transport stalls and apply the project's host-key policy."""
+    strict_host_key = "no" if client == "legacy" else "accept-new"
+    return [
+        "-o", "StrictHostKeyChecking={}".format(strict_host_key),
+        "-o", "ConnectTimeout=20",
+        "-o", "ConnectionAttempts=1",
+        "-o", "ServerAliveInterval=30",
+        "-o", "ServerAliveCountMax=3",
+    ]
+
+
 def exact_inventory_target(cfg, target):
     wanted = str(target or "").strip().lower()
     if not wanted:
@@ -2263,9 +2424,10 @@ def command_exec(cfg, target, command_values, use_sudo=False, override_user=None
     remote_text = " ".join(shlex.quote(value) for value in command_values)
     if use_sudo:
         remote_text = "sudo -S -p '' -- sh -c {}".format(shlex.quote(remote_text))
+    known_hosts = ensure_known_hosts(cfg)
     ssh_command = [client_binary, "-F", "/dev/null", "-p", port,
-                   "-o", "UserKnownHostsFile={}".format(ensure_known_hosts(cfg)),
-                   "-o", "StrictHostKeyChecking=ask"]
+                   "-o", "UserKnownHostsFile={}".format(known_hosts)]
+    ssh_command.extend(ssh_connection_options(selected_client))
     profile_cfg = cfg.get("ssh_profiles", {}).get(selected_profile, {}) if selected_profile else {}
     identity = str(profile_cfg.get("identity_file") or "").strip()
     if identity:
@@ -2283,6 +2445,7 @@ def command_exec(cfg, target, command_values, use_sudo=False, override_user=None
         if not vault_secret_exists(ssh_secret):
             raise GrError("Vault secret is not configured: {}".format(ssh_secret))
         ssh_command, inherited_fd = ssh_with_password(ssh_command, read_vault_password(ssh_secret))
+    used_sshpass = inherited_fd is not None
     sudo_input = None
     if use_sudo:
         if no_vault or not selected_profile:
@@ -2323,6 +2486,11 @@ def command_exec(cfg, target, command_values, use_sudo=False, override_user=None
     if recorder:
         recorder.close(process.returncode)
         print("Remote command audit: {}".format(recorder.path), file=sys.stderr)
+    if process.returncode != 0:
+        report_ssh_failure(
+            process.returncode, str(row["_ip"]), selected_profile, known_hosts,
+            stderr_data=stderr_data, remote_command=True,
+            used_sshpass=used_sshpass)
     return process.returncode
 
 
@@ -2330,6 +2498,7 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
                 override_client=None, override_driver=None, no_vault=False, audit=None):
     # Always connect to the selected IP, not a potentially duplicated hostname.
     target = str(row["_ip"])
+    known_hosts = ensure_known_hosts(cfg)
     meta = phpipam_ssh_metadata(row)
     if meta["enabled"] or override_user is not None or override_port is not None or override_profile is not None:
         user = override_user or meta["user"] or getpass.getuser()
@@ -2341,8 +2510,8 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
         if not shutil.which(client_binary):
             raise GrError("SSH client is not installed: {}".format(client_binary))
         command = [client_binary, "-F", "/dev/null", "-p", port]
-        command.extend(["-o", "UserKnownHostsFile={}".format(ensure_known_hosts(cfg)),
-                        "-o", "StrictHostKeyChecking=ask"])
+        command.extend(["-o", "UserKnownHostsFile={}".format(known_hosts)])
+        command.extend(ssh_connection_options(selected_client))
         selected_profile = override_profile or meta["profile"]
         profile_cfg = cfg.get("ssh_profiles", {}).get(selected_profile, {}) if selected_profile else {}
         identity = str(profile_cfg.get("identity_file") or "").strip()
@@ -2362,6 +2531,7 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
             raise GrError("SSH metadata is not enabled for {} and legacy fallback is disabled".format(target))
         effective = ssh_effective(target)
         command = ["ssh", target]
+        known_hosts = expand("~/.ssh/known_hosts")
         print("Connecting with LEGACY ~/.ssh/config: {}@{}:{}".format(
             effective["user"], target, effective["port"]))
     selected_profile = override_profile or meta["profile"]
@@ -2384,28 +2554,47 @@ def connect_ssh(cfg, row, override_user=None, override_port=None, override_profi
         print("Using device driver: {}".format(device_driver))
         login_driver = device_login_driver(device_driver)(user, vault_password)
 
-    def retry_with_prompt(exit_status):
-        if not vault_password:
-            return exit_status
-        return retry_rejected_vault_password(
-            exit_status, target, selected_profile,
-            lambda: connect_ssh(cfg, row, override_user, override_port, override_profile,
-                                override_client, override_driver, no_vault=True, audit=audit),
-            prompt_retry_supported=login_driver is None)
+    def finish_connection(exit_status, diagnostics):
+        if vault_password and exit_status == 5:
+            return retry_rejected_vault_password(
+                exit_status, target, selected_profile,
+                lambda: connect_ssh(cfg, row, override_user, override_port, override_profile,
+                                    override_client, override_driver, no_vault=True, audit=audit),
+                prompt_retry_supported=login_driver is None)
+        if exit_status != 0:
+            evidence = diagnostics.get("stderr", b"") + diagnostics.get("stdout", b"")
+            report_ssh_failure(
+                exit_status, target, selected_profile, known_hosts,
+                stderr_data=evidence,
+                remote_command=False, used_sshpass=bool(vault_password))
+        return exit_status
 
     audit_enabled = cfg.get("ssh_audit_enabled", False) if audit is None else audit
     if audit_enabled:
         recorder = SshSessionAudit(cfg, row, command)
         print("Recording complete SSH session to: {}".format(recorder.path), file=sys.stderr)
-        return retry_with_prompt(run_pty_ssh(command, recorder, inherited_fd, login_driver))
+        diagnostics = {}
+        exit_status = run_pty_ssh(
+            command, recorder, inherited_fd, login_driver, diagnostics=diagnostics)
+        return finish_connection(exit_status, diagnostics)
     if login_driver is not None:
-        return retry_with_prompt(run_pty_ssh(command, inherited_fd=inherited_fd,
-                                             login_driver=login_driver))
+        diagnostics = {}
+        exit_status = run_pty_ssh(
+            command, inherited_fd=inherited_fd, login_driver=login_driver,
+            diagnostics=diagnostics)
+        return finish_connection(exit_status, diagnostics)
     if vault_password:
         # We must wait for sshpass to return to identify status 5 and offer the
-        # operator an interactive retry. Non-vault SSH retains execvp behavior.
-        return retry_with_prompt(run_pty_ssh(command, inherited_fd=inherited_fd))
-    os.execvp(command[0], command)
+        # operator an interactive retry.
+        diagnostics = {}
+        exit_status = run_pty_ssh(
+            command, inherited_fd=inherited_fd, diagnostics=diagnostics)
+        return finish_connection(exit_status, diagnostics)
+    # Keep native-prompt sessions inside the PTY relay even without audit so gr
+    # can always report the final status. Typed credentials are not persisted.
+    diagnostics = {}
+    exit_status = run_pty_ssh(command, diagnostics=diagnostics)
+    return finish_connection(exit_status, diagnostics)
 
 
 def command_search(cfg, terms, use_ssh=False, ssh_user=None, ssh_port=None,

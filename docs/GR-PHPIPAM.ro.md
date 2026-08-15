@@ -51,6 +51,32 @@ handlerul lor de login necesită credențiala criptată. Verifică decriptarea c
 `gr vault test PROFIL` și rulează `gr vault set PROFIL` numai după confirmarea
 independentă a parolei noi.
 
+Orice rezultat SSH administrat cu status nenul afișează acum un diagnostic
+`SSH_DIAGNOSTIC` fără secrete, cu statusul și categoria stabilită din dovezile
+stderr. Sunt diferențiate: autentificare respinsă, DNS/rută/refuz/timeout,
+schimbarea cheii host, negocierea algoritmilor, închiderea conexiunii,
+respingerea PTY/shell, codul comenzii remote, identitățile locale inutilizabile,
+metodele de autentificare incompatibile, refuzul prin policy, limitele de
+sesiuni/resurse și ieșirile ambigue. Diagnosticul interactiv ia în calcul și
+coada limitată a outputului terminalului, astfel încât limitele CLI sau
+respingerea loginului de către echipament să poată fi explicate. Codul singur
+nu mai este folosit pentru a acuza credențiala Vault: statusul 6 poate proveni
+din gestionarea cheii host de către `sshpass`, dar și dintr-o comandă/sesiune
+remote care întoarce ea însăși 6.
+
+Clientul normal folosește `StrictHostKeyChecking=accept-new` cu magazinul privat
+`~/.local/state/gr/known_hosts`: acceptă cheia văzută prima dată, o raportează
+prin OpenSSH și continuă să refuze orice cheie schimbată. Încercările de
+conectare sunt limitate și folosesc keepalive SSH, astfel încât un transport
+indisponibil sau întrerupt revine cu diagnostic în loc să aștepte tăcut. O
+conexiune interactivă fără niciun octet primit timp de 15 secunde afișează că
+încă așteaptă, în timp ce limitele rămân active.
+Clientul legacy izolat își păstrează politica de compatibilitate.
+
+Și sesiunile cu prompt nativ (`--no-vault --no-audit`) rămân în releul PTY,
+pentru ca `gr` să poată interpreta statusul final. Parola introdusă nu este
+persistentă deoarece auditul este dezactivat.
+
 Dacă un dialog GPG/pinentry abandonat blochează comenzile `gr` următoare,
 închide terminalul respectiv și rulează `gr vault reset-agent PROFIL`. Comanda
 repornește numai agentul GPG al utilizatorului Unix curent, nu modifică seiful și
