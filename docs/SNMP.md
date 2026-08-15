@@ -144,13 +144,17 @@ the user command omits `v3`, and an implicit privacy password creates DES. The
 sw15 pilot passed structural verification, both authPriv probes, conditional
 save, removal of its legacy community, final archive, phpIPAM association and
 LibreNMS poll.
-SG220-26P firmware 1.1.3.1 has another exact dialect: `engineid default`, a
-view expressed as `iso included`, a group using `read`, a user command without
+SG220-26P firmware 1.1.3.1 is not dialect-uniform. Sw16 uses `engineid default`,
+a view expressed as `iso included`, a group using `read`, a user command without
 `v3` whose implicit privacy password creates DES, and the bare `snmp-server`
 command to enable the agent. The sw16 pilot passed shadow and LibreNMS authPriv
 probes before save, removed one legacy community, passed both probes again,
 saved and archived the final state, and completed phpIPAM association and a
-successful LibreNMS poll.
+successful LibreNMS poll. Read-only contextual help on sw21 and sw37 instead
+confirmed the SG220-50P-style `subtree/oid-mask/viewtype` and
+`read-view/write-view` grammar. The catalog therefore scopes both SG220-26P
+dialects by IP and leaves unknown units blocked instead of guessing from model
+and firmware alone.
 The sw51 template submits engine-ID confirmations with a newline and waits two
 seconds before structural verification, matching the pacing of the successful
 manual pilot and allowing the SNMPv3 user database to settle.
@@ -198,7 +202,8 @@ The initial catalog incorporates the pilot evidence:
 | Cisco SG350X-48MP 2.4.0.91 | transactional SHA/DES configure/rotate | sw51 passed structural SHA/DES verification, both authPriv probes, conditional save, archive, phpIPAM association and LibreNMS poll |
 | Cisco SG350-28P, SG250X-24P and SG250-08HP 2.4.0.94 | transactional SHA/DES configure/rotate/cleanup | sw20, sw30 and sw31 passed structural and two-source authPriv verification, conditional save, archive and LibreNMS poll; sw20/sw30 also validated legacy-community removal and post-cleanup probes |
 | Cisco SG220-50P firmware 1.1.3.1 | transactional SHA/DES configure/rotate/cleanup | sw15 passed structural and two-source authPriv verification, conditional save, legacy-community cleanup, archive, phpIPAM association and LibreNMS poll |
-| Cisco SG220-26P firmware 1.1.3.1 | transactional SHA/DES configure/rotate/cleanup | sw16 confirmed the exact CLI dialect, passed both authPriv probes before and after legacy cleanup, saved and archived the final state, and completed phpIPAM/LibreNMS association and poll |
+| Cisco SG220-26P firmware 1.1.3.1, sw16 dialect | IP-scoped transactional SHA/DES configure/rotate/cleanup | sw16 confirmed the simple CLI dialect, passed both authPriv probes before and after legacy cleanup, saved and archived the final state, and completed phpIPAM/LibreNMS association and poll |
+| Cisco SG220-26P firmware 1.1.3.1, sw21/sw37 dialect | IP-scoped transactional SHA/DES configure/rotate/cleanup | both targets confirmed the SG220-50P-style subtree/read-view/write-view grammar through non-mutating contextual help; sw21 passed both authPriv probes before and after legacy cleanup, saved/archived the final state, and completed phpIPAM/LibreNMS association and poll |
 | Cisco SF220-24P firmware 1.1.3.1 | distinct blocked handler, report/test | an exact-model transactional pilot is still required |
 | Other Cisco Business | report/test | no reviewed model/firmware-specific handler |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | adaptive initialization, SHA/AES and v3-only validated |

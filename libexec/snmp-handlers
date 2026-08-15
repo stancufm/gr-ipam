@@ -300,6 +300,12 @@ def _verify_cbs_authpriv(template, output, values, action):
     if template.get("verify_engineid_default_config"):
         engine_present = engine_present or bool(re.search(
             r"(?im)^\s*snmp-server\s+engineid\s+default\s*$", output))
+    if template.get("verify_engine_from_v3_user"):
+        # Some SG220 firmware keeps the authoritative engine ID out of both
+        # running-config and show output.  A local authPriv user can exist only
+        # after that engine database has been initialized, so the scoped user
+        # block is the strongest available non-secret proof on those targets.
+        engine_present = engine_present or user_present
     checks = {
         "engine": engine_present,
         "view": values["view"].lower() in output.lower(),
