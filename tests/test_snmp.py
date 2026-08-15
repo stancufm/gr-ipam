@@ -174,7 +174,7 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertTrue(template["apply_supported"])
         self.assertEqual(template["privacy_protocol_required"], "DES")
         self.assertEqual(template["pilot_status"], "transactionally-validated")
-        self.assertNotIn("ip_in", template["match"])
+        self.assertEqual(template["match"]["ip_in"], ["10.22.10.16"])
         self.assertIn("snmp-server engineid default", template["configure_commands"])
         self.assertIn("snmp-server view {view} iso included", template["configure_commands"])
         self.assertIn("snmp-server group {group} v3 priv read {view}",
@@ -184,12 +184,35 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertTrue(template["verify_engineid_default_config"])
         self.assertTrue(template["verify_server_enabled"])
 
-    def test_cisco_business_sg220_26p_other_target_uses_validated_template(self):
+    def test_cisco_business_sg220_26p_sw21_uses_subtree_pilot(self):
         device = row("cisco-small-business", "SG220-26P", version="1.1.3.1")
         device["ip"] = "10.22.10.21"
         template, _source = SNMP.resolve_template(self.templates, device)
-        self.assertEqual(template["id"], "cisco-business-sg220-26p-1.1.3-des-v3")
+        self.assertEqual(
+            template["id"], "cisco-business-sg220-26p-1.1.3-subtree-des-v3")
         self.assertTrue(template["apply_supported"])
+        self.assertEqual(template["pilot_status"], "transactionally-validated")
+        self.assertEqual(template["match"]["ip_in"], ["10.22.10.21", "10.22.10.37"])
+        self.assertIn(
+            "snmp-server view {view} subtree 1 oid-mask all viewtype included",
+            template["configure_commands"])
+        self.assertIn(
+            "snmp-server group {group} v3 priv read-view {view} write-view SNMP_NO_WRITE",
+            template["configure_commands"])
+
+    def test_cisco_business_sg220_26p_sw37_uses_subtree_pilot(self):
+        device = row("cisco-small-business", "SG220-26P", version="1.1.3.1")
+        device["ip"] = "10.22.10.37"
+        template, _source = SNMP.resolve_template(self.templates, device)
+        self.assertEqual(
+            template["id"], "cisco-business-sg220-26p-1.1.3-subtree-des-v3")
+
+    def test_cisco_business_sg220_26p_unknown_ip_remains_blocked(self):
+        device = row("cisco-small-business", "SG220-26P", version="1.1.3.1")
+        device["ip"] = "192.0.2.21"
+        template, _source = SNMP.resolve_template(self.templates, device)
+        self.assertEqual(template["id"], "cisco-business-sg-sf220-1.1-v3")
+        self.assertFalse(template["apply_supported"])
 
     def test_cisco_business_220_other_firmware_remains_blocked(self):
         template, _source = SNMP.resolve_template(
@@ -289,6 +312,24 @@ Encryption Protocol: des
         self.assertTrue(checks["engine"])
         self.assertTrue(checks["privacy_des"])
         self.assertTrue(checks["server_enabled"])
+
+    def test_sg220_26p_subtree_verifier_accepts_user_as_engine_proof(self):
+        template = next(item for item in self.templates if item["id"] ==
+                        "cisco-business-sg220-26p-1.1.3-subtree-des-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """SNMP is enabled.
+snmp-server view SNMP_DEFAULT_VIEW subtree 1 oid-mask all viewtype included
+snmp-server group SNMP_DEFAULT_GROUP v3 priv read-view SNMP_DEFAULT_VIEW
+Username: monitor
+Access GroupName: SNMP_DEFAULT_GROUP
+Authentication Protocol: sha
+Encryption Protocol: des
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertTrue(ok)
+        self.assertTrue(checks["engine"])
+        self.assertTrue(checks["user"])
 
     def test_live_summary_keeps_counts_but_never_raw_values(self):
         output = """Sw#show snmp-server
