@@ -114,7 +114,9 @@ management ACLs.
 `gr snmp capabilities` is a read-only gate for candidate handlers. It enters
 configuration mode only to request contextual help from deliberately incomplete
 `snmp-server ... ?` commands. A static safety validator refuses any candidate
-command that could create an object, and the command reports normalized
+command that could create an object. Every contextual-help line is cancelled
+with Ctrl-C before the interactive client can append a newline, including when
+the firmware exposes `<cr>` as a valid completion. The command reports normalized
 capabilities rather than a complete configuration. It does not read SNMP
 credentials. Candidate templates remain `apply_supported: false` until this
 probe and a complete transactional pilot succeed on a representative device.
@@ -136,6 +138,12 @@ enabled after sw64/sw65/sw67, sw66/sw68/sw69 and sw51 respectively passed local
 and LibreNMS authPriv probes, conditional save, final archive and LibreNMS poll.
 The 2.4.0.94 pilots on sw20, sw30 and sw31 also validated removal of legacy
 communities, post-cleanup probes and token-only Cisco Business removal syntax.
+SG220-50P firmware 1.1.3.1 uses the distinct Cisco 220 grammar: views require
+`subtree 1 oid-mask all viewtype`, groups require both read and write views,
+the user command omits `v3`, and an implicit privacy password creates DES. The
+sw15 pilot passed structural verification, both authPriv probes, conditional
+save, removal of its legacy community, final archive, phpIPAM association and
+LibreNMS poll.
 The sw51 template submits engine-ID confirmations with a newline and waits two
 seconds before structural verification, matching the pacing of the successful
 manual pilot and allowing the SNMPv3 user database to settle.
@@ -182,7 +190,8 @@ The initial catalog incorporates the pilot evidence:
 | Cisco SG350X-24PD 2.3.0.130 | transactional SHA/DES configure/rotate | sw66, sw68 and sw69 passed both authPriv probes, prompted save, final archive and LibreNMS poll |
 | Cisco SG350X-48MP 2.4.0.91 | transactional SHA/DES configure/rotate | sw51 passed structural SHA/DES verification, both authPriv probes, conditional save, archive, phpIPAM association and LibreNMS poll |
 | Cisco SG350-28P, SG250X-24P and SG250-08HP 2.4.0.94 | transactional SHA/DES configure/rotate/cleanup | sw20, sw30 and sw31 passed structural and two-source authPriv verification, conditional save, archive and LibreNMS poll; sw20/sw30 also validated legacy-community removal and post-cleanup probes |
-| Cisco SG/SF 220 firmware 1.1.3.1 | distinct blocked handler, report/test | sw15 created DES rather than the required AES; rollback and clean-state verification succeeded without save |
+| Cisco SG220-50P firmware 1.1.3.1 | transactional SHA/DES configure/rotate/cleanup | sw15 passed structural and two-source authPriv verification, conditional save, legacy-community cleanup, archive, phpIPAM association and LibreNMS poll |
+| Cisco SG220-26P and SF220-24P firmware 1.1.3.1 | distinct blocked handler, report/test | exact-model transactional pilots are still required |
 | Other Cisco Business | report/test | no reviewed model/firmware-specific handler |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | adaptive initialization, SHA/AES and v3-only validated |
 | HPE Comware 7 | configure/rotate, process ACL | system-view workflow validated on the three pilot devices |

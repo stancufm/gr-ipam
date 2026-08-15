@@ -77,7 +77,9 @@ deduc și nu se aplică ACL-uri pe control-plane, interfață sau management glo
 `gr snmp capabilities` este poarta read-only pentru handlerele candidate. Intră
 în modul de configurare numai pentru help contextual, folosind comenzi
 `snmp-server ... ?` intenționat incomplete. Un validator static refuză orice
-comandă candidat care ar putea crea un obiect, iar rezultatul conține numai
+comandă candidat care ar putea crea un obiect. Fiecare linie de help contextual
+este anulată cu Ctrl-C înainte ca clientul interactiv să poată adăuga newline,
+inclusiv când firmware-ul oferă `<cr>` drept completare validă. Rezultatul conține numai
 capabilități normalizate, nu configurația completă. Comanda nu citește
 credențiale SNMP. Template-ul rămâne `apply_supported: false` până când această
 probă și un pilot tranzacțional complet reușesc pe un echipament reprezentativ.
@@ -101,8 +103,14 @@ probele authPriv din shadow și LibreNMS, save-ul condiționat, arhivarea final�
 eliminarea community legacy, probele după cleanup și sintaxa Cisco Business
 care elimină numai tokenul community. Template-ul sw51 trimite confirmările engine ID cu newline
 și așteaptă două secunde înainte de verificarea structurală, reproducând ritmul
-pilotului manual reușit și permițând stabilizarea bazei userilor SNMPv3. Restul
-combinațiilor Cisco Business 2.x rămân
+pilotului manual reușit și permițând stabilizarea bazei userilor SNMPv3.
+SG220-50P cu firmware 1.1.3.1 folosește gramatica distinctă Cisco 220: view-urile
+cer `subtree 1 oid-mask all viewtype`, grupurile cer atât read-view cât și
+write-view, comanda userului omite `v3`, iar parola privacy implicită creează
+DES. Pilotul sw15 a trecut verificarea structurală, ambele probe authPriv,
+save-ul condiționat, eliminarea community legacy, arhivarea finală, asocierea
+phpIPAM și poll-ul LibreNMS.
+Restul combinațiilor Cisco Business 2.x rămân
 blocate deoarece dialectul privacy nu poate fi dedus numai din familie.
 Help-ul contextual care acceptă o parolă privacy implicită este raportat drept
 `implicit-unverified`; nu este considerat dovadă AES, deoarece același format
@@ -146,7 +154,8 @@ Catalogul inițial include concluziile piloților:
 | Cisco SG350X-24PD 2.3.0.130 | configure/rotate tranzacțional SHA/DES | sw66, sw68 și sw69 au trecut ambele probe authPriv, save-ul cu prompt, arhiva finală și poll-ul LibreNMS |
 | Cisco SG350X-48MP 2.4.0.91 | configure/rotate tranzacțional SHA/DES | sw51 a trecut verificarea structurală SHA/DES, ambele probe authPriv, save-ul condiționat, arhivarea, asocierea phpIPAM și poll-ul LibreNMS |
 | Cisco SG350-28P, SG250X-24P și SG250-08HP 2.4.0.94 | configure/rotate/cleanup tranzacțional SHA/DES | sw20, sw30 și sw31 au trecut verificarea structurală, probele authPriv din ambele surse, save-ul, arhivarea și poll-ul LibreNMS; sw20/sw30 au validat și eliminarea community legacy plus retestarea |
-| Cisco SG/SF 220 firmware 1.1.3.1 | handler distinct blocat, report/test | sw15 a creat DES în loc de AES; rollback-ul și verificarea stării curate au reușit fără save |
+| Cisco SG220-50P firmware 1.1.3.1 | configure/rotate/cleanup tranzacțional SHA/DES | sw15 a trecut verificarea structurală, probele authPriv din ambele surse, save-ul condiționat, eliminarea community legacy, arhivarea, asocierea phpIPAM și poll-ul LibreNMS |
+| Cisco SG220-26P și SF220-24P firmware 1.1.3.1 | handler distinct blocat, report/test | sunt necesari încă piloți tranzacționali pe fiecare model exact |
 | Restul Cisco Business | report/test | nu există încă handler validat pe model/firmware |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | inițializare adaptivă, SHA/AES și v3-only validate |
 | HPE Comware 7 | configure/rotate, ACL pe proces | workflow system-view validat pe cele trei piloturi |
