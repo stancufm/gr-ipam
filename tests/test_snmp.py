@@ -99,17 +99,18 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["id"], "planet-sgs-6310-2.2-v3")
         self.assertTrue(template["apply_supported"])
 
-    def test_unreviewed_cisco_business_2x_selects_family_candidate(self):
+    def test_validated_sf350_24094_selects_des_handler(self):
         template, _source = SNMP.resolve_template(
             self.templates, row("cisco-small-business", "SF350-24P", version="2.4.0.94"))
-        self.assertEqual(template["id"], "cisco-business-sx2xx-sx3xx-2x-v3")
+        self.assertEqual(template["id"], "cisco-business-2.4.0.94-des-pilot-v3")
         self.assertEqual(template["handler"], "cisco-business-2x")
-        self.assertFalse(template["apply_supported"])
-        self.assertEqual(template["pilot_status"], "blocked-unclassified-privacy-dialect")
-        self.assertEqual(template["pilot_evidence"]["os_version"], "2.5.0.83")
+        self.assertTrue(template["apply_supported"])
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertTrue(template["reconcile_preexisting_managed"])
 
     def test_validated_24094_models_select_sha_des_template(self):
         for ip, model in (("10.22.10.23", "SG350-28P"),
+                          ("192.0.2.26", "SF350-24P"),
                           ("10.22.10.36", "SG250X-24P"),
                           ("10.22.10.47", "SG250-08HP")):
             device = row("cisco-small-business", model, version="2.4.0.94")
