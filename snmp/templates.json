@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": 13,
+  "catalog_version": 14,
   "templates": [
     {
       "id": "cisco-ios-v3",
@@ -169,6 +169,43 @@
       "rotate_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
       "verify_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views {view}", "show snmp groups {group}", "show snmp users {username}"],
       "save_commands": ["terminal datadump", "copy running-config startup-config"],
+      "configure_rollback_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "no snmp-server group {group} v3 priv", "no snmp-server view {view}", "no snmp-server server", "no snmp-server engineID local", "end"],
+      "rotate_rollback_commands": []
+    },
+    {
+      "id": "cisco-business-sf250-24p-2.3.5.63-des-pilot-v3",
+      "match": {
+        "driver": "cisco-small-business",
+        "model_regex": "^SF250-24P$",
+        "os_version_regex": "^2\\.3\\.5\\.63$"
+      },
+      "handler": "cisco-business-2x",
+      "defaults": {"group": "SNMP_DEFAULT_GROUP", "view": "SNMP_DEFAULT_VIEW"},
+      "privacy_protocol_required": "DES",
+      "recommended_profile": "monitoring-v3-cbs2x",
+      "apply_supported": true,
+      "require_monitoring_test": true,
+      "verify_server_enabled": true,
+      "post_apply_settle_seconds": 3,
+      "preserve_preexisting_engine": true,
+      "preserve_preexisting_server": true,
+      "reconcile_preexisting_managed": true,
+      "supported_actions": ["configure", "rotate", "cleanup"],
+      "reason": "Transactionally validated SF250-24P firmware 2.3.5.63 SHA/DES workflow. It supports safe adoption of an existing managed state, legacy-community cleanup, authenticated probes from shadow and LibreNMS, and the device-specific short write save command with overwrite confirmation.",
+      "pilot_status": "transactionally-validated",
+      "pilot_evidence": {
+        "target": "sw10",
+        "model": "SF250-24P",
+        "os_version": "2.3.5.63",
+        "result": "sha-des-two-source-cleanup-write-archive-phpipam-librenms-poll-success"
+      },
+      "workflow": "transactional-cli-v1",
+      "inspect_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],
+      "cleanup_inspect_commands": ["terminal datadump", "show running-config"],
+      "configure_commands": ["terminal datadump", "configure terminal", "snmp-server engineID local default", "snmp-server view {view} iso included", "snmp-server group {group} v3 priv read {view}", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "snmp-server server", "end"],
+      "rotate_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "verify_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views {view}", "show snmp groups {group}", "show snmp users {username}"],
+      "save_commands": ["terminal datadump", "write"],
       "configure_rollback_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "no snmp-server group {group} v3 priv", "no snmp-server view {view}", "no snmp-server server", "no snmp-server engineID local", "end"],
       "rotate_rollback_commands": []
     },

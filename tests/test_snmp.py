@@ -108,6 +108,23 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["privacy_protocol_required"], "DES")
         self.assertTrue(template["reconcile_preexisting_managed"])
 
+    def test_sf250_23563_selects_strict_des_pilot(self):
+        template, source = SNMP.resolve_template(
+            self.templates,
+            row("cisco-small-business", "SF250-24P", version="2.3.5.63"))
+        self.assertEqual(
+            template["id"],
+            "cisco-business-sf250-24p-2.3.5.63-des-pilot-v3")
+        self.assertEqual(source, "selector")
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertTrue(template["apply_supported"])
+        self.assertTrue(template["reconcile_preexisting_managed"])
+        self.assertTrue(template["require_monitoring_test"])
+        self.assertEqual(template["save_commands"], ["terminal datadump", "write"])
+        self.assertEqual(
+            template["pilot_status"],
+            "transactionally-validated")
+
     def test_validated_24094_models_select_sha_des_template(self):
         for ip, model in (("10.22.10.23", "SG350-28P"),
                           ("192.0.2.26", "SF350-24P"),
@@ -203,6 +220,12 @@ class SnmpManagerTests(unittest.TestCase):
             {"reconcile_preexisting_managed": True}, "configure", []))
         self.assertTrue(SNMP.reconcile_preexisting_managed(
             {"reconcile_preexisting_managed": True}, "configure", managed))
+
+    def test_plain_write_is_a_prompted_save_command(self):
+        self.assertTrue(SNMP.commands_include_save(["terminal datadump", "write"]))
+        self.assertTrue(SNMP.commands_include_save(
+            ["copy running-config startup-config"]))
+        self.assertFalse(SNMP.commands_include_save(["show running-config"]))
 
     def test_sg250_10p_second_device_uses_validated_template(self):
         device = row("cisco-small-business", "SG250-10P", version="2.4.0.90")
