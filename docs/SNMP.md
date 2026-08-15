@@ -201,12 +201,19 @@ The initial catalog incorporates the pilot evidence:
 | Cisco SG350X-24PD 2.3.0.130 | transactional SHA/DES configure/rotate | sw66, sw68 and sw69 passed both authPriv probes, prompted save, final archive and LibreNMS poll |
 | Cisco SG350X-48MP 2.4.0.91 | transactional SHA/DES configure/rotate | sw51 passed structural SHA/DES verification, both authPriv probes, conditional save, archive, phpIPAM association and LibreNMS poll |
 | Cisco SG250-26HP 2.4.0.91 | transactional SHA/DES configure/rotate/cleanup | sw24 and sw38 passed explicit SHA/DES structural verification, both authPriv probes, conditional save, legacy cleanup and retest, final archive, phpIPAM association and LibreNMS poll |
+| Cisco SG250-10P 2.4.0.90 | transactional SHA/DES configure/rotate/cleanup | sw25 confirmed exact grammar and safe adoption without configuration commands; sw27 confirmed fresh configuration and removal of one legacy community; both passed explicit SHA/DES verification, two-source authPriv probes, conditional save, archive, phpIPAM association and LibreNMS poll; pre-activation `show snmp*` commands can be unusually slow |
+
 | Cisco SG350-28P, SG250X-24P and SG250-08HP 2.4.0.94 | transactional SHA/DES configure/rotate/cleanup | sw20, sw30 and sw31 passed structural and two-source authPriv verification, conditional save, archive and LibreNMS poll; sw20/sw30 also validated legacy-community removal and post-cleanup probes |
 | Cisco SG220-50P firmware 1.1.3.1 | transactional SHA/DES configure/rotate/cleanup | sw15 passed structural and two-source authPriv verification, conditional save, legacy-community cleanup, archive, phpIPAM association and LibreNMS poll |
 | Cisco SG220-26P firmware 1.1.3.1, sw16 dialect | IP-scoped transactional SHA/DES configure/rotate/cleanup | sw16 confirmed the simple CLI dialect, passed both authPriv probes before and after legacy cleanup, saved and archived the final state, and completed phpIPAM/LibreNMS association and poll |
 | Cisco SG220-26P firmware 1.1.3.1, sw21/sw37 dialect | IP-scoped transactional SHA/DES configure/rotate/cleanup | both targets confirmed the SG220-50P-style subtree/read-view/write-view grammar through non-mutating contextual help; sw21 passed both authPriv probes before and after legacy cleanup, saved/archived the final state, and completed phpIPAM/LibreNMS association and poll |
 | Cisco SF220-24P firmware 1.1.3.1 | transactional SHA/DES configure/rotate/cleanup | contextual help on sw17, sw18 and sw19 confirmed one dialect; sw17 passed structural verification, both authPriv probes, conditional save, legacy cleanup and retest, final archive, phpIPAM association and LibreNMS poll |
 | Other Cisco Business | report/test | no reviewed model/firmware-specific handler |
+
+The SG250-10P handler can adopt a manually prepared running state.
+Adoption sends no configuration or rollback commands and permits save only
+after explicit SHA/DES verification and successful authenticated probes from
+both the local and monitoring sources.
 | Aruba 2920 WB.15/WB.16 | configure/rotate | adaptive initialization, SHA/AES and v3-only validated |
 | HPE Comware 7 | configure/rotate, process ACL | system-view workflow validated on the three pilot devices |
 | Dell OS10 | rotate only, no ACL | user replacement and SNMP proof validated; blank-state group/view creation was not |
