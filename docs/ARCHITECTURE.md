@@ -136,6 +136,10 @@ Browsing uses `gr config devices/history/view`; gr configures no archive remote.
 8. Interpret `sshpass` status 5 as a rejected Vault credential. Generic targets
    may be retried once through an operator-approved OpenSSH prompt; automated
    device drivers stop until their Vault profile is corrected.
+9. For every other non-zero result, classify recorded stderr evidence and emit
+   a secret-free `SSH_DIAGNOSTIC`. Normal clients accept only first-seen host
+   keys into the private gr store, reject changed keys, and use bounded connect
+   attempts plus keepalives.
 
 ### Updates
 

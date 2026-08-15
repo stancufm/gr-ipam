@@ -87,6 +87,121 @@ class AuditTests(unittest.TestCase):
         callback.assert_not_called()
         self.assertIn("gr vault test switch", stderr.getvalue())
 
+    def test_ssh_connection_options_bound_stalls_and_accept_only_new_keys(self):
+        normal = GR.ssh_connection_options("normal")
+        self.assertIn("StrictHostKeyChecking=accept-new", normal)
+        self.assertIn("ConnectTimeout=20", normal)
+        self.assertIn("ConnectionAttempts=1", normal)
+        self.assertIn("ServerAliveInterval=30", normal)
+        self.assertIn("ServerAliveCountMax=3", normal)
+        self.assertIn("StrictHostKeyChecking=no", GR.ssh_connection_options("legacy"))
+
+    def test_ssh_failure_classification_uses_evidence_before_exit_code(self):
+        self.assertEqual(GR.classify_ssh_failure(
+            6, b"Permission denied", used_sshpass=True), "authentication-rejected")
+        self.assertEqual(GR.classify_ssh_failure(
+            6, b"", used_sshpass=True), "sshpass-exit-6-ambiguous")
+        self.assertEqual(GR.classify_ssh_failure(
+            6, b"", remote_command=True, used_sshpass=True), "remote-command-exit")
+        self.assertEqual(GR.classify_ssh_failure(
+            255, b"Connection timed out", used_sshpass=True), "timeout")
+        self.assertEqual(GR.classify_ssh_failure(
+            255, b"REMOTE HOST IDENTIFICATION HAS CHANGED!", used_sshpass=True),
+            "host-key-changed")
+        self.assertEqual(GR.classify_ssh_failure(
+            255, b"Failed to add the host to the list of known hosts", used_sshpass=True),
+            "host-key-verification")
+        self.assertEqual(GR.classify_ssh_failure(
+            255, b"Load key /tmp/id: invalid format", used_sshpass=False),
+            "local-identity")
+        self.assertEqual(GR.classify_ssh_failure(
+            255, b"No supported authentication methods available", used_sshpass=False),
+            "authentication-unavailable")
+        self.assertEqual(GR.classify_ssh_failure(
+            255, b"channel 0: open failed: administratively prohibited", used_sshpass=False),
+            "policy-rejected")
+        self.assertEqual(GR.classify_ssh_failure(
+            255, b"Over maximum CLI session", used_sshpass=False),
+            "resource-exhausted")
+
+    def test_ambiguous_exit_six_does_not_blame_vault_password(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            category = GR.report_ssh_failure(
+                6, "192.0.2.10", "operator", "/tmp/gr-known-hosts",
+                used_sshpass=True)
+        self.assertEqual(category, "sshpass-exit-6-ambiguous")
+        message = stderr.getvalue()
+        self.assertIn("SSH_DIAGNOSTIC", message)
+        self.assertIn("Status 6 alone is ambiguous", message)
+        self.assertIn("password is not classified as rejected", message)
+
+    def test_no_vault_session_stays_in_relay_and_reports_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            cfg = {
+                "ssh_known_hosts": os.path.join(root, "known_hosts"),
+                "ssh_audit_dir": os.path.join(root, "audit"),
+                "ssh_audit_enabled": False,
+                "ssh_legacy_fallback": True,
+                "ssh_profiles": {},
+            }
+            row = {
+                "_hostname": "server",
+                "_ip": ipaddress.ip_address("192.0.2.10"),
+                "custom_fields": {
+                    "ssh_enabled": "1", "ssh_user": "operator", "ssh_port": "22",
+                    "ssh_profile": "", "ssh_client": "normal",
+                    "device_driver": "generic",
+                },
+            }
+
+            def failed_relay(_command, diagnostics=None, **_kwargs):
+                diagnostics["stderr"] = b"Connection refused"
+                return 255
+
+            stderr = io.StringIO()
+            with mock.patch.object(GR.shutil, "which", return_value="/usr/bin/ssh"), \
+                    mock.patch.object(GR, "run_pty_ssh", side_effect=failed_relay) as relay, \
+                    mock.patch.object(GR.os, "execvp") as execvp, \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(stderr):
+                result = GR.connect_ssh(cfg, row, no_vault=True, audit=False)
+            self.assertEqual(result, 255)
+            relay.assert_called_once()
+            execvp.assert_not_called()
+            self.assertIn("category=connection-refused", stderr.getvalue())
+
+    def test_interactive_cli_stdout_is_used_as_diagnostic_evidence(self):
+        with tempfile.TemporaryDirectory() as root:
+            cfg = {
+                "ssh_known_hosts": os.path.join(root, "known_hosts"),
+                "ssh_audit_dir": os.path.join(root, "audit"),
+                "ssh_audit_enabled": False,
+                "ssh_legacy_fallback": True,
+                "ssh_profiles": {},
+            }
+            row = {
+                "_hostname": "switch", "_ip": ipaddress.ip_address("192.0.2.10"),
+                "custom_fields": {
+                    "ssh_enabled": "1", "ssh_user": "operator", "ssh_port": "22",
+                    "ssh_profile": "", "ssh_client": "normal",
+                    "device_driver": "generic",
+                },
+            }
+
+            def failed_relay(_command, diagnostics=None, **_kwargs):
+                diagnostics["stdout"] = b"Over maximum CLI session"
+                return 255
+
+            stderr = io.StringIO()
+            with mock.patch.object(GR.shutil, "which", return_value="/usr/bin/ssh"), \
+                    mock.patch.object(GR, "run_pty_ssh", side_effect=failed_relay), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(stderr):
+                result = GR.connect_ssh(cfg, row, no_vault=True, audit=False)
+            self.assertEqual(result, 255)
+            self.assertIn("category=resource-exhausted", stderr.getvalue())
+
     def test_cisco_small_business_login_handles_fragmented_prompts(self):
         driver = GR.CiscoSmallBusinessLogin("cisco", "vault-secret")
         self.assertEqual(driver.feed(b"Welcome\r\nUser Na"), [])
@@ -174,6 +289,34 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(stdout.buffer.getvalue(), b"")
             self.assertIn(b"sshpass exit 5", stderr.buffer.getvalue())
             self.assertIn(b"Vault profile", stderr.buffer.getvalue())
+
+    def test_empty_exit_six_session_has_nonmisleading_replay(self):
+        with tempfile.TemporaryDirectory() as root:
+            audit = GR.SshSessionAudit(
+                {"ssh_audit_dir": root},
+                {"_hostname": "server", "_ip": ipaddress.ip_address("192.0.2.10")},
+                ["sshpass", "-d", "4", "ssh", "192.0.2.10"])
+            path = audit.path
+            audit.close(6)
+
+            class BinaryCapture:
+                def __init__(self):
+                    self.buffer = io.BytesIO()
+
+                def isatty(self):
+                    return False
+
+            old_stdout, old_stderr = sys.stdout, sys.stderr
+            stdout, stderr = BinaryCapture(), BinaryCapture()
+            try:
+                sys.stdout, sys.stderr = stdout, stderr
+                GR.command_audit_replay(path, GR.audit_replay_streams())
+            finally:
+                sys.stdout, sys.stderr = old_stdout, old_stderr
+            self.assertEqual(stdout.buffer.getvalue(), b"")
+            self.assertIn(b"exit status 6", stderr.buffer.getvalue())
+            self.assertIn(b"ambiguous", stderr.buffer.getvalue())
+            self.assertIn(b"not classified as rejected", stderr.buffer.getvalue())
 
     def test_cli_audit_overrides(self):
         parser = GR.build_parser()

@@ -37,6 +37,12 @@ Replaying such a session is no longer silent: `gr audit show` reports the final
 status, and status 5 is explained as a rejected Vault password. The transcript
 still stores no automated password.
 
+An empty status-6 replay is reported as ambiguous rather than as a bad
+password: `sshpass` uses 6 for host-key handling, while a remote command or
+session may also return 6. Live connections add evidence-based
+`SSH_DIAGNOSTIC` categories; replay never invents evidence that was not
+recorded.
+
 Browse targets first, then narrow the list to one hostname or IP and select a
 session without memorizing storage paths:
 

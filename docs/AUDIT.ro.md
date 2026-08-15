@@ -37,6 +37,12 @@ Redarea unei asemenea sesiuni nu mai este tăcută: `gr audit show` afișează
 statusul final, iar codul 5 este explicat drept parolă Vault respinsă.
 Transcriptul nu stochează parola automată.
 
+Un audit gol cu status 6 este raportat ca ambiguu, nu drept parolă greșită:
+`sshpass` folosește 6 pentru gestionarea cheii host, iar o comandă sau sesiune
+remote poate întoarce tot 6. Conexiunile live adaugă categorii
+`SSH_DIAGNOSTIC` bazate pe dovezi; redarea nu inventează dovezi care nu au fost
+înregistrate.
+
 Navigarea pornește de la echipament, apoi restrânge lista la sesiunile
 hostname-ului sau IP-ului ales, fără memorarea căilor:
 
