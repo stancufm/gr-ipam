@@ -78,7 +78,11 @@ gr snmp report --all --mode ports --profile monitoring-v3
 ```
 
 `inventory-sync` imports only successful model/firmware facts from a version
-collector JSON report into address metadata. It is also dry-run until `--apply`.
+collector JSON report into address metadata. It also derives `device_vendor`
+from an unambiguous detected driver/model family. A missing vendor is filled;
+an existing different value is reported as `VENDOR_CONFLICT` and is preserved
+unless `--overwrite-vendor` is explicitly supplied. Unknown families are
+reported as `VENDOR_UNRESOLVED`. The operation remains dry-run until `--apply`.
 
 Only templates with `apply_supported: true`, the requested action in
 `supported_actions`, and a reviewed workflow execute. Templates select a

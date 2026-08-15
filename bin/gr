@@ -44,7 +44,7 @@ CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
 SNMP_MANAGER = os.environ.get("GR_SNMP_MANAGER", "/usr/local/libexec/gr/snmp-manager")
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.8.14"
+GR_VERSION = "2.8.15"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -53,12 +53,14 @@ if hasattr(time, "tzset"):
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?$")
 DEVICE_DRIVER_SPECS = {
     "generic": {
+        "vendor": "",
         "interactive_cli": False,
         "version_commands": ("show version",),
         "cleanup_commands": (),
         "config_commands": (),
     },
     "cisco-ios": {
+        "vendor": "cisco",
         "interactive_cli": False,
         "config_interactive_cli": True,
         "version_commands": ("show version",),
@@ -66,30 +68,35 @@ DEVICE_DRIVER_SPECS = {
         "config_commands": ("enable", "terminal length 0", "show running-config"),
     },
     "cisco-small-business": {
+        "vendor": "cisco",
         "interactive_cli": True,
         "version_commands": ("terminal datadump", "show version", "show system"),
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("terminal datadump", "show running-config"),
     },
     "planet-sgs": {
+        "vendor": "planet-technology",
         "interactive_cli": True,
         "version_commands": ("enable", "show version"),
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("enable", "show running-config"),
     },
     "dell-os10": {
+        "vendor": "dell",
         "interactive_cli": False,
         "version_commands": ("show version",),
         "cleanup_commands": (),
         "config_commands": ("terminal length 0", "show running-configuration"),
     },
     "hpe-arubaos-switch": {
+        "vendor": "hpe-aruba",
         "interactive_cli": True,
         "version_commands": ("no page", "show version", "show system"),
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("no page", "show running-config"),
     },
     "hpe-comware7": {
+        "vendor": "hpe-comware",
         "interactive_cli": True,
         "version_commands": ("screen-length disable", "display version",
                              "display device manuinfo"),
@@ -97,6 +104,7 @@ DEVICE_DRIVER_SPECS = {
         "config_commands": ("screen-length disable", "display current-configuration"),
     },
     "fortigate-fortios": {
+        "vendor": "fortinet",
         "interactive_cli": True,
         "version_commands": ("get system status",),
         "cleanup_commands": ("exit",),

@@ -1098,6 +1098,8 @@ def command_inventory_sync(cfg, args):
     by_ip = {row_ip(row): row for row in rows}
     changes = []
     unchanged = 0
+    vendor_conflicts = 0
+    vendor_unresolved = 0
     for ip in sorted(by_result_ip, key=lambda value: ipaddress.ip_address(value)):
         result = by_result_ip[ip]
         ip = str(result.get("ip") or "")
@@ -1107,23 +1109,43 @@ def command_inventory_sync(cfg, args):
         payload = {"custom_device_model": str(result.get("model") or "").strip(),
                    "custom_os_version": str(result.get("firmware") or "").strip()}
         payload = {key: value for key, value in payload.items() if value}
+        detected_driver, driver_evidence = gr.detect_device_driver(row, result)
+        detected_vendor = str(
+            gr.device_driver_spec(detected_driver).get("vendor") or "").strip()
+        current_vendor = str(custom(row, "device_vendor") or "").strip()
+        if detected_vendor:
+            if (not current_vendor or current_vendor.lower() == detected_vendor or
+                    getattr(args, "overwrite_vendor", False)):
+                payload["custom_device_vendor"] = detected_vendor
+            else:
+                vendor_conflicts += 1
+                print("VENDOR_CONFLICT {} current={} detected={} source={}".format(
+                    ip, current_vendor, detected_vendor, driver_evidence))
+        elif not current_vendor:
+            vendor_unresolved += 1
+            print("VENDOR_UNRESOLVED {} source={}".format(ip, driver_evidence))
         if not payload:
             continue
         current = {"custom_device_model": str(custom(row, "device_model") or "").strip(),
-                   "custom_os_version": str(custom(row, "os_version") or "").strip()}
+                   "custom_os_version": str(custom(row, "os_version") or "").strip(),
+                   "custom_device_vendor": current_vendor}
         if all(current.get(key) == value for key, value in payload.items()):
             unchanged += 1
-            print("UNCHANGED {} model={} os_version={}".format(
-                ip, current["custom_device_model"] or "-", current["custom_os_version"] or "-"))
+            print("UNCHANGED {} model={} os_version={} vendor={}".format(
+                ip, current["custom_device_model"] or "-", current["custom_os_version"] or "-",
+                current_vendor or "-"))
             continue
         changes.append((row, payload))
-        print("{} {} model={} os_version={}".format(
+        print("{} {} model={} os_version={} vendor={} vendor_source={}".format(
             "APPLY" if args.apply else "PLAN", ip,
-            payload.get("custom_device_model", "-"), payload.get("custom_os_version", "-")))
+            payload.get("custom_device_model", "-"), payload.get("custom_os_version", "-"),
+            payload.get("custom_device_vendor", current_vendor or "-"),
+            driver_evidence if detected_vendor else "unresolved"))
     if not args.apply:
-        print("REPORTS={} UNIQUE_TARGETS={} CHANGES={} UNCHANGED={}".format(
-            len(reports), len(by_result_ip), len(changes), unchanged))
-        print("DRY_RUN=True Re-run with --apply to synchronize model/OS version metadata.")
+        print("REPORTS={} UNIQUE_TARGETS={} CHANGES={} UNCHANGED={} VENDOR_CONFLICTS={} VENDOR_UNRESOLVED={}".format(
+            len(reports), len(by_result_ip), len(changes), unchanged,
+            vendor_conflicts, vendor_unresolved))
+        print("DRY_RUN=True Re-run with --apply to synchronize model/OS version/vendor metadata.")
         return 0
     write_cfg = dict(cfg); write_cfg["app_id"] = cfg.get("migration_app_id", "gr-migrate")
     with gr.api_session(write_cfg) as api:
@@ -1135,11 +1157,12 @@ def command_inventory_sync(cfg, args):
             verified = {
                 "custom_device_model": str(gr.custom_value(data, "device_model") or "").strip(),
                 "custom_os_version": str(gr.custom_value(data, "os_version") or "").strip(),
+                "custom_device_vendor": str(gr.custom_value(data, "device_vendor") or "").strip(),
             }
             if any(verified.get(key) != value for key, value in payload.items()):
                 raise gr.GrError("phpIPAM metadata verification failed for {}".format(row_ip(row)))
-    print("INVENTORY_SYNC_STATUS=success changed={} unchanged={}".format(
-        len(changes), unchanged))
+    print("INVENTORY_SYNC_STATUS=success changed={} unchanged={} vendor_conflicts={} vendor_unresolved={}".format(
+        len(changes), unchanged, vendor_conflicts, vendor_unresolved))
     return 0
 
 
@@ -1347,6 +1370,9 @@ def build_parser():
     inventory_sync.add_argument("--report", action="append", required=True,
                                 help="collect-version JSON report; repeat and later reports win per IP")
     inventory_sync.add_argument("--apply", action="store_true")
+    inventory_sync.add_argument(
+        "--overwrite-vendor", action="store_true",
+        help="replace a conflicting device_vendor only when inventory detection is unambiguous")
     monitor = sub.add_parser("monitor"); add_selectors(monitor)
     monitor.add_argument("--monitoring-profile", required=True)
     monitor.add_argument("--add", action="store_true"); monitor.add_argument("--apply", action="store_true")

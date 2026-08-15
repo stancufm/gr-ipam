@@ -45,7 +45,11 @@ gr snmp report --all --mode ports --profile monitoring-v3
 ```
 
 `inventory-sync` importă numai rezultatele reușite model/firmware din raportul
-JSON al colectorului de versiuni. Rămâne dry-run până la `--apply`.
+JSON al colectorului de versiuni și deduce `device_vendor` numai dintr-un
+driver/model identificat neechivoc. Un vendor lipsă este completat; o valoare
+existentă diferită este raportată ca `VENDOR_CONFLICT` și păstrată, exceptând
+cazul în care se solicită explicit `--overwrite-vendor`. Familiile necunoscute
+sunt raportate ca `VENDOR_UNRESOLVED`. Operația rămâne dry-run până la `--apply`.
 
 Se execută numai template-urile marcate `apply_supported`, care includ acțiunea
 cerută în `supported_actions` și au handler tranzacțional revizuit. Handlerul din
