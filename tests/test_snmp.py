@@ -214,6 +214,38 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["id"], "cisco-business-sg-sf220-1.1-v3")
         self.assertFalse(template["apply_supported"])
 
+    def test_cisco_business_sf220_24p_sw17_selects_pilot_template(self):
+        device = row("cisco-small-business", "SF220-24P", version="1.1.3.1")
+        device["ip"] = "10.22.10.17"
+        template, source = SNMP.resolve_template(self.templates, device)
+        self.assertEqual(
+            template["id"], "cisco-business-sf220-24p-1.1.3-des-v3")
+        self.assertEqual(source, "selector")
+        self.assertTrue(template["apply_supported"])
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertEqual(template["pilot_status"], "transactionally-validated")
+        self.assertNotIn("ip_in", template["match"])
+        self.assertTrue(template["require_monitoring_test"])
+        self.assertTrue(template["verify_engine_from_v3_user"])
+        self.assertIn(
+            "snmp-server view {view} subtree 1 oid-mask all viewtype included",
+            template["configure_commands"])
+        self.assertIn(
+            "snmp-server group {group} v3 priv read-view {view} write-view SNMP_NO_WRITE",
+            template["configure_commands"])
+        user_command = next(item for item in template["configure_commands"]
+                            if item.startswith("snmp-server user "))
+        self.assertNotIn(" v3 auth ", user_command)
+
+    def test_cisco_business_sf220_24p_family_selects_validated_template(self):
+        for ip in ("10.22.10.18", "10.22.10.19", "192.0.2.17"):
+            device = row("cisco-small-business", "SF220-24P", version="1.1.3.1")
+            device["ip"] = ip
+            template, _source = SNMP.resolve_template(self.templates, device)
+            self.assertEqual(
+                template["id"], "cisco-business-sf220-24p-1.1.3-des-v3")
+            self.assertTrue(template["apply_supported"])
+
     def test_cisco_business_220_other_firmware_remains_blocked(self):
         template, _source = SNMP.resolve_template(
             self.templates, row("cisco-small-business", "SG220-50P", version="1.1.2.0"))
@@ -330,6 +362,25 @@ Encryption Protocol: des
         self.assertTrue(ok)
         self.assertTrue(checks["engine"])
         self.assertTrue(checks["user"])
+
+    def test_sf220_24p_pilot_verifier_accepts_sha_des_state(self):
+        template = next(item for item in self.templates if item["id"] ==
+                        "cisco-business-sf220-24p-1.1.3-des-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """SNMP is enabled.
+snmp-server view SNMP_DEFAULT_VIEW subtree 1 oid-mask all viewtype included
+snmp-server group SNMP_DEFAULT_GROUP v3 priv read-view SNMP_DEFAULT_VIEW
+Username: monitor
+Access GroupName: SNMP_DEFAULT_GROUP
+Authentication Protocol: sha
+Encryption Protocol: des
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertTrue(ok)
+        self.assertTrue(checks["engine"])
+        self.assertTrue(checks["privacy_des"])
+        self.assertTrue(checks["server_enabled"])
 
     def test_live_summary_keeps_counts_but_never_raw_values(self):
         output = """Sw#show snmp-server
