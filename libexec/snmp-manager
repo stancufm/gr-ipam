@@ -98,6 +98,16 @@ def implicit_privacy_probe_candidate(template, checks):
     return all(bool(checks.get(name)) for name in required)
 
 
+def reconcile_preexisting_managed(template, action, managed_existing):
+    """Allow a reviewed template to adopt an existing running state.
+
+    Adoption sends no configuration or rollback commands. The caller still
+    requires structural verification and both authenticated probes before save.
+    """
+    return (action == "configure" and bool(managed_existing) and
+            bool(template.get("reconcile_preexisting_managed")))
+
+
 def row_ip(row):
     return str(gr.normalize_ip(row.get("ip")) or row.get("ip") or "")
 
@@ -756,7 +766,9 @@ def command_plan_or_apply(cfg, templates, args):
         managed_terms = [values["username"], values["group"], values["view"], values["acl"]]
         managed_existing = [term for term in managed_terms
                             if term.lower() in preflight["output"].lower()]
-        if args.action == "configure" and managed_existing:
+        reconcile_existing = reconcile_preexisting_managed(
+            template, args.action, managed_existing)
+        if args.action == "configure" and managed_existing and not reconcile_existing:
             print("ERROR=Managed SNMP objects already exist: {}; use test/rotate or a reconciliation template".format(
                 ",".join(managed_existing)))
             failed = True
@@ -769,7 +781,11 @@ def command_plan_or_apply(cfg, templates, args):
             continue
         actual_commands = render_commands(template, args.action, values, redact=False)
         rollback_commands = render_commands(template, args.action + "_rollback", values, redact=False)
-        if args.action == "configure":
+        if reconcile_existing:
+            actual_commands = []
+            rollback_commands = []
+            print("RECONCILE_EXISTING_MANAGED=True CONFIG_COMMANDS_SENT=0 ROLLBACK=not_applicable")
+        elif args.action == "configure":
             actual_commands, rollback_commands = preserve_preexisting_snmp_state(
                 template, preflight["output"], actual_commands, rollback_commands)
         if args.action == "cleanup":
@@ -852,8 +868,9 @@ def command_plan_or_apply(cfg, templates, args):
                     values=values) if rollback_commands else None
                 rollback_ok = bool(rollback and rollback["complete"] and
                                    not rollback["timeout"] and not rollback["cli_errors"])
-                print("RESULT=save_failed SAVED=False ROLLBACK={}".format(
-                    "success" if rollback_ok else "failed"))
+                rollback_status = ("not_applicable" if reconcile_existing else
+                                   ("success" if rollback_ok else "failed"))
+                print("RESULT=save_failed SAVED=False ROLLBACK={}".format(rollback_status))
                 failed = True
                 continue
             archive_ok = True
@@ -871,8 +888,10 @@ def command_plan_or_apply(cfg, templates, args):
             rollback = run_device_commands(
                 cfg, row, rollback_commands, template=template, values=values) if rollback_commands else None
             rollback_ok = bool(rollback and rollback["complete"] and not rollback["cli_errors"])
+            rollback_status = ("not_applicable" if reconcile_existing else
+                               ("success" if rollback_ok else "failed"))
             print("RESULT=failed ROLLBACK={} SNMP_TEST={}".format(
-                "success" if rollback_ok else "failed", "failed" if test_rc else "success"))
+                rollback_status, "failed" if test_rc else "success"))
             if test_error:
                 print("SNMP_ERROR={}".format(test_error.splitlines()[-1][:200]))
             if monitoring_error:
