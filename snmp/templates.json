@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": 10,
+  "catalog_version": 11,
   "templates": [
     {
       "id": "cisco-ios-v3",
@@ -162,6 +162,52 @@
         "result": "sha-des-two-source-legacy-cleanup-save-archive-librenms-poll-success"
       },
       "workflow": "transactional-cli-v1",
+      "inspect_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],
+      "cleanup_inspect_commands": ["terminal datadump", "show running-config"],
+      "configure_commands": ["terminal datadump", "configure terminal", "snmp-server engineID local default", "snmp-server view {view} iso included", "snmp-server group {group} v3 priv read {view}", "snmp-server server", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "rotate_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "verify_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views {view}", "show snmp groups {group}", "show snmp users {username}"],
+      "save_commands": ["terminal datadump", "copy running-config startup-config"],
+      "configure_rollback_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "no snmp-server group {group} v3 priv", "no snmp-server view {view}", "no snmp-server server", "no snmp-server engineID local", "end"],
+      "rotate_rollback_commands": []
+    },
+    {
+      "id": "cisco-business-sg250-26hp-2.4.0.91-des-pilot-v3",
+      "match": {
+        "driver": "cisco-small-business",
+        "model_regex": "^SG250-26HP$",
+        "os_version_regex": "^2\\.4\\.0\\.91$"
+      },
+      "handler": "cisco-business-2x",
+      "defaults": {"group": "SNMP_DEFAULT_GROUP", "view": "SNMP_DEFAULT_VIEW"},
+      "privacy_protocol_required": "DES",
+      "recommended_profile": "monitoring-v3-cbs2x",
+      "apply_supported": true,
+      "require_monitoring_test": true,
+      "verify_server_enabled": true,
+      "post_apply_settle_seconds": 3,
+      "preserve_preexisting_engine": true,
+      "preserve_preexisting_server": true,
+      "supported_actions": ["configure", "rotate", "cleanup"],
+      "reason": "Transactionally validated SHA/DES workflow for SG250-26HP firmware 2.4.0.91. Save is gated by an explicit SHA/DES structural result and authenticated probes from shadow and LibreNMS; legacy cleanup is followed by the same two probes.",
+      "pilot_status": "transactionally-validated",
+      "pilot_evidence": {
+        "targets": ["sw24", "sw38"],
+        "model": "SG250-26HP",
+        "os_version": "2.4.0.91",
+        "result": "sha-des-dual-authpriv-save-legacy-cleanup-retest-archive-phpipam-librenms-poll-success"
+      },
+      "workflow": "transactional-cli-v1",
+      "capability_commands": [
+        "terminal datadump",
+        "configure terminal",
+        "snmp-server engineID local ?",
+        "snmp-server group GR_CAP_GROUP v3 priv ?",
+        "snmp-server user GRcapProbe GR_CAP_GROUP v3 auth ?",
+        "snmp-server user GRcapProbe GR_CAP_GROUP v3 auth sha ?",
+        "snmp-server user GRcapProbe GR_CAP_GROUP v3 auth sha GrProbeAuth9 priv ?",
+        "end"
+      ],
       "inspect_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],
       "cleanup_inspect_commands": ["terminal datadump", "show running-config"],
       "configure_commands": ["terminal datadump", "configure terminal", "snmp-server engineID local default", "snmp-server view {view} iso included", "snmp-server group {group} v3 priv read {view}", "snmp-server server", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
