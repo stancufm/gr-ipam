@@ -184,6 +184,10 @@ def template_matches(template, row):
     for key in ("ip", "driver", "vendor"):
         if match.get(key) and values[key].lower() != str(match[key]).lower():
             return False
+    if match.get("ip_in"):
+        allowed_ips = {str(item).lower() for item in match["ip_in"]}
+        if values["ip"].lower() not in allowed_ips:
+            return False
     for key in ("model", "device_os", "os_version"):
         pattern = match.get(key + "_regex")
         if pattern and not re.search(pattern, values[key], re.I):
@@ -203,7 +207,7 @@ def resolve_template(templates, row):
         raise gr.GrError("No SNMP template matches {}".format(row_ip(row)))
     def score(item):
         match = item.get("match", {})
-        return sum(1 for key in ("ip", "model_regex", "device_os_regex", "os_version_regex", "vendor", "driver")
+        return sum(1 for key in ("ip", "ip_in", "model_regex", "device_os_regex", "os_version_regex", "vendor", "driver")
                    if match.get(key))
     candidates.sort(key=score, reverse=True)
     return candidates[0], "selector"
@@ -758,8 +762,11 @@ def command_plan_or_apply(cfg, templates, args):
             actual_commands, rollback_commands = preserve_preexisting_snmp_state(
                 template, preflight["output"], actual_commands, rollback_commands)
         if args.action == "cleanup":
+            cleanup_inspect_commands = (
+                template.get("cleanup_inspect_commands") or
+                render_commands(template, "inspect", values, redact=False))
             inspection = run_device_commands(
-                cfg, row, render_commands(template, "inspect", values, redact=False),
+                cfg, row, cleanup_inspect_commands,
                 template=template, values=values)
             actual_commands, rollback_commands = snmp_handlers.cleanup_plan(
                 template, inspection["output"], values)
@@ -776,9 +783,11 @@ def command_plan_or_apply(cfg, templates, args):
         if settle_seconds:
             print("POST_APPLY_SETTLE_SECONDS={}".format(settle_seconds))
             time.sleep(settle_seconds)
-        verify_action = "inspect" if args.action == "cleanup" else "verify"
+        verification_commands = (
+            cleanup_inspect_commands if args.action == "cleanup" else
+            render_commands(template, "verify", values, redact=False))
         verification = run_device_commands(
-            cfg, row, render_commands(template, verify_action, values, redact=False),
+            cfg, row, verification_commands,
             template=template, values=values)
         terms_ok, normalized_checks = snmp_handlers.verify(
             template, verification["output"], values, args.action)

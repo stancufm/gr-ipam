@@ -361,6 +361,21 @@ def _cleanup_ios(output, _values):
             ["configure terminal"] + lines + ["end"])
 
 
+def _cleanup_cisco_business(output, _values):
+    """Cisco Business removes a community by name, not by its full config line."""
+    lines = [line.strip() for line in output.splitlines()
+             if re.match(r"^snmp-server\s+community\s+", line.strip(), re.I)]
+    removals = []
+    for line in lines:
+        match = re.match(
+            r'(?i)^snmp-server\s+community\s+("[^"]+"|\S+)', line)
+        if not match:
+            raise HandlerError("Cannot safely derive Cisco Business community removal")
+        removals.append("no snmp-server community {}".format(match.group(1)))
+    return (["configure terminal"] + removals + ["end"],
+            ["configure terminal"] + lines + ["end"])
+
+
 def _cleanup_comware(output, _values):
     lines = [line.strip() for line in output.splitlines()
              if re.match(r"^snmp-agent\s+community\s+", line.strip(), re.I)]
@@ -386,15 +401,15 @@ HANDLERS = {
     "cisco-ios": {"login": _generic_login, "prepare": _prepare_generic,
                   "verify": _base_verify, "cleanup": _cleanup_ios, "exits": ["exit"]},
     "cisco-business-3x": {"login": _cbs_login, "prepare": _prepare_quoted,
-                          "verify": _base_verify, "cleanup": _cleanup_ios,
+                          "verify": _base_verify, "cleanup": _cleanup_cisco_business,
                           "capabilities": _capabilities_unknown,
                           "exits": ["exit", "exit"]},
     "cisco-business-2x": {"login": _cbs_login, "prepare": _prepare_cbs_unquoted,
-                          "verify": _verify_cbs_authpriv, "cleanup": _cleanup_ios,
+                          "verify": _verify_cbs_authpriv, "cleanup": _cleanup_cisco_business,
                           "capabilities": _capabilities_cbs_2x,
                           "exits": ["exit", "exit"]},
     "cisco-business-220": {"login": _cbs_login, "prepare": _prepare_cbs_unquoted,
-                           "verify": _verify_cbs_authpriv, "cleanup": _cleanup_ios,
+                           "verify": _verify_cbs_authpriv, "cleanup": _cleanup_cisco_business,
                            "capabilities": _capabilities_cbs_220,
                            "exits": ["exit", "exit"]},
     "arubaos-switch-adaptive": {"login": _aruba_login, "prepare": _prepare_quoted,
