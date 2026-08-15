@@ -110,6 +110,13 @@ write-view, comanda userului omite `v3`, iar parola privacy implicită creează
 DES. Pilotul sw15 a trecut verificarea structurală, ambele probe authPriv,
 save-ul condiționat, eliminarea community legacy, arhivarea finală, asocierea
 phpIPAM și poll-ul LibreNMS.
+SG220-26P cu firmware 1.1.3.1 are un alt dialect exact: `engineid default`, view
+scris `iso included`, grup cu `read`, comandă de user fără `v3` a cărei parolă
+privacy implicită creează DES și comanda simplă `snmp-server` pentru activarea
+agentului. Pilotul sw16 a trecut probele authPriv din shadow și LibreNMS
+înainte de save, a eliminat o community legacy, a trecut din nou ambele probe,
+a salvat și arhivat starea finală și a finalizat asocierea phpIPAM plus poll-ul
+LibreNMS.
 Restul combinațiilor Cisco Business 2.x rămân
 blocate deoarece dialectul privacy nu poate fi dedus numai din familie.
 Help-ul contextual care acceptă o parolă privacy implicită este raportat drept
@@ -155,7 +162,8 @@ Catalogul inițial include concluziile piloților:
 | Cisco SG350X-48MP 2.4.0.91 | configure/rotate tranzacțional SHA/DES | sw51 a trecut verificarea structurală SHA/DES, ambele probe authPriv, save-ul condiționat, arhivarea, asocierea phpIPAM și poll-ul LibreNMS |
 | Cisco SG350-28P, SG250X-24P și SG250-08HP 2.4.0.94 | configure/rotate/cleanup tranzacțional SHA/DES | sw20, sw30 și sw31 au trecut verificarea structurală, probele authPriv din ambele surse, save-ul, arhivarea și poll-ul LibreNMS; sw20/sw30 au validat și eliminarea community legacy plus retestarea |
 | Cisco SG220-50P firmware 1.1.3.1 | configure/rotate/cleanup tranzacțional SHA/DES | sw15 a trecut verificarea structurală, probele authPriv din ambele surse, save-ul condiționat, eliminarea community legacy, arhivarea, asocierea phpIPAM și poll-ul LibreNMS |
-| Cisco SG220-26P și SF220-24P firmware 1.1.3.1 | handler distinct blocat, report/test | sunt necesari încă piloți tranzacționali pe fiecare model exact |
+| Cisco SG220-26P firmware 1.1.3.1 | configure/rotate/cleanup tranzacțional SHA/DES | sw16 a confirmat dialectul CLI exact, a trecut ambele probe authPriv înainte și după cleanup legacy, a salvat/arhivat starea finală și a finalizat asocierea phpIPAM plus poll-ul LibreNMS |
+| Cisco SF220-24P firmware 1.1.3.1 | handler distinct blocat, report/test | este necesar încă un pilot tranzacțional pe modelul exact |
 | Restul Cisco Business | report/test | nu există încă handler validat pe model/firmware |
 | Aruba 2920 WB.15/WB.16 | configure/rotate | inițializare adaptivă, SHA/AES și v3-only validate |
 | HPE Comware 7 | configure/rotate, ACL pe proces | workflow system-view validat pe cele trei piloturi |
