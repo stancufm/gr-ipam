@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": 15,
+  "catalog_version": 16,
   "templates": [
     {
       "id": "cisco-ios-v3",
@@ -69,6 +69,41 @@
       "configure_commands": ["terminal datadump", "configure terminal", "snmp-server engineID local default", "snmp-server view {view} iso included", "snmp-server group {group} v3 priv read {view}", "snmp-server server", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
       "rotate_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
       "verify_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views {view}", "show snmp groups {group}", "show snmp users"],
+      "save_commands": ["terminal datadump", "copy running-config startup-config"],
+      "configure_rollback_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "no snmp-server group {group} v3 priv", "no snmp-server view {view}", "no snmp-server server", "no snmp-server engineID local", "end"],
+      "rotate_rollback_commands": []
+    },
+    {
+      "id": "cisco-business-cbs350-24p-4x-3.5.3.3-aes-v3",
+      "match": {
+        "driver": "cisco-small-business",
+        "model_regex": "^CBS350-24P-4X$",
+        "os_version_regex": "^3\\.5\\.3\\.3$"
+      },
+      "handler": "cisco-business-2x",
+      "defaults": {"group": "SNMP_DEFAULT_GROUP", "view": "SNMP_DEFAULT_VIEW"},
+      "privacy_protocol_required": "AES128",
+      "privacy_protocol_implicit": "AES128",
+      "apply_supported": false,
+      "require_monitoring_test": true,
+      "verify_server_enabled": true,
+      "preserve_preexisting_engine": true,
+      "preserve_preexisting_server": true,
+      "reconcile_preexisting_managed": true,
+      "supported_actions": ["configure", "rotate"],
+      "reason": "CBS350-24P-4X firmware 3.5.3.3 has a live SHA/AES128 authPriv state on sw70, no legacy communities and a successful LibreNMS poll. The current monitoring-v3 Vault credentials are not accepted by the device, so no SNMP profile is recommended until credentials are reconciled. Configuration writes remain blocked until a representative transactional save and rollback pilot completes.",
+      "pilot_status": "live-read-only-validated",
+      "pilot_evidence": {
+        "target": "sw70",
+        "model": "CBS350-24P-4X",
+        "os_version": "3.5.3.3",
+        "result": "running-config-sha-implicit-privacy-no-community-librenms-sha-aes-up-current-vault-auth-failed"
+      },
+      "workflow": "transactional-cli-v1",
+      "inspect_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],
+      "configure_commands": ["terminal datadump", "configure terminal", "snmp-server engineID local default", "snmp-server view {view} iso included", "snmp-server group {group} v3 priv read {view}", "snmp-server server", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "rotate_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "snmp-server user {username} {group} v3 auth sha {auth_cli} priv {privacy_cli}", "end"],
+      "verify_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views {view}", "show snmp groups {group}", "show snmp users {username}", "show running-config | include snmp-server"],
       "save_commands": ["terminal datadump", "copy running-config startup-config"],
       "configure_rollback_commands": ["terminal datadump", "configure terminal", "no snmp-server user {username} v3", "no snmp-server group {group} v3 priv", "no snmp-server view {view}", "no snmp-server server", "no snmp-server engineID local", "end"],
       "rotate_rollback_commands": []

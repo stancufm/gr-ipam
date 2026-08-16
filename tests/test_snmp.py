@@ -107,6 +107,22 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertTrue(template["require_monitoring_test"])
         self.assertIn("cleanup", template["supported_actions"])
 
+    def test_cbs350_3533_selects_exact_aes_read_only_template(self):
+        template, source = SNMP.resolve_template(
+            self.templates,
+            row("cisco-small-business", "CBS350-24P-4X", version="3.5.3.3"))
+        self.assertEqual(
+            template["id"],
+            "cisco-business-cbs350-24p-4x-3.5.3.3-aes-v3")
+        self.assertEqual(source, "selector")
+        self.assertEqual(template["handler"], "cisco-business-2x")
+        self.assertEqual(template["privacy_protocol_required"], "AES128")
+        self.assertEqual(template["privacy_protocol_implicit"], "AES128")
+        self.assertNotIn("recommended_profile", template)
+        self.assertFalse(template["apply_supported"])
+        self.assertEqual(template["pilot_status"], "live-read-only-validated")
+        self.assertTrue(template["require_monitoring_test"])
+
     def test_reviewed_planet_build_suffix_selects_apply_handler(self):
         template, _source = SNMP.resolve_template(
             self.templates,
@@ -754,6 +770,25 @@ Authentication Method : SHA
         ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
         self.assertTrue(ok)
         self.assertTrue(checks["privacy_aes128"])
+
+    def test_cbs_authpriv_verifier_uses_scoped_running_config_sha_for_implicit_aes_probe(self):
+        template = next(item for item in self.templates
+                        if item["id"] ==
+                        "cisco-business-cbs350-24p-4x-3.5.3.3-aes-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP",
+                  "view": "SNMP_DEFAULT_VIEW"}
+        output = """SNMP is enabled
+Local SNMP engineID: 800000090300001122334455
+SNMP_DEFAULT_VIEW iso included
+SNMP_DEFAULT_GROUP V3 priv
+encrypted snmp-server user monitor SNMP_DEFAULT_GROUP v3 auth sha ENCRYPTED_AUTH priv ENCRYPTED_PRIV
+"""
+        ok, checks = SNMP.snmp_handlers.verify(template, output, values, "configure")
+        self.assertTrue(ok)
+        self.assertTrue(checks["user"])
+        self.assertTrue(checks["auth_sha"])
+        self.assertTrue(checks["privacy_aes128"])
+        self.assertTrue(checks["privacy_implicit_policy"])
 
     def test_cbs_server_verifier_accepts_agent_word_and_punctuation(self):
         template = next(item for item in self.templates

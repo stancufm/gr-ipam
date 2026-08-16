@@ -162,6 +162,18 @@ and firmware alone.
 The sw51 template submits engine-ID confirmations with a newline and waits two
 seconds before structural verification, matching the pacing of the successful
 manual pilot and allowing the SNMPv3 user database to settle.
+CBS350-24P-4X firmware 3.5.3.3 is represented by a separate exact-match
+SHA/AES128 template. On sw70, the archived running configuration proves the
+`v3 auth sha ... priv ...` grammar and absence of legacy communities, while
+LibreNMS device 6 confirms an active authPriv SHA/AES poll. Some automated
+`show snmp users` sessions omit the algorithm labels, so verification may use
+the requested user/group's encrypted running-config line to prove SHA; only
+the authenticated AES128 probes can prove the implicit privacy algorithm.
+The current `monitoring-v3` Vault credentials fail authentication on sw70, so
+the phpIPAM SNMP profile remains intentionally unset until a controlled user
+credential reconciliation is authorized.
+Configuration writes remain disabled until save and rollback are exercised in
+a representative transactional pilot.
 Other Cisco Business 2.x combinations remain blocked because their privacy
 dialect cannot be inferred from the product family alone.
 Contextual help that accepts an implicit privacy password is reported as
@@ -201,6 +213,7 @@ The initial catalog incorporates the pilot evidence:
 | Cisco IOS/IOS XE | transactional SHA/AES128, group ACL | consistent CLI, rollback and save verified |
 | Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | six-device rollout and engine confirmation validated; legacy cleanup not exercised |
 | Cisco CBS350-48P-4G 3.0.0.69 | transactional SHA/DES configure/rotate/cleanup | sw49 passed safe adoption without configuration commands, explicit structural verification, both authPriv probes, conditional save, archive, phpIPAM association and LibreNMS poll; no legacy communities were present |
+| Cisco CBS350-24P-4X 3.5.3.3 | SHA/AES128 report/test; writes blocked | sw70 running state confirms the exact user grammar and no legacy communities; LibreNMS device 6 is UP with authPriv SHA/AES, but current Vault credentials fail authentication, so profile assignment and transactional save/rollback remain pending |
 | Cisco SG/SF 250/350 firmware 2.x | blocked handler, report/test | SG350XG-2F10 2.5.0.83 accepted the documented command but created `Privacy Method: None`; 32-hex and 16-character alphanumeric privacy inputs both failed the local AES128 gate and rolled back without save, before the monitoring test |
 | Cisco SG350X/SG350XG 2.5.0.83 | transactional SHA/DES configure/rotate | sw64, sw65 and sw67 passed both authPriv probes; sw65/sw67 also validated prompted save, final archive and LibreNMS poll |
 | Cisco SG350X-24PD 2.3.0.130 | transactional SHA/DES configure/rotate | sw66, sw68 and sw69 passed both authPriv probes, prompted save, final archive and LibreNMS poll |
