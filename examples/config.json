@@ -44,6 +44,11 @@
       "host": "monitoring.example.net"
     }
   },
+  "config_collection": {
+    "state_dir": "~/.local/state/gr/config-collection",
+    "scheduler_enabled": false,
+    "pools": {}
+  },
   "username": "gr-api",
   "vendor_db_dir": "/var/lib/gr/ieee-vendors"
 }

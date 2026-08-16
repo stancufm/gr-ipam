@@ -21,11 +21,17 @@ class InstallDependencyTests(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(
                 root, "usr/local/libexec/gr/collect-config")))
             self.assertTrue(os.path.isfile(os.path.join(
+                root, "usr/local/libexec/gr/config-collection-pools")))
+            self.assertTrue(os.path.isfile(os.path.join(
                 root, "usr/local/libexec/gr/snmp-manager")))
             self.assertTrue(os.path.isfile(os.path.join(
                 root, "usr/local/libexec/gr/snmp-handlers")))
             self.assertTrue(os.path.isfile(os.path.join(
                 root, "etc/gr/snmp-templates.json")))
+            self.assertTrue(os.path.isfile(os.path.join(
+                root, "etc/systemd/user/gr-config-collect.service")))
+            self.assertTrue(os.path.isfile(os.path.join(
+                root, "etc/systemd/user/gr-config-collect.timer")))
 
     def test_missing_packages_abort_before_installation(self):
         with tempfile.TemporaryDirectory() as root:

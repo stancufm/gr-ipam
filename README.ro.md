@@ -54,6 +54,7 @@ gr vendor lookup e8:d3:22:00:00:01
 gr ssh validate
 gr collect version --ip 192.0.2.10
 gr collect reports latest
+gr collect config pools
 gr snmp report --ip 192.0.2.10 --mode inventory
 gr snmp test --ip 192.0.2.10
 gr self-update check

@@ -41,10 +41,12 @@ DEFAULT_DOCUMENTATION_RO = "/usr/local/share/doc/gr/GR-PHPIPAM.ro.md"
 SSH_VALIDATOR = "/usr/local/libexec/gr/validate-ssh"
 VERSION_COLLECTOR = "/usr/local/libexec/gr/collect-version"
 CONFIG_COLLECTOR = "/usr/local/libexec/gr/collect-config"
+CONFIG_POOL_MANAGER = os.environ.get(
+    "GR_CONFIG_POOL_MANAGER", "/usr/local/libexec/gr/config-collection-pools")
 SNMP_MANAGER = os.environ.get("GR_SNMP_MANAGER", "/usr/local/libexec/gr/snmp-manager")
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.8.17"
+GR_VERSION = "2.9.0"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -178,6 +180,7 @@ CONFIG_OPTIONS = (
     ("snmp_report_dir", "~/.local/state/gr/snmp-reports"),
     ("snmp_profiles", {}),
     ("monitoring_profiles", {}),
+    ("config_collection", {}),
 )
 
 
@@ -208,7 +211,8 @@ def read_json_config(path, required=True):
 def merge_config(base, override):
     merged = dict(base)
     for key, value in override.items():
-        if key in ("ssh_profiles", "snmp_profiles", "monitoring_profiles") and isinstance(value, dict) and isinstance(merged.get(key), dict):
+        if key in ("ssh_profiles", "snmp_profiles", "monitoring_profiles",
+                   "config_collection") and isinstance(value, dict) and isinstance(merged.get(key), dict):
             profiles = dict(merged[key])
             profiles.update(value)
             merged[key] = profiles
@@ -250,6 +254,7 @@ def load_config(path=None):
     cfg["snmp_report_dir"] = expand(cfg.get("snmp_report_dir", "~/.local/state/gr/snmp-reports"))
     cfg["snmp_profiles"] = cfg.get("snmp_profiles", {})
     cfg["monitoring_profiles"] = cfg.get("monitoring_profiles", {})
+    cfg["config_collection"] = cfg.get("config_collection", {})
     cfg["_config_sources"] = sources
     return cfg
 
@@ -336,6 +341,14 @@ def parse_config_setting(name, value):
             raise GrError("{} expects a JSON list".format(name))
         if not isinstance(parsed, list):
             raise GrError("{} expects a JSON list".format(name))
+        return parsed
+    if len(parts) == 1 and isinstance(default, dict):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            raise GrError("{} expects a JSON object".format(name))
+        if not isinstance(parsed, dict):
+            raise GrError("{} expects a JSON object".format(name))
         return parsed
     return str(value)
 
@@ -2939,6 +2952,11 @@ def command_doctor(cfg, test_api=False, system_only=False):
     metadata = os.path.join(vendor_dir, "metadata.json")
     check("IEEE vendor database", os.path.isfile(metadata), metadata)
     check("self-update helper", os.path.isfile(SELF_UPDATER), SELF_UPDATER, essential=system_only)
+    check("configuration pool helper", os.path.isfile(CONFIG_POOL_MANAGER),
+          CONFIG_POOL_MANAGER, essential=system_only)
+    for unit in ("/etc/systemd/user/gr-config-collect.service",
+                 "/etc/systemd/user/gr-config-collect.timer"):
+        check("configuration pool unit", os.path.isfile(unit), unit, essential=system_only)
     check("update configuration", os.path.isfile("/etc/gr/update.json"), "/etc/gr/update.json",
           essential=system_only)
     check("release verification key", os.path.isfile("/etc/gr/release-key.asc"),
@@ -3485,13 +3503,16 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                                  help="parallel SSH sessions (default: 4; effective range: 1-12)")
     collect_config = collect_sub.add_parser(
         "config", help="collect running configurations into the global Git archive")
-    collect_config_target = collect_config.add_mutually_exclusive_group(required=True)
+    collect_config.add_argument("config_operation", nargs="?", choices=("pools", "status"))
+    collect_config_target = collect_config.add_mutually_exclusive_group()
     collect_config_target.add_argument("--all", action="store_true")
     collect_config_target.add_argument("--ip", action="append", dest="ips")
+    collect_config_target.add_argument("--pool")
+    collect_config_target.add_argument("--due", action="store_true")
     collect_config.add_argument("--vendor")
     collect_config.add_argument("--driver", choices=DEVICE_DRIVERS,
                                 help="probe selected --ip targets with an explicit driver")
-    collect_config.add_argument("--workers", type=int, default=4)
+    collect_config.add_argument("--workers", type=int)
     collect_reports = collect_sub.add_parser("reports", help="list or display collected version reports")
     collect_reports.add_argument("report", nargs="?", help="report timestamp/ID or latest")
     collect_reports.add_argument("--raw", action="store_true",
@@ -3748,7 +3769,27 @@ def main(argv=None):
         if args.collect_action == "reports":
             return command_collect_reports(cfg, args.report, use_pager=not args.no_more, raw=args.raw)
         if args.collect_action == "config":
-            helper_args = ["--workers", str(args.workers)]
+            pool_mode = bool(args.config_operation or args.pool or args.due)
+            direct_mode = bool(args.all or args.ips)
+            if pool_mode and direct_mode:
+                raise GrError("Pool operations cannot be combined with --all or --ip")
+            if not pool_mode and not direct_mode:
+                raise GrError("Choose --all, --ip, --pool, --due, pools or status")
+            if pool_mode:
+                if args.vendor or args.driver or args.workers is not None:
+                    raise GrError(
+                        "Pool operations use vendor, driver and workers from the pool definition")
+                helper_args = []
+                if args.config_operation:
+                    helper_args.append(args.config_operation)
+                if args.pool:
+                    helper_args.extend(["--pool", args.pool])
+                if args.due:
+                    helper_args.append("--due")
+                if args.config:
+                    helper_args.extend(["--config", args.config])
+                return command_helper(CONFIG_POOL_MANAGER, helper_args)
+            helper_args = ["--workers", str(args.workers or 4)]
             if args.driver and not args.ips:
                 raise GrError("--driver requires --ip and is intended for controlled probing")
             if args.vendor:
@@ -3759,6 +3800,8 @@ def main(argv=None):
                 helper_args.append("--all")
             for ip in args.ips or []:
                 helper_args.extend(["--ip", ip])
+            if args.config:
+                helper_args.extend(["--config", args.config])
             return command_helper(CONFIG_COLLECTOR, helper_args)
         if args.collect_action != "version":
             parser.parse_args(["collect", "--help"])

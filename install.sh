@@ -133,11 +133,14 @@ install -d -m 0755 "$destdir/usr/local/bin" "$destdir/usr/local/libexec/gr" \
   "$destdir/usr/local/share/doc/gr" "$destdir/usr/local/share/gr/phpipam" \
   "$destdir/usr/local/share/gr/snmp" \
   "$destdir/etc/gr" "$destdir/var/lib/gr/ieee-vendors" \
-  "$destdir/etc/systemd/system" "$destdir/etc/bash_completion.d"
+  "$destdir/etc/systemd/system" "$destdir/etc/systemd/user" \
+  "$destdir/etc/bash_completion.d"
 install -m 0755 "$package_dir/bin/gr" "$destdir/usr/local/bin/gr"
 install -m 0755 "$package_dir/libexec/validate-ssh" "$destdir/usr/local/libexec/gr/validate-ssh"
 install -m 0755 "$package_dir/libexec/collect-version" "$destdir/usr/local/libexec/gr/collect-version"
 install -m 0755 "$package_dir/libexec/collect-config" "$destdir/usr/local/libexec/gr/collect-config"
+install -m 0755 "$package_dir/libexec/config-collection-pools" \
+  "$destdir/usr/local/libexec/gr/config-collection-pools"
 install -m 0755 "$package_dir/libexec/snmp-manager" "$destdir/usr/local/libexec/gr/snmp-manager"
 install -m 0755 "$package_dir/libexec/snmp-handlers" "$destdir/usr/local/libexec/gr/snmp-handlers"
 install -m 0755 "$package_dir/libexec/gr-update" "$destdir/usr/local/libexec/gr/gr-update"
@@ -154,6 +157,10 @@ fi
 install -m 0644 "$package_dir/VERSION" "$destdir/usr/local/share/doc/gr/VERSION"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.service" "$destdir/etc/systemd/system/gr-vendor-update.service"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.timer" "$destdir/etc/systemd/system/gr-vendor-update.timer"
+install -m 0644 "$package_dir/systemd/gr-config-collect.service" \
+  "$destdir/etc/systemd/user/gr-config-collect.service"
+install -m 0644 "$package_dir/systemd/gr-config-collect.timer" \
+  "$destdir/etc/systemd/user/gr-config-collect.timer"
 install -m 0644 "$package_dir/completions/gr.bash" "$destdir/etc/bash_completion.d/gr"
 
 if [ -n "$config_source" ]; then
@@ -193,7 +200,8 @@ fi
 
 python3 -c 'import ast,sys; [ast.parse(open(path, encoding="utf-8").read(), filename=path) for path in sys.argv[1:]]' \
   "$package_dir/bin/gr" "$package_dir/libexec/validate-ssh" "$package_dir/libexec/collect-version" \
-    "$package_dir/libexec/collect-config" "$package_dir/libexec/snmp-manager" \
+    "$package_dir/libexec/collect-config" "$package_dir/libexec/config-collection-pools" \
+    "$package_dir/libexec/snmp-manager" \
     "$package_dir/libexec/snmp-handlers"
 sh -n "$package_dir/libexec/gr-update"
 bash -n "$package_dir/completions/gr.bash"
@@ -221,3 +229,4 @@ fi
 echo "Installed gr. Each user should run: gr init --configure-auth"
 echo "Then validate with: gr doctor --api"
 echo "Reload Bash completion in existing shells with: source /etc/bash_completion.d/gr"
+echo "Configuration collection timer remains disabled; see CONFIG-COLLECTION-POOLS.md."

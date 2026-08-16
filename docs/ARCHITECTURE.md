@@ -38,6 +38,9 @@ documentation and vault management.
   parsed JSON inventory.
 - `libexec/collect-config` runs the driver's configuration commands and commits
   changed normalized configurations to the global private Git archive.
+- `libexec/config-collection-pools` resolves declarative phpIPAM-backed pools,
+  serializes scheduled runs, and delegates each eligible set to
+  `collect-config`.
 - `libexec/snmp-manager` resolves model/OS templates, inventories and tests;
 - `libexec/snmp-handlers` contains reviewed interactive session and normalized
   verification behavior, separate from declarative SNMP templates
@@ -61,7 +64,9 @@ GET verification.
 
 `/etc/gr/config.json` contains shared, non-secret settings. An optional
 `~/.config/gr/config.json` overlays only user-specific keys; `ssh_profiles`,
-`snmp_profiles` and `monitoring_profiles` are merged by profile name.
+`snmp_profiles` and `monitoring_profiles` are merged by profile name;
+`config_collection` is shallow-merged so a user may override scheduler state
+without duplicating shared pool definitions.
 `--config PATH` deliberately selects one file without
 layering.
 

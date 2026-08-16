@@ -60,6 +60,11 @@ gr doctor --api
 `gr init` creează și depozitul privat persistent pentru cheile host în
 `~/.local/state/gr/known_hosts`.
 
+Instalarea nu activează colectarea programată a configurațiilor. Configurează și
+validează întâi pool-urile; activarea și regulile HA sunt documentate în
+`CONFIG-COLLECTION-POOLS.ro.md`. Unitățile per utilizator sunt instalate în
+`/etc/systemd/user/gr-config-collect.*`.
+
 Installerul creează arhiva globală de configurații și grupul de autorizare.
 Accesul se acordă explicit, urmat de un login nou:
 

@@ -14,6 +14,10 @@ salvează numai modificările normalizate în arhiva Git globală privată
 folosește seiful privat al operatorului, iar scrierea folosește lock global.
 Un commit este creat numai când conținutul diferă; gr nu configurează remote.
 
+`libexec/config-collection-pools` rezolvă pool-urile declarative din inventarul
+phpIPAM, serializează rulările programate și deleagă seturile eligibile către
+`collect-config`. Starea schedulerului este separată de arhiva Git.
+
 `libexec/snmp-manager` rezolvă template-uri după model/OS, inventariază și
 testează; `libexec/snmp-handlers` separă comportamentul interactiv revizuit și
 verificarea normalizată de template-urile SNMP declarative.
@@ -32,7 +36,9 @@ dedicat de scriere și verificare GET.
 
 Configurația comună este `/etc/gr/config.json`; `~/.config/gr/config.json`
 suprascrie valorile utilizatorului și combină profilurile SSH, SNMP și de
-monitorizare.
+monitorizare. Obiectul `config_collection` este combinat superficial, astfel
+încât starea schedulerului poate fi suprascrisă fără duplicarea pool-urilor
+comune.
 Parola phpIPAM este în `~/.config/gr/credentials` cu `0600`, parolele SSH în
 `~/.password-store/gr/`, cheile host persistente în
 `~/.local/state/gr/known_hosts`, iar rapoartele și auditurile în

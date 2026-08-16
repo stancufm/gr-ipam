@@ -1,0 +1,27 @@
+{
+  "config_collection": {
+    "state_dir": "~/.local/state/gr/config-collection",
+    "scheduler_enabled": false,
+    "active_marker": "~/.config/gr/config-collection-active",
+    "pools": {
+      "critical": {
+        "interval": "6h",
+        "retry_interval": "30m",
+        "workers": 2,
+        "ips": ["192.0.2.10", "192.0.2.11"]
+      },
+      "access": {
+        "interval": "24h",
+        "retry_interval": "1h",
+        "workers": 2,
+        "hostname_regex": "^sw[0-9]+$",
+        "exclude_hostnames": ["sw-core-a", "sw-core-b"],
+        "maintenance_window": {
+          "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+          "start": "22:00",
+          "end": "06:00"
+        }
+      }
+    }
+  }
+}

@@ -180,6 +180,7 @@ def main():
     parser.add_argument("--vendor")
     parser.add_argument("--driver")
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--config")
     args = parser.parse_args()
     gr = load_module("gr_config_collector", GR_PATH)
     if args.driver and not args.ips:
@@ -187,7 +188,7 @@ def main():
     if args.driver:
         args.driver = gr.normalize_device_driver(args.driver)
     version_helper = load_module("gr_version_helper", VERSION_HELPER_PATH)
-    cfg = gr.load_config(None)
+    cfg = gr.load_config(args.config)
     with gr.api_session(cfg, prompt=False) as client:
         rows = client.addresses()
     items, rejected = [], []
