@@ -204,12 +204,21 @@ source /etc/bash_completion.d/gr
 gr auth configure
 gr auth test
 gr vault init <GPG-ID>
+gr vault add <profile>
+gr vault add <profile> --apply
 gr vault set <profile>
 gr vault test <profile>
 gr vault list
 ```
 
 The API credential requires mode `0600`. SSH passwords are encrypted through pass/GPG and supplied to sshpass over an anonymous descriptor.
+
+`gr vault add <profile>` previews creation of a user-scoped SSH profile with
+`password_secret=gr/<profile>`. Add `--apply` to write that profile atomically
+with mode `0600`, then enter its password into `pass`. An existing profile is
+never overwritten by `add`; use `gr vault set <profile>` only after confirming a
+replacement password. Use `--secret gr/custom/path` only when an explicit pass
+entry name is needed.
 
 ## Inventory updates
 

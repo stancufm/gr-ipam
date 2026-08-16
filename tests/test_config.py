@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 GR = importlib.machinery.SourceFileLoader("gr_config_test_module", "bin/gr").load_module()
 
@@ -255,6 +256,33 @@ class ConfigShowTests(unittest.TestCase):
             GR.parse_config_setting("ssh_audit_enabled", "perhaps")
         with self.assertRaises(GR.GrError):
             GR.validate_config_setting_name("unknown_setting")
+
+    def test_vault_add_previews_then_creates_user_profile(self):
+        with tempfile.TemporaryDirectory() as root:
+            old_user = GR.USER_CONFIG
+            try:
+                GR.USER_CONFIG = os.path.join(root, "config.json")
+                cfg = {"ssh_profiles": {}}
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(GR.command_vault(cfg, "add", "pve-root"), 0)
+                self.assertFalse(os.path.exists(GR.USER_CONFIG))
+                self.assertIn("Would add user SSH vault profile pve-root", output.getvalue())
+                with mock.patch.object(GR.subprocess, "call", return_value=0) as call:
+                    self.assertEqual(GR.command_vault(cfg, "add", "pve-root", apply=True), 0)
+                with open(GR.USER_CONFIG, encoding="utf-8") as handle:
+                    saved = json.load(handle)
+                self.assertEqual(saved["ssh_profiles"]["pve-root"]["password_secret"], "gr/pve-root")
+                call.assert_called_once_with(["pass", "insert", "-f", "gr/pve-root"])
+            finally:
+                GR.USER_CONFIG = old_user
+
+    def test_vault_add_rejects_existing_profile_and_unsafe_secret(self):
+        cfg = {"ssh_profiles": {"existing": {"password_secret": "gr/existing"}}}
+        with self.assertRaises(GR.GrError):
+            GR.command_vault(cfg, "add", "existing", apply=True)
+        with self.assertRaises(GR.GrError):
+            GR.command_vault({"ssh_profiles": {}}, "add", "new", secret_name="../outside")
 
 
 if __name__ == "__main__":

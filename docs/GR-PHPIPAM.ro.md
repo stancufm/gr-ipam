@@ -205,12 +205,21 @@ source /etc/bash_completion.d/gr
 gr auth configure
 gr auth test
 gr vault init <GPG-ID>
+gr vault add <profil>
+gr vault add <profil> --apply
 gr vault set <profil>
 gr vault test <profil>
 gr vault list
 ```
 
 Credențiala API are modul `0600`. Parolele SSH sunt criptate de pass/GPG și transmise către sshpass prin descriptor anonim.
+
+`gr vault add <profil>` previzualizează crearea unui profil SSH în configurația
+utilizatorului, cu `password_secret=gr/<profil>`. Adăugați `--apply` pentru a
+scrie atomic profilul cu modul `0600`, apoi introduceți parola în `pass`.
+Comanda nu suprascrie un profil existent; pentru înlocuirea unei parole
+confirmate se folosește `gr vault set <profil>`. Opțiunea `--secret gr/cale`
+este doar pentru un nume explicit al intrării din pass.
 
 ## Sincronizare și actualizări
 

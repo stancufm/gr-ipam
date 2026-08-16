@@ -201,8 +201,10 @@ _gr_completion() {
             ;;
         vault)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "init list set test" "$current"
-            elif [[ $subcommand == set || $subcommand == test ]]; then
+                _gr_complete_words "init list add set test reset-agent" "$current"
+            elif [[ $subcommand == add && $current == -* ]]; then
+                _gr_complete_words "--secret --apply --config --help" "$current"
+            elif [[ $subcommand == add || $subcommand == set || $subcommand == test || $subcommand == reset-agent ]]; then
                 _gr_complete_dynamic profiles "$current"
             fi
             ;;

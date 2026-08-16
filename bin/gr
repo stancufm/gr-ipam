@@ -1064,6 +1064,16 @@ def vault_secret_name(cfg, profile):
     return str(profile_cfg.get("password_secret") or "").strip()
 
 
+def validate_vault_secret_name(secret):
+    """Accept only a relative, dedicated pass entry below gr/."""
+    value = str(secret or "").strip()
+    if not re.match(r"^gr/[A-Za-z0-9][A-Za-z0-9._/-]*$", value):
+        raise GrError("Vault secret must be a relative gr/ path, for example gr/example")
+    if "//" in value or "/../" in value or value.endswith("/..") or value.endswith("/"):
+        raise GrError("Vault secret path must not contain empty or parent segments")
+    return value
+
+
 def sudo_vault_secret_name(cfg, profile):
     """Use an explicit sudo secret when configured, otherwise reuse the SSH secret."""
     profile_cfg = cfg.get("ssh_profiles", {}).get(profile, {})
@@ -3033,7 +3043,7 @@ def command_doctor(cfg, test_api=False, system_only=False):
     return 0
 
 
-def command_vault(cfg, action, value=None):
+def command_vault(cfg, action, value=None, secret_name=None, apply=False):
     if sys.stdin.isatty():
         try:
             os.environ["GPG_TTY"] = os.ttyname(sys.stdin.fileno())
@@ -3064,6 +3074,22 @@ def command_vault(cfg, action, value=None):
     if not value:
         raise GrError("Usage: gr vault {} <profile>".format(action))
     profile = profile_name(value)
+    if action == "add":
+        secret = validate_vault_secret_name(secret_name or "gr/{}".format(profile))
+        existing = cfg.get("ssh_profiles", {}).get(profile, {})
+        if existing.get("password_secret"):
+            raise GrError("Profile {} already has password_secret {}; use 'gr vault set {}' "
+                          "to replace only its encrypted password".format(
+                              profile, existing["password_secret"], profile))
+        if not apply:
+            print("Would add user SSH vault profile {} with password_secret {}.".format(profile, secret))
+            print("Run: gr vault add {} --apply".format(profile))
+            return 0
+        command_config_change("set", "ssh_profiles.{}.password_secret".format(profile),
+                              secret, scope="user")
+        print("Created user SSH vault profile {} with password_secret {}.".format(profile, secret))
+        print("Saving encrypted password for profile {}.".format(profile))
+        return subprocess.call(["pass", "insert", "-f", secret])
     secret = vault_secret_name(cfg, profile)
     if not secret:
         raise GrError("Profile {} has no password_secret in ssh_profiles".format(profile))
@@ -3572,10 +3598,13 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
     auth = sub.add_parser("auth", help="configure or test API authentication")
     auth.add_argument("action", choices=("configure", "test"))
     vault = sub.add_parser("vault", help="initialize and manage encrypted per-user SSH passwords")
-    vault.add_argument("action", choices=("init", "list", "set", "test", "reset-agent"))
+    vault.add_argument("action", choices=("init", "list", "add", "set", "test", "reset-agent"))
     vault.add_argument(
         "value", nargs="?",
-        help="GPG ID for init, SSH profile for set/test, or optional profile to test after reset-agent")
+        help="GPG ID for init, SSH profile for add/set/test, or optional profile to test after reset-agent")
+    vault.add_argument("--secret", help="pass entry for vault add (default: gr/<profile>)")
+    vault.add_argument("--apply", action="store_true",
+                       help="write the new user profile before prompting for its password (vault add only)")
     update = sub.add_parser("update", help="preview or update hostname and custom SSH fields in phpIPAM")
     update.add_argument("ip", help="exact phpIPAM address to update")
     update.add_argument("--apply", action="store_true", help="write and GET-verify the requested changes")
@@ -3846,7 +3875,11 @@ def main(argv=None):
     if args.command == "auth":
         return command_auth(cfg, args.action)
     if args.command == "vault":
-        return command_vault(cfg, args.action, args.value)
+        if args.apply and args.action != "add":
+            raise GrError("--apply is supported only by 'gr vault add'")
+        if args.secret and args.action != "add":
+            raise GrError("--secret is supported only by 'gr vault add'")
+        return command_vault(cfg, args.action, args.value, args.secret, args.apply)
     if args.command == "update":
         return command_update(cfg, args)
     if args.command == "migrate-ssh":
