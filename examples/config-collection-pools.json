@@ -1,0 +1,19 @@
+{
+  "config_collection": {
+    "state_dir": "/var/lib/gr/config-collection",
+    "timer_enabled_by_default": false,
+    "pools": {
+      "critical": {
+        "interval": "6h",
+        "workers": 2,
+        "ips": ["192.0.2.10", "192.0.2.11"]
+      },
+      "access": {
+        "interval": "24h",
+        "workers": 2,
+        "hostname_regex": "^sw[0-9]+$",
+        "exclude_hostnames": ["sw-core-a", "sw-core-b"]
+      }
+    }
+  }
+}
