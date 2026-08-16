@@ -1,0 +1,486 @@
+#!/usr/bin/env python3
+"""Resolve and run scheduled configuration collection pools safely."""
+
+import argparse
+import datetime
+import fcntl
+import importlib.machinery
+import importlib.util
+import ipaddress
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+
+
+GR_PATH = os.environ.get("GR_PATH", "/usr/local/bin/gr")
+COLLECTOR_PATH = os.environ.get(
+    "GR_CONFIG_COLLECTOR", "/usr/local/libexec/gr/collect-config")
+INTERVAL_RE = re.compile(r"^([1-9][0-9]*)([mhd])$")
+POOL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+TOP_KEYS = {"state_dir", "scheduler_enabled", "active_marker", "pools"}
+POOL_KEYS = {
+    "enabled", "interval", "retry_interval", "workers", "ips",
+    "hostname_regex", "vendor", "driver", "exclude_ips",
+    "exclude_hostnames", "maintenance_window",
+}
+WINDOW_KEYS = {"days", "start", "end"}
+
+
+class PoolError(Exception):
+    pass
+
+
+def load_module(name, path):
+    loader = importlib.machinery.SourceFileLoader(name, path)
+    spec = importlib.util.spec_from_loader(name, loader)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def parse_interval(value, label):
+    match = INTERVAL_RE.match(str(value or ""))
+    if not match:
+        raise PoolError("{} must use a positive m/h/d interval (for example 30m or 6h)".format(label))
+    amount = int(match.group(1))
+    seconds = amount * {"m": 60, "h": 3600, "d": 86400}[match.group(2)]
+    if seconds < 900 or seconds > 365 * 86400:
+        raise PoolError("{} must be between 15m and 365d".format(label))
+    return seconds
+
+
+def string_list(value, label):
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip()
+                                           for item in value):
+        raise PoolError("{} must be a list of non-empty strings".format(label))
+    return [item.strip() for item in value]
+
+
+def clock_value(value, label):
+    try:
+        parsed = datetime.datetime.strptime(str(value), "%H:%M")
+    except ValueError:
+        raise PoolError("{} must use HH:MM".format(label))
+    return parsed.hour * 60 + parsed.minute
+
+
+def validate_window(value, label):
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise PoolError("{} must be an object".format(label))
+    unknown = sorted(set(value) - WINDOW_KEYS)
+    if unknown:
+        raise PoolError("{} has unknown keys: {}".format(label, ", ".join(unknown)))
+    days = [item.lower() for item in string_list(value.get("days"), label + ".days")]
+    if not days or any(day not in DAY_NAMES for day in days):
+        raise PoolError("{}.days must contain mon..sun".format(label))
+    start = clock_value(value.get("start"), label + ".start")
+    end = clock_value(value.get("end"), label + ".end")
+    if start == end:
+        raise PoolError("{} start and end cannot be equal".format(label))
+    return {"days": days, "start": start, "end": end,
+            "start_text": value["start"], "end_text": value["end"]}
+
+
+def validate_configuration(cfg, allowed_drivers=None):
+    raw = cfg.get("config_collection", {})
+    if not isinstance(raw, dict):
+        raise PoolError("config_collection must be an object")
+    unknown = sorted(set(raw) - TOP_KEYS)
+    if unknown:
+        raise PoolError("config_collection has unknown keys: {}".format(", ".join(unknown)))
+    state_dir_value = raw.get("state_dir", "~/.local/state/gr/config-collection")
+    if not isinstance(state_dir_value, str) or not state_dir_value.strip():
+        raise PoolError("config_collection.state_dir must be a non-empty path")
+    if ("scheduler_enabled" in raw and
+            not isinstance(raw["scheduler_enabled"], bool)):
+        raise PoolError("config_collection.scheduler_enabled must be true or false")
+    pools = raw.get("pools", {})
+    if not isinstance(pools, dict):
+        raise PoolError("config_collection.pools must be an object")
+    normalized = {}
+    for name, value in sorted(pools.items()):
+        if not POOL_NAME_RE.match(str(name)):
+            raise PoolError("Invalid pool name: {}".format(name))
+        if not isinstance(value, dict):
+            raise PoolError("Pool {} must be an object".format(name))
+        unknown = sorted(set(value) - POOL_KEYS)
+        if unknown:
+            raise PoolError("Pool {} has unknown keys: {}".format(name, ", ".join(unknown)))
+        if "enabled" in value and not isinstance(value["enabled"], bool):
+            raise PoolError("{}.enabled must be true or false".format(name))
+        ips = string_list(value.get("ips"), "{}.ips".format(name))
+        exclude_ips = string_list(value.get("exclude_ips"), "{}.exclude_ips".format(name))
+        try:
+            ips = [str(ipaddress.ip_address(item)) for item in ips]
+            exclude_ips = [str(ipaddress.ip_address(item)) for item in exclude_ips]
+        except ValueError as exc:
+            raise PoolError("Pool {} contains an invalid IP address: {}".format(name, exc))
+        exclude_hostnames = string_list(
+            value.get("exclude_hostnames"), "{}.exclude_hostnames".format(name))
+        hostname_regex = value.get("hostname_regex")
+        if hostname_regex is not None:
+            if not isinstance(hostname_regex, str) or not hostname_regex:
+                raise PoolError("{}.hostname_regex must be a non-empty string".format(name))
+            try:
+                re.compile(hostname_regex)
+            except re.error as exc:
+                raise PoolError("Invalid {}.hostname_regex: {}".format(name, exc))
+        vendor = value.get("vendor")
+        driver = value.get("driver")
+        if vendor is not None and (not isinstance(vendor, str) or not vendor.strip()):
+            raise PoolError("{}.vendor must be a non-empty string".format(name))
+        if driver is not None and (not isinstance(driver, str) or not driver.strip()):
+            raise PoolError("{}.driver must be a non-empty string".format(name))
+        if (driver and allowed_drivers is not None and
+                driver.strip() not in allowed_drivers):
+            raise PoolError("{}.driver is not a registered GR driver: {}".format(
+                name, driver.strip()))
+        if not any((ips, hostname_regex, vendor, driver)):
+            raise PoolError("Pool {} needs at least one target selector".format(name))
+        workers = value.get("workers", 4)
+        if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 12:
+            raise PoolError("{}.workers must be an integer from 1 to 12".format(name))
+        interval = parse_interval(value.get("interval"), "{}.interval".format(name))
+        retry = parse_interval(value.get("retry_interval", "1h"),
+                               "{}.retry_interval".format(name))
+        normalized[name] = {
+            "enabled": bool(value.get("enabled", True)),
+            "interval": interval,
+            "interval_text": value.get("interval"),
+            "retry_interval": retry,
+            "retry_interval_text": value.get("retry_interval", "1h"),
+            "workers": workers,
+            "ips": ips,
+            "hostname_regex": hostname_regex,
+            "vendor": vendor.strip() if isinstance(vendor, str) else None,
+            "driver": driver.strip() if isinstance(driver, str) else None,
+            "exclude_ips": set(exclude_ips),
+            "exclude_hostnames": set(exclude_hostnames),
+            "maintenance_window": validate_window(
+                value.get("maintenance_window"), "{}.maintenance_window".format(name)),
+        }
+    state_dir = os.path.abspath(os.path.expanduser(state_dir_value))
+    active_marker = raw.get("active_marker")
+    if active_marker is not None:
+        if not isinstance(active_marker, str) or not active_marker.strip():
+            raise PoolError("config_collection.active_marker must be a non-empty path")
+        active_marker = os.path.abspath(os.path.expanduser(active_marker))
+    return {"state_dir": state_dir,
+            "scheduler_enabled": raw.get("scheduler_enabled", False),
+            "active_marker": active_marker, "pools": normalized}
+
+
+def utc_now():
+    return datetime.datetime.utcnow().replace(microsecond=0)
+
+
+def timestamp(value):
+    return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_timestamp(value):
+    if not value:
+        return None
+    try:
+        return datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError):
+        return None
+
+
+def atomic_json(path, data):
+    directory = os.path.dirname(path)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    os.chmod(directory, 0o700)
+    descriptor, temporary = tempfile.mkstemp(prefix=".state-", dir=directory, text=True)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
+def read_state(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            value = json.load(handle)
+        if isinstance(value, dict) and isinstance(value.get("pools", {}), dict):
+            return value
+    except (OSError, ValueError):
+        pass
+    return {"version": 1, "pools": {}}
+
+
+def in_window(window, now=None):
+    if not window:
+        return True
+    local = now or datetime.datetime.now()
+    minute = local.hour * 60 + local.minute
+    day = DAY_NAMES[local.weekday()]
+    start, end = window["start"], window["end"]
+    if start < end:
+        return day in window["days"] and start <= minute < end
+    previous_day = DAY_NAMES[(local.weekday() - 1) % 7]
+    return ((day in window["days"] and minute >= start) or
+            (previous_day in window["days"] and minute < end))
+
+
+def due_status(pool, pool_state, now):
+    if not pool["enabled"]:
+        return False, "disabled", None
+    last_attempt = parse_timestamp(pool_state.get("last_attempt"))
+    last_success = parse_timestamp(pool_state.get("last_success"))
+    if pool_state.get("last_status") == "success" and last_success:
+        next_due = last_success + datetime.timedelta(seconds=pool["interval"])
+    elif last_attempt:
+        next_due = last_attempt + datetime.timedelta(seconds=pool["retry_interval"])
+    else:
+        next_due = now
+    return now >= next_due, "due" if now >= next_due else "waiting", next_due
+
+
+def row_identity(gr, row):
+    ip = str(gr.normalize_ip(row.get("ip")) or row.get("ip") or "")
+    return ip, str(row.get("hostname") or ip)
+
+
+def matches_pool(gr, row, pool):
+    ip, hostname = row_identity(gr, row)
+    if pool["ips"] and ip not in pool["ips"]:
+        return False
+    if pool["hostname_regex"] and not re.search(pool["hostname_regex"], hostname):
+        return False
+    vendor = str(gr.custom_value(row, "device_vendor") or "").strip()
+    if pool["vendor"] and vendor.lower() != pool["vendor"].lower():
+        return False
+    driver = gr.resolve_device_driver(row)
+    if pool["driver"] and driver != pool["driver"]:
+        return False
+    return ip not in pool["exclude_ips"] and hostname not in pool["exclude_hostnames"]
+
+
+def resolve_pool(gr, rows, pool):
+    selected, rejected = [], []
+    seen = set()
+    for row in rows:
+        if not matches_pool(gr, row, pool):
+            continue
+        ip, hostname = row_identity(gr, row)
+        if not ip or ip in seen:
+            continue
+        seen.add(ip)
+        driver = gr.resolve_device_driver(row)
+        meta = gr.phpipam_ssh_metadata(row)
+        reasons = []
+        if driver == "generic":
+            reasons.append("generic-driver")
+        elif not gr.device_driver_spec(driver).get("config_commands"):
+            reasons.append("no-config-command")
+        if not meta.get("enabled"):
+            reasons.append("ssh-disabled")
+        if not meta.get("profile"):
+            reasons.append("missing-ssh-profile")
+        if reasons:
+            rejected.append({"ip": ip, "hostname": hostname, "reasons": reasons})
+        else:
+            selected.append({"ip": ip, "hostname": hostname, "driver": driver})
+    missing = sorted(set(pool["ips"]) - seen)
+    for ip in missing:
+        rejected.append({"ip": ip, "hostname": "-", "reasons": ["not-in-phpipam"]})
+    selected.sort(key=lambda item: item["ip"])
+    rejected.sort(key=lambda item: item["ip"])
+    return selected, rejected
+
+
+def run_collector(pool_name, pool, selected, config_path=None):
+    command = [sys.executable, COLLECTOR_PATH, "--workers", str(pool["workers"])]
+    if config_path:
+        command.extend(["--config", config_path])
+    for item in selected:
+        command.extend(["--ip", item["ip"]])
+    try:
+        completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   universal_newlines=True)
+    except OSError as exc:
+        print("POOL={} ERROR=Cannot start configuration collector: {}".format(
+            pool_name, exc), file=sys.stderr)
+        return 2, {}
+    for line in completed.stdout.splitlines():
+        if line.startswith(("RESULT ", "SUMMARY=", "ARCHIVE=", "COMMIT=")):
+            print("POOL={} {}".format(pool_name, line))
+    if completed.returncode:
+        error = completed.stderr.strip().splitlines()
+        print("POOL={} ERROR={}".format(
+            pool_name, error[-1] if error else "collector exited {}".format(completed.returncode)),
+            file=sys.stderr)
+    summary = {}
+    for line in completed.stdout.splitlines():
+        if line.startswith("SUMMARY="):
+            try:
+                summary = json.loads(line.split("=", 1)[1])
+            except ValueError:
+                pass
+    return completed.returncode, summary
+
+
+def display_pools(config, gr, rows, state):
+    now = utc_now()
+    ownership = {}
+    attention = False
+    for name, pool in config["pools"].items():
+        selected, rejected = resolve_pool(gr, rows, pool)
+        due, status, next_due = due_status(pool, state["pools"].get(name, {}), now)
+        for item in selected:
+            ownership.setdefault(item["ip"], []).append(name)
+        print("POOL={} enabled={} targets={} rejected={} schedule={} next={}".format(
+            name, str(pool["enabled"]).lower(), len(selected), len(rejected), status,
+            timestamp(next_due) if next_due else "-"))
+        for item in rejected:
+            attention = True
+            print("REJECTED pool={} ip={} reason={}".format(
+                name, item["ip"], ",".join(item["reasons"])))
+    overlaps = {ip: names for ip, names in ownership.items() if len(names) > 1}
+    for ip, names in sorted(overlaps.items()):
+        attention = True
+        print("OVERLAP ip={} pools={}".format(ip, ",".join(names)))
+    print("POOL_VALIDATION_STATUS={}".format("attention" if attention else "success"))
+    return 2 if attention else 0
+
+
+def display_status(config, state):
+    for name in config["pools"]:
+        value = state["pools"].get(name, {})
+        print("POOL={} last_status={} last_attempt={} last_success={} targets={}".format(
+            name, value.get("last_status", "never"), value.get("last_attempt", "-"),
+            value.get("last_success", "-"), value.get("targets", 0)))
+    print("STATE_FILE={}".format(os.path.join(config["state_dir"], "state.json")))
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Manage scheduled configuration collection pools")
+    parser.add_argument("action", nargs="?", choices=("pools", "status"))
+    choice = parser.add_mutually_exclusive_group()
+    choice.add_argument("--pool")
+    choice.add_argument("--due", action="store_true")
+    parser.add_argument("--config")
+    args = parser.parse_args(argv)
+    if sum(bool(value) for value in (args.action, args.pool, args.due)) != 1:
+        parser.error("choose pools, status, --pool NAME or --due")
+    gr = load_module("gr_config_pool_manager", GR_PATH)
+    try:
+        cfg = gr.load_config(args.config)
+        config = validate_configuration(cfg, getattr(gr, "DEVICE_DRIVERS", ()))
+    except (PoolError, gr.GrError) as exc:
+        print("gr collect config: error: {}".format(exc), file=sys.stderr)
+        return 2
+    state_path = os.path.join(config["state_dir"], "state.json")
+    state = read_state(state_path)
+    if args.action == "status":
+        return display_status(config, state)
+    if not config["pools"]:
+        print("No configuration collection pools are configured.")
+        return 1
+    if args.pool and args.pool not in config["pools"]:
+        print("gr collect config: error: Unknown pool: {}".format(args.pool), file=sys.stderr)
+        return 2
+    if args.due and not config["scheduler_enabled"]:
+        print("SCHEDULER_STATUS=disabled")
+        return 0
+    if args.due and config["active_marker"] and not os.path.isfile(config["active_marker"]):
+        print("SCHEDULER_STATUS=standby active_marker=absent")
+        return 0
+    try:
+        with gr.api_session(cfg, prompt=False) as client:
+            rows = client.addresses()
+    except gr.GrError as exc:
+        print("gr collect config: error: {}".format(exc), file=sys.stderr)
+        return 2
+    if args.action == "pools":
+        return display_pools(config, gr, rows, state)
+
+    resolved = {name: resolve_pool(gr, rows, pool)
+                for name, pool in config["pools"].items()}
+    if args.due:
+        ownership = {}
+        for name, pool in config["pools"].items():
+            if not pool["enabled"]:
+                continue
+            for item in resolved[name][0]:
+                ownership.setdefault(item["ip"], []).append(name)
+        overlaps = {ip: names for ip, names in ownership.items() if len(names) > 1}
+        if overlaps:
+            for ip, names in sorted(overlaps.items()):
+                print("OVERLAP ip={} pools={}".format(ip, ",".join(names)), file=sys.stderr)
+            print("gr collect config: error: scheduled pools overlap", file=sys.stderr)
+            return 2
+
+    os.makedirs(config["state_dir"], mode=0o700, exist_ok=True)
+    os.chmod(config["state_dir"], 0o700)
+    lock_path = os.path.join(config["state_dir"], "collection.lock")
+    with open(lock_path, "a+") as lock_handle:
+        os.chmod(lock_path, 0o600)
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("COLLECTION_LOCK=busy", file=sys.stderr)
+            return 2
+        now = utc_now()
+        names = [args.pool] if args.pool else list(config["pools"])
+        failures, executed = 0, 0
+        for name in names:
+            pool = config["pools"][name]
+            pool_state = state["pools"].setdefault(name, {})
+            due, reason, next_due = due_status(pool, pool_state, now)
+            if args.due and (not due or not in_window(pool["maintenance_window"])):
+                skip = "outside-window" if due else reason
+                print("POOL={} STATUS=skipped reason={}".format(name, skip))
+                continue
+            selected, rejected = resolved[name]
+            attempt = timestamp(utc_now())
+            pool_state.update({"last_attempt": attempt, "targets": len(selected)})
+            if rejected or not selected:
+                pool_state.update({"last_status": "selection-failed",
+                                   "rejected": len(rejected)})
+                failures += 1
+                print("POOL={} STATUS=selection-failed targets={} rejected={}".format(
+                    name, len(selected), len(rejected)))
+                for item in rejected:
+                    print("REJECTED pool={} ip={} reason={}".format(
+                        name, item["ip"], ",".join(item["reasons"])))
+                atomic_json(state_path, state)
+                continue
+            executed += 1
+            print("POOL={} STATUS=running targets={} workers={}".format(
+                name, len(selected), pool["workers"]))
+            returncode, summary = run_collector(name, pool, selected, args.config)
+            pool_state.update({"last_status": "success" if returncode == 0 else "failed",
+                               "summary": summary, "rejected": 0})
+            if returncode == 0:
+                pool_state["last_success"] = timestamp(utc_now())
+            else:
+                failures += 1
+            atomic_json(state_path, state)
+        print("CONFIG_COLLECTION_STATUS={} executed={} failed={}".format(
+            "success" if failures == 0 else "failed", executed, failures))
+        return 0 if failures == 0 else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -79,6 +79,7 @@ Installed paths:
 | `/etc/bash_completion.d/gr` | global Bash completion, including dynamic audit candidates |
 | `/var/lib/gr/ieee-vendors/` | shared IEEE database |
 | `/etc/systemd/system/gr-vendor-update.*` | optional weekly update |
+| `/etc/systemd/user/gr-config-collect.*` | disabled-by-default per-user configuration pool timer |
 
 ## 4. Initialize users
 
@@ -92,6 +93,10 @@ gr doctor --api
 
 `gr init` also creates the private persistent host-key store at
 `~/.local/state/gr/known_hosts`.
+
+Scheduled configuration collection is not activated by installation. Configure
+and validate pools first; activation and HA guidance are in
+`CONFIG-COLLECTION-POOLS.md`.
 
 The installer creates the global configuration archive and its authorization
 group. Grant access explicitly, then start a new login session:

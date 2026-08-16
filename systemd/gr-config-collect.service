@@ -1,0 +1,10 @@
+[Unit]
+Description=Run due GR configuration collection pools
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gr collect config --due
+Nice=10
+IOSchedulingClass=best-effort

@@ -307,6 +307,10 @@ gr collect config --all [--vendor VENDOR] [--workers N]
 gr collect config --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
 ```
 
+Pool-urile denumite și timerul opțional, dezactivat implicit, sunt documentate
+în `CONFIG-COLLECTION-POOLS.ro.md`. Începe cu `gr collect config pools` pentru a
+valida selectorii și eligibilitatea fără a contacta echipamentele.
+
 Comenzile fiecărui driver sunt afișate de `gr driver list`. Țintele `generic`
 sunt respinse. Colectarea folosește lock global, normalizează outputul de
 terminal și păstrează câte un fișier pentru fiecare IP. Un commit este creat

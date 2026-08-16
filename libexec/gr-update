@@ -143,6 +143,8 @@ rollback() {
     restore_item /etc/gr/release-key.asc release-key.asc
     restore_item /etc/systemd/system/gr-vendor-update.service vendor.service
     restore_item /etc/systemd/system/gr-vendor-update.timer vendor.timer
+    restore_item /etc/systemd/user/gr-config-collect.service config-collect.service
+    restore_item /etc/systemd/user/gr-config-collect.timer config-collect.timer
     systemctl daemon-reload 2>/dev/null || true
 }
 
@@ -202,6 +204,8 @@ backup_item /etc/gr/update.json update.json
 backup_item /etc/gr/release-key.asc release-key.asc
 backup_item /etc/systemd/system/gr-vendor-update.service vendor.service
 backup_item /etc/systemd/system/gr-vendor-update.timer vendor.timer
+backup_item /etc/systemd/user/gr-config-collect.service config-collect.service
+backup_item /etc/systemd/user/gr-config-collect.timer config-collect.timer
 
 started=1
 sh "$repo/install.sh" --config "$config_copy"

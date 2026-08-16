@@ -21,6 +21,16 @@ class ConfigShowTests(unittest.TestCase):
         self.assertEqual(sorted(merged["snmp_profiles"]), ["new", "old"])
         self.assertEqual(sorted(merged["monitoring_profiles"]), ["one", "two"])
 
+    def test_configuration_collection_objects_merge_and_parse_as_json(self):
+        merged = GR.merge_config(
+            {"config_collection": {"pools": {"one": {}}, "scheduler_enabled": False}},
+            {"config_collection": {"scheduler_enabled": True}})
+        self.assertEqual(merged["config_collection"]["pools"], {"one": {}})
+        self.assertTrue(merged["config_collection"]["scheduler_enabled"])
+        parsed = GR.parse_config_setting(
+            "config_collection", '{"scheduler_enabled": false, "pools": {}}')
+        self.assertEqual(parsed, {"scheduler_enabled": False, "pools": {}})
+
     def test_snmp_profile_sources_are_validated_as_ip_list(self):
         value = GR.parse_config_setting("snmp_profiles.monitor.sources",
                                         '["192.0.2.20", "2001:db8::20"]')

@@ -281,6 +281,27 @@ class CollectVersionCliTests(unittest.TestCase):
         self.assertTrue(args.raw)
         self.assertTrue(args.no_more)
 
+    def test_configuration_pool_cli_variants_parse_without_direct_target(self):
+        parser = GR.build_parser()
+        listed = parser.parse_args(["collect", "config", "pools"])
+        self.assertEqual(listed.config_operation, "pools")
+        selected = parser.parse_args(["collect", "config", "--pool", "critical"])
+        self.assertEqual(selected.pool, "critical")
+        due = parser.parse_args(["collect", "config", "--due"])
+        self.assertTrue(due.due)
+
+    def test_configuration_pool_cli_routes_to_dedicated_helper(self):
+        with mock.patch.object(GR, "load_config", return_value={}), \
+                mock.patch.object(GR, "command_helper", return_value=0) as helper:
+            self.assertEqual(GR.main(["collect", "config", "--pool", "critical"]), 0)
+        helper.assert_called_once_with(
+            GR.CONFIG_POOL_MANAGER, ["--pool", "critical"])
+
+    def test_configuration_pool_rejects_direct_selector_options(self):
+        with mock.patch.object(GR, "load_config", return_value={}):
+            with self.assertRaises(GR.GrError):
+                GR.main(["collect", "config", "--pool", "critical", "--workers", "8"])
+
 
 if __name__ == "__main__":
     unittest.main()

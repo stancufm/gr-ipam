@@ -1,0 +1,11 @@
+[Unit]
+Description=Check due GR configuration collection pools
+
+[Timer]
+OnCalendar=*-*-* *:0/15:00
+RandomizedDelaySec=2m
+Persistent=false
+Unit=gr-config-collect.service
+
+[Install]
+WantedBy=timers.target

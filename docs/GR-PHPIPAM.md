@@ -308,6 +308,10 @@ gr collect config --all [--vendor VENDOR] [--workers N]
 gr collect config --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
 ```
 
+Named pools and the optional disabled-by-default user timer are documented in
+`CONFIG-COLLECTION-POOLS.md`. Start with `gr collect config pools` to validate
+selectors and eligibility without contacting devices.
+
 The driver command mapping is visible through `gr driver list`. `generic`
 targets are rejected. Collection takes a global lock, normalizes terminal
 control output, writes one file per IP and creates one Git commit only when at
