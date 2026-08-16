@@ -97,8 +97,12 @@ template rollback. After save, the final configuration is collected again.
 Approved source addresses come from the SNMP profile or explicit `--source`
 options. There is no permissive/default source. A configure operation refuses
 pre-existing managed object names instead of risking destructive rollback.
-Rotation additionally requires
-`--previous-profile`, so rollback can recreate the previous user. Cisco IOS
+Rotation normally requires `--previous-profile`, so rollback can recreate the
+previous user. A reviewed template may instead declare encrypted running-state
+rollback. In that narrow workflow, gr accepts exactly one encrypted user line
+scoped to the managed username, group and authentication grammar, keeps its
+localized values only in memory, redacts them from CLI output and restores that
+line if either pre-save probe fails. Cisco IOS
 legacy cleanup discovers exact community lines without displaying them, removes
 them, tests v3, and can restore the exact lines before save.
 
@@ -169,11 +173,13 @@ LibreNMS device 6 confirms an active authPriv SHA/AES poll. Some automated
 `show snmp users` sessions omit the algorithm labels, so verification may use
 the requested user/group's encrypted running-config line to prove SHA; only
 the authenticated AES128 probes can prove the implicit privacy algorithm.
-The current `monitoring-v3` Vault credentials fail authentication on sw70, so
-the phpIPAM SNMP profile remains intentionally unset until a controlled user
-credential reconciliation is authorized.
-Configuration writes remain disabled until save and rollback are exercised in
-a representative transactional pilot.
+The sw70 credential reconciliation rotated only the user, preserved the engine,
+group, view and server state, passed authenticated AES128 probes from shadow and
+LibreNMS before save, archived the final configuration, synchronized LibreNMS
+and completed an immediate poll. The exact template is therefore enabled for
+configure/rotate and recommends `monitoring-v3`. Its rotation can recover from
+the prior encrypted running-state user even when the old plaintext is absent
+from Vault.
 Other Cisco Business 2.x combinations remain blocked because their privacy
 dialect cannot be inferred from the product family alone.
 Contextual help that accepts an implicit privacy password is reported as
@@ -213,7 +219,7 @@ The initial catalog incorporates the pilot evidence:
 | Cisco IOS/IOS XE | transactional SHA/AES128, group ACL | consistent CLI, rollback and save verified |
 | Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | six-device rollout and engine confirmation validated; legacy cleanup not exercised |
 | Cisco CBS350-48P-4G 3.0.0.69 | transactional SHA/DES configure/rotate/cleanup | sw49 passed safe adoption without configuration commands, explicit structural verification, both authPriv probes, conditional save, archive, phpIPAM association and LibreNMS poll; no legacy communities were present |
-| Cisco CBS350-24P-4X 3.5.3.3 | SHA/AES128 report/test; writes blocked | sw70 running state confirms the exact user grammar and no legacy communities; LibreNMS device 6 is UP with authPriv SHA/AES, but current Vault credentials fail authentication, so profile assignment and transactional save/rollback remain pending |
+| Cisco CBS350-24P-4X 3.5.3.3 | transactional SHA/AES128 configure/rotate | sw70 passed user-only rotation with in-memory encrypted rollback material, both pre-save probes, conditional save, final archive, LibreNMS credential synchronization and immediate poll |
 | Cisco SG/SF 250/350 firmware 2.x | blocked handler, report/test | SG350XG-2F10 2.5.0.83 accepted the documented command but created `Privacy Method: None`; 32-hex and 16-character alphanumeric privacy inputs both failed the local AES128 gate and rolled back without save, before the monitoring test |
 | Cisco SG350X/SG350XG 2.5.0.83 | transactional SHA/DES configure/rotate | sw64, sw65 and sw67 passed both authPriv probes; sw65/sw67 also validated prompted save, final archive and LibreNMS poll |
 | Cisco SG350X-24PD 2.3.0.130 | transactional SHA/DES configure/rotate | sw66, sw68 and sw69 passed both authPriv probes, prompted save, final archive and LibreNMS poll |
@@ -310,8 +316,10 @@ than the `gr exec` connection banner.
 Credential rotation is deliberately an explicit reviewed operation: configure a
 new vault profile, run `rotate --previous-profile OLD --profile NEW` as a dry-run,
 apply in a maintenance window, synchronize LibreNMS, then assign the new profile
-in phpIPAM. This command chain is suitable for a site scheduler, but `--apply`
-must never be enabled without change-window controls and failure notification.
+in phpIPAM. An exact reviewed template may omit the old profile only when it
+declares encrypted running-state rollback. This command chain is suitable for a
+site scheduler, but `--apply` must never be enabled without change-window
+controls and failure notification.
 
 ## Installation and validation
 

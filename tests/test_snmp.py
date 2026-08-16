@@ -107,7 +107,7 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertTrue(template["require_monitoring_test"])
         self.assertIn("cleanup", template["supported_actions"])
 
-    def test_cbs350_3533_selects_exact_aes_read_only_template(self):
+    def test_cbs350_3533_selects_exact_aes_transactional_template(self):
         template, source = SNMP.resolve_template(
             self.templates,
             row("cisco-small-business", "CBS350-24P-4X", version="3.5.3.3"))
@@ -118,10 +118,39 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["handler"], "cisco-business-2x")
         self.assertEqual(template["privacy_protocol_required"], "AES128")
         self.assertEqual(template["privacy_protocol_implicit"], "AES128")
-        self.assertNotIn("recommended_profile", template)
-        self.assertFalse(template["apply_supported"])
-        self.assertEqual(template["pilot_status"], "live-read-only-validated")
+        self.assertEqual(template["recommended_profile"], "monitoring-v3")
+        self.assertTrue(template["apply_supported"])
+        self.assertTrue(template["rotate_encrypted_user_rollback"])
+        self.assertEqual(template["pilot_status"], "transactionally-validated")
         self.assertTrue(template["require_monitoring_test"])
+
+    def test_cbs_encrypted_user_rollback_is_scoped_and_redactable(self):
+        template = next(item for item in self.templates
+                        if item["id"] ==
+                        "cisco-business-cbs350-24p-4x-3.5.3.3-aes-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP"}
+        output = (
+            "encrypted snmp-server user unrelated OTHER v3 auth sha OLD priv OLD\n"
+            "encrypted snmp-server user monitor SNMP_DEFAULT_GROUP v3 "
+            "auth sha ENCRYPTEDAUTH== priv ENCRYPTEDPRIV==\n")
+        commands, secrets = SNMP.snmp_handlers.encrypted_user_rollback_plan(
+            template, output, values)
+        self.assertIn("no snmp-server user monitor v3", commands)
+        self.assertIn(
+            "encrypted snmp-server user monitor SNMP_DEFAULT_GROUP v3 auth sha "
+            "ENCRYPTEDAUTH== priv ENCRYPTEDPRIV==", commands)
+        self.assertEqual(secrets, ["ENCRYPTEDAUTH==", "ENCRYPTEDPRIV=="])
+
+    def test_cbs_encrypted_user_rollback_rejects_ambiguous_state(self):
+        template = next(item for item in self.templates
+                        if item["id"] ==
+                        "cisco-business-cbs350-24p-4x-3.5.3.3-aes-v3")
+        values = {"username": "monitor", "group": "SNMP_DEFAULT_GROUP"}
+        line = ("encrypted snmp-server user monitor SNMP_DEFAULT_GROUP v3 "
+                "auth sha AUTHVALUE priv PRIVVALUE\n")
+        with self.assertRaises(SNMP.snmp_handlers.HandlerError):
+            SNMP.snmp_handlers.encrypted_user_rollback_plan(
+                template, line + line, values)
 
     def test_reviewed_planet_build_suffix_selects_apply_handler(self):
         template, _source = SNMP.resolve_template(

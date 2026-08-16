@@ -528,6 +528,9 @@ def run_device_commands(cfg, row, commands, timeout=70, template=None, values=No
         for key in ("temporary_auth", "temporary_priv"):
             if context.get(key):
                 secrets_to_redact.append(context[key])
+        for secret in (values or {}).get("rollback_secret_values", []):
+            if secret:
+                secrets_to_redact.append(secret)
         for secret in secrets_to_redact:
             output = output.replace(str(secret), "[REDACTED]")
             error = error.replace(str(secret), "[REDACTED]")
@@ -756,8 +759,10 @@ def command_plan_or_apply(cfg, templates, args):
             print("ERROR=Template requires --monitoring-profile for a pre-save remote SNMP test")
             failed = True
             continue
-        if args.action == "rotate" and not args.previous_profile:
-            print("ERROR=--previous-profile is required for recoverable rotation")
+        encrypted_rollback = bool(template.get("rotate_encrypted_user_rollback"))
+        if args.action == "rotate" and not args.previous_profile and not encrypted_rollback:
+            print("ERROR=--previous-profile is required unless the reviewed template "
+                  "supports encrypted running-state rollback")
             failed = True
             continue
         if "<SOURCE_REQUIRED>" in values.values():
@@ -803,12 +808,28 @@ def command_plan_or_apply(cfg, templates, args):
                 template, inspection["output"], values)
             print("LEGACY_CLEANUP_COMMANDS={}".format(max(0, len(actual_commands) - 2)))
         if args.action == "rotate":
-            previous_args = argparse.Namespace(profile=args.previous_profile, username=None,
-                                               prompt_credentials=False)
-            previous = profile_values(cfg, row, previous_args)
-            previous_values = variables(row, previous, args, template)
-            previous_values = snmp_handlers.prepare(template, row, previous_values, applying=True)
-            rollback_commands = render_commands(template, "rotate", previous_values, redact=False)
+            if args.previous_profile:
+                previous_args = argparse.Namespace(profile=args.previous_profile, username=None,
+                                                   prompt_credentials=False)
+                previous = profile_values(cfg, row, previous_args)
+                previous_values = variables(row, previous, args, template)
+                previous_values = snmp_handlers.prepare(
+                    template, row, previous_values, applying=True)
+                rollback_commands = render_commands(
+                    template, "rotate", previous_values, redact=False)
+                print("ROTATE_ROLLBACK_SOURCE=previous_profile")
+            else:
+                try:
+                    rollback_commands, rollback_secrets = (
+                        snmp_handlers.encrypted_user_rollback_plan(
+                            template, preflight["output"], values))
+                except snmp_handlers.HandlerError as exc:
+                    print("ERROR={}".format(exc))
+                    failed = True
+                    continue
+                values["rollback_secret_values"] = rollback_secrets
+                print("ROTATE_ROLLBACK_SOURCE=encrypted_running_state "
+                      "VALUES=not_displayed")
         session = run_device_commands(cfg, row, actual_commands, template=template, values=values)
         settle_seconds = max(0, min(10, int(template.get("post_apply_settle_seconds") or 0)))
         if settle_seconds:
