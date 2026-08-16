@@ -62,8 +62,13 @@ se testează SNMPv3 și se salvează numai după succes, apoi configurația fina
 este arhivată din nou. La eșec se execută rollback.
 Sursele aprobate provin din profilul SNMP sau din opțiuni `--source` explicite;
 nu există o sursă implicită/permisivă. `configure` refuză nume de obiecte deja
-existente, evitând un rollback distructiv. Rotația cere obligatoriu
-`--previous-profile`, pentru a putea recrea credențialele precedente. Cleanup-ul
+existente, evitând un rollback distructiv. Rotația cere în mod normal
+`--previous-profile`, pentru a putea recrea credențialele precedente. Un template
+revizuit poate declara în schimb rollback din starea running criptată. În acest
+flux restrâns, gr acceptă exact o linie de user criptată, limitată la userul,
+grupul și gramatica de autentificare administrate, păstrează valorile localizate
+numai în memorie, le elimină din output și restaurează linia dacă una dintre
+probele de dinainte de save eșuează. Cleanup-ul
 Cisco IOS extrage intern liniile community exacte, fără afișare, le elimină,
 testează v3 și le poate restaura înainte de save.
 
@@ -140,10 +145,13 @@ LibreNMS 6 confirmă un poll authPriv SHA/AES activ. Unele sesiuni automatizate
 `show snmp users` omit etichetele algoritmilor; verificarea poate folosi linia
 criptată din running-config, limitată la userul și grupul cerute, pentru dovada
 SHA, dar numai probele autentificate AES128 pot confirma algoritmul privacy
-implicit. Scrierile rămân blocate până la pilotarea tranzacțională a save-ului
-și rollback-ului. Credentialele actuale `monitoring-v3` din Vault sunt respinse
-de sw70, deci profilul SNMP din phpIPAM rămâne intenționat necompletat până la
-o reconciliere controlată a credentialelor userului.
+implicit. Reconcilierea sw70 a rotit numai userul și a păstrat engine ID-ul,
+grupul, view-ul și serviciul. Noile credențiale AES128 au trecut probele
+autentificate din shadow și LibreNMS înainte de save; configurația finală a fost
+arhivată, credențialele LibreNMS sincronizate și poll-ul imediat a reușit.
+Template-ul exact permite acum configure/rotate și recomandă `monitoring-v3`.
+Rotația poate reveni la userul criptat din running chiar dacă vechiul plaintext
+nu există în Vault.
 Sesiunile de save recunosc numai prompturile restrânse de destinație/suprascriere
 emise de `copy running-config startup-config`. Un save eșuat retrage acum
 configurația running nesalvată; un eșec de arhivare după save confirmat este
@@ -176,7 +184,7 @@ Catalogul inițial include concluziile piloților:
 | Cisco IOS/IOS XE | tranzacțional SHA/AES128, ACL pe grup | CLI, rollback și save validate |
 | Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | rollout pe șase echipamente și confirmarea engine validate; cleanup legacy neprobat |
 | Cisco CBS350-48P-4G 3.0.0.69 | configure/rotate/cleanup tranzacțional SHA/DES | sw49 a trecut adoptarea sigură fără comenzi de configurare, verificarea structurală explicită, ambele probe authPriv, save-ul condiționat, arhiva, asocierea phpIPAM și poll-ul LibreNMS; nu existau community legacy |
-| Cisco CBS350-24P-4X 3.5.3.3 | report/test SHA/AES128; scrieri blocate | starea running a sw70 confirmă gramatica exactă și absența community-urilor legacy; dispozitivul LibreNMS 6 este UP cu authPriv SHA/AES, dar credentialele actuale din Vault eșuează, deci asocierea profilului și pilotarea save/rollback rămân în așteptare |
+| Cisco CBS350-24P-4X 3.5.3.3 | configure/rotate tranzacțional SHA/AES128 | sw70 a trecut rotația exclusivă a userului cu material criptat de rollback păstrat în memorie, ambele probe înainte de save, save-ul condiționat, arhiva finală, sincronizarea credențialelor LibreNMS și poll-ul imediat |
 | Cisco SG/SF 250/350 firmware 2.x | handler blocat, report/test | SG350XG-2F10 2.5.0.83 a acceptat comanda documentată, dar a creat `Privacy Method: None`; atât cheia de 32 hex, cât și passphrase-ul alfanumeric de 16 caractere au eșuat pragul AES128 local și au fost retrase fără save, înaintea testului din LibreNMS |
 | Cisco SG350X/SG350XG 2.5.0.83 | configure/rotate tranzacțional SHA/DES | sw64, sw65 și sw67 au trecut ambele probe authPriv; sw65/sw67 au validat și save-ul cu prompt, arhiva finală și poll-ul LibreNMS |
 | Cisco SG350X-24PD 2.3.0.130 | configure/rotate tranzacțional SHA/DES | sw66, sw68 și sw69 au trecut ambele probe authPriv, save-ul cu prompt, arhiva finală și poll-ul LibreNMS |
@@ -261,8 +269,10 @@ bannerul de conectare `gr exec`. Testele și rapoartele
 pot fi programate extern. Pentru rotație se
 creează un profil nou în vault, se rulează dry-run cu
 `rotate --previous-profile VECHI --profile NOU`, se aplică în mentenanță, se
-sincronizează LibreNMS și apoi se asociază profilul nou în phpIPAM. Un scheduler
-poate rula acest lanț numai cu controlul ferestrei și notificare la eșec.
+sincronizează LibreNMS și apoi se asociază profilul nou în phpIPAM. Lipsa
+profilului vechi este acceptată numai de un template exact revizuit care declară
+rollback din linia criptată a userului din running-config. Un scheduler poate
+rula acest lanț numai cu controlul ferestrei și notificare la eșec.
 
 ## Instalare
 

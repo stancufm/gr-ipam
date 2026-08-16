@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_version": 16,
+  "catalog_version": 17,
   "templates": [
     {
       "id": "cisco-ios-v3",
@@ -84,20 +84,22 @@
       "defaults": {"group": "SNMP_DEFAULT_GROUP", "view": "SNMP_DEFAULT_VIEW"},
       "privacy_protocol_required": "AES128",
       "privacy_protocol_implicit": "AES128",
-      "apply_supported": false,
+      "recommended_profile": "monitoring-v3",
+      "apply_supported": true,
+      "rotate_encrypted_user_rollback": true,
       "require_monitoring_test": true,
       "verify_server_enabled": true,
       "preserve_preexisting_engine": true,
       "preserve_preexisting_server": true,
       "reconcile_preexisting_managed": true,
       "supported_actions": ["configure", "rotate"],
-      "reason": "CBS350-24P-4X firmware 3.5.3.3 has a live SHA/AES128 authPriv state on sw70, no legacy communities and a successful LibreNMS poll. The current monitoring-v3 Vault credentials are not accepted by the device, so no SNMP profile is recommended until credentials are reconciled. Configuration writes remain blocked until a representative transactional save and rollback pilot completes.",
-      "pilot_status": "live-read-only-validated",
+      "reason": "SHA/AES128 credential rotation was transactionally validated on CBS350-24P-4X firmware 3.5.3.3. The workflow preserves engine/group/view/server state, retains the previous localized encrypted user only in memory for rollback, requires shadow and LibreNMS-source probes before save, archives the result and completes a LibreNMS poll.",
+      "pilot_status": "transactionally-validated",
       "pilot_evidence": {
         "target": "sw70",
         "model": "CBS350-24P-4X",
         "os_version": "3.5.3.3",
-        "result": "running-config-sha-implicit-privacy-no-community-librenms-sha-aes-up-current-vault-auth-failed"
+        "result": "sha-aes128-two-source-save-archive-librenms-sync-poll-success"
       },
       "workflow": "transactional-cli-v1",
       "inspect_commands": ["terminal datadump", "show snmp", "show snmp engineID", "show snmp views", "show snmp groups", "show snmp users", "show running-config | include snmp"],

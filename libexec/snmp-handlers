@@ -394,6 +394,37 @@ def _cleanup_cisco_business(output, _values):
             ["configure terminal"] + lines + ["end"])
 
 
+def _encrypted_user_rollback_cisco_business(output, values):
+    """Build a rollback from one scoped encrypted Cisco Business user line.
+
+    Localized SNMPv3 keys are useful recovery material when the old plaintext
+    is intentionally absent from Vault.  Accept only the exact managed user,
+    group, SHA grammar and two base64-like encrypted fields.  The caller keeps
+    those fields in memory and redacts them from every returned CLI stream.
+    """
+    username = re.escape(str(values.get("username") or ""))
+    group = re.escape(str(values.get("group") or ""))
+    token = r"([A-Za-z0-9+/=]+)"
+    pattern = re.compile(
+        r"(?im)^\s*encrypted\s+snmp-server\s+user\s+{}\s+{}\s+v3\s+"
+        r"auth\s+sha\s+{}\s+priv\s+{}\s*$".format(
+            username, group, token, token))
+    matches = pattern.findall(str(output or ""))
+    if len(matches) != 1:
+        raise HandlerError(
+            "Expected one encrypted rollback line for the managed SNMPv3 user")
+    auth_value, privacy_value = matches[0]
+    command = (
+        "encrypted snmp-server user {username} {group} v3 auth sha "
+        "{auth} priv {privacy}"
+    ).format(username=values["username"], group=values["group"],
+             auth=auth_value, privacy=privacy_value)
+    commands = ["terminal datadump", "configure terminal",
+                "no snmp-server user {} v3".format(values["username"]),
+                command, "end"]
+    return commands, [auth_value, privacy_value]
+
+
 def _cleanup_comware(output, _values):
     lines = [line.strip() for line in output.splitlines()
              if re.match(r"^snmp-agent\s+community\s+", line.strip(), re.I)]
@@ -424,6 +455,7 @@ HANDLERS = {
                           "exits": ["exit", "exit"]},
     "cisco-business-2x": {"login": _cbs_login, "prepare": _prepare_cbs_unquoted,
                           "verify": _verify_cbs_authpriv, "cleanup": _cleanup_cisco_business,
+                          "encrypted_user_rollback": _encrypted_user_rollback_cisco_business,
                           "capabilities": _capabilities_cbs_2x,
                           "exits": ["exit", "exit"]},
     "cisco-business-220": {"login": _cbs_login, "prepare": _prepare_cbs_unquoted,
@@ -477,3 +509,11 @@ def exit_commands(template):
 
 def capabilities(template, output):
     return get(template)["capabilities"](output)
+
+
+def encrypted_user_rollback_plan(template, output, values):
+    handler = get(template).get("encrypted_user_rollback")
+    if handler is None:
+        raise HandlerError(
+            "The selected SNMP handler cannot restore an encrypted user")
+    return handler(output, values)
