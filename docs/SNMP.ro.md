@@ -133,6 +133,17 @@ de comandă poate crea un user DES pe firmware-urile afectate.
 Sesiunile interactive Cisco Business solicită un PTY de 512 coloane. Astfel,
 redesenarea comenzilor SNMP lungi de către editorul CLI nu mai poate semăna cu
 un prompt nou și nu poate avansa prematur coada tranzacțională de comenzi.
+CBS350-24P-4X cu firmware 3.5.3.3 are un template separat, cu potrivire exactă,
+SHA și AES128. Pe sw70, configurația running arhivată confirmă gramatica
+`v3 auth sha ... priv ...` și absența community-urilor legacy, iar dispozitivul
+LibreNMS 6 confirmă un poll authPriv SHA/AES activ. Unele sesiuni automatizate
+`show snmp users` omit etichetele algoritmilor; verificarea poate folosi linia
+criptată din running-config, limitată la userul și grupul cerute, pentru dovada
+SHA, dar numai probele autentificate AES128 pot confirma algoritmul privacy
+implicit. Scrierile rămân blocate până la pilotarea tranzacțională a save-ului
+și rollback-ului. Credentialele actuale `monitoring-v3` din Vault sunt respinse
+de sw70, deci profilul SNMP din phpIPAM rămâne intenționat necompletat până la
+o reconciliere controlată a credentialelor userului.
 Sesiunile de save recunosc numai prompturile restrânse de destinație/suprascriere
 emise de `copy running-config startup-config`. Un save eșuat retrage acum
 configurația running nesalvată; un eșec de arhivare după save confirmat este
@@ -165,6 +176,7 @@ Catalogul inițial include concluziile piloților:
 | Cisco IOS/IOS XE | tranzacțional SHA/AES128, ACL pe grup | CLI, rollback și save validate |
 | Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | rollout pe șase echipamente și confirmarea engine validate; cleanup legacy neprobat |
 | Cisco CBS350-48P-4G 3.0.0.69 | configure/rotate/cleanup tranzacțional SHA/DES | sw49 a trecut adoptarea sigură fără comenzi de configurare, verificarea structurală explicită, ambele probe authPriv, save-ul condiționat, arhiva, asocierea phpIPAM și poll-ul LibreNMS; nu existau community legacy |
+| Cisco CBS350-24P-4X 3.5.3.3 | report/test SHA/AES128; scrieri blocate | starea running a sw70 confirmă gramatica exactă și absența community-urilor legacy; dispozitivul LibreNMS 6 este UP cu authPriv SHA/AES, dar credentialele actuale din Vault eșuează, deci asocierea profilului și pilotarea save/rollback rămân în așteptare |
 | Cisco SG/SF 250/350 firmware 2.x | handler blocat, report/test | SG350XG-2F10 2.5.0.83 a acceptat comanda documentată, dar a creat `Privacy Method: None`; atât cheia de 32 hex, cât și passphrase-ul alfanumeric de 16 caractere au eșuat pragul AES128 local și au fost retrase fără save, înaintea testului din LibreNMS |
 | Cisco SG350X/SG350XG 2.5.0.83 | configure/rotate tranzacțional SHA/DES | sw64, sw65 și sw67 au trecut ambele probe authPriv; sw65/sw67 au validat și save-ul cu prompt, arhiva finală și poll-ul LibreNMS |
 | Cisco SG350X-24PD 2.3.0.130 | configure/rotate tranzacțional SHA/DES | sw66, sw68 și sw69 au trecut ambele probe authPriv, save-ul cu prompt, arhiva finală și poll-ul LibreNMS |

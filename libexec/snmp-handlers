@@ -269,13 +269,21 @@ def _verify_cbs_authpriv(template, output, values, action):
         r"(?im)^\s*user\s*name\s*(?::\s*|\s+){}\s*$".format(
             re.escape(values["username"])))
     user_match = user_header.search(output)
-    user_present = bool(user_match)
+    # CBS 3.5 can omit the authentication/privacy labels from ``show snmp
+    # users`` in an automated session while still exposing the localized user
+    # grammar in running-config.  Scope this fallback to the requested user and
+    # group; the authenticated probes remain the only proof of implicit AES.
+    configured_user = re.search(
+        r"(?im)^\s*(?:encrypted\s+)?snmp-server\s+user\s+{}\s+{}\s+v3\s+"
+        r"auth\s+sha\s+\S+\s+priv\s+\S+\s*$".format(
+            re.escape(values["username"]), re.escape(values["group"])), output)
+    user_present = bool(user_match or configured_user)
     user_output = output
     if user_match:
         next_user = re.search(r"(?im)^\s*user\s*name\s*:", output[user_match.end():])
         end = user_match.end() + next_user.start() if next_user else len(output)
         user_output = output[user_match.start():end]
-    auth_sha = bool(re.search(
+    auth_sha = bool(configured_user or re.search(
         r"(?im)(?:authentication\s+(?:method|protocol)|auth\.?\s*protocol)\s*:?\s*sha\b",
         user_output))
     privacy_explicit_aes128 = bool(re.search(
