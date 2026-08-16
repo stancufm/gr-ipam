@@ -92,6 +92,21 @@ class SnmpManagerTests(unittest.TestCase):
         self.assertEqual(template["handler"], "cisco-business-3x")
         self.assertTrue(template["apply_supported"])
 
+    def test_cbs350_30069_selects_strict_des_reconciliation_template(self):
+        template, source = SNMP.resolve_template(
+            self.templates,
+            row("cisco-small-business", "CBS350-48P-4G", version="3.0.0.69"))
+        self.assertEqual(
+            template["id"],
+            "cisco-business-cbs350-48p-4g-3.0.0.69-des-pilot-v3")
+        self.assertEqual(source, "selector")
+        self.assertEqual(template["privacy_protocol_required"], "DES")
+        self.assertEqual(template["handler"], "cisco-business-2x")
+        self.assertTrue(template["apply_supported"])
+        self.assertTrue(template["reconcile_preexisting_managed"])
+        self.assertTrue(template["require_monitoring_test"])
+        self.assertIn("cleanup", template["supported_actions"])
+
     def test_reviewed_planet_build_suffix_selects_apply_handler(self):
         template, _source = SNMP.resolve_template(
             self.templates,
@@ -1070,6 +1085,11 @@ rule 30 permit source 192.0.2.3 0
             "inventory-sync", "--report", "old.json", "--report", "new.json"])
         self.assertEqual(args.report, ["old.json", "new.json"])
 
+    def test_inventory_sync_accepts_explicit_vendor_overwrite(self):
+        args = SNMP.build_parser().parse_args([
+            "inventory-sync", "--report", "report.json", "--overwrite-vendor"])
+        self.assertTrue(args.overwrite_vendor)
+
     def test_inventory_sync_is_idempotent_and_later_report_wins(self):
         address = dict(row(), id="10", custom_device_model="new-model",
                        custom_os_version="new-version")
@@ -1137,6 +1157,116 @@ rule 30 permit source 192.0.2.3 0
                 self.assertEqual(SNMP.command_inventory_sync({}, args), 0)
             self.assertEqual(len(Api.patches), 1)
             self.assertEqual(address["custom_device_model"], "verified-model")
+        finally:
+            if not handle.closed:
+                handle.close()
+            os.unlink(handle.name)
+
+    def test_inventory_sync_fills_vendor_from_unambiguous_model_family(self):
+        address = dict(row(driver="cisco-small-business", model="", version=""),
+                       id="10", custom_device_vendor="")
+
+        class Api:
+            patches = []
+            def addresses(self):
+                return [address]
+            def request(self, method, path, payload=None):
+                if path == "devices/":
+                    return {"data": []}
+                if method == "PATCH":
+                    address.update(payload); self.patches.append(payload)
+                return address
+
+        class Session:
+            def __enter__(self):
+                return Api()
+            def __exit__(self, *_args):
+                return False
+
+        handle = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        try:
+            json.dump({"results": [{"ip": "192.0.2.10", "model": "SF220-24P",
+                                     "firmware": "1.1.3.1", "result": "success"}]}, handle)
+            handle.close()
+            args = types.SimpleNamespace(report=[handle.name], apply=True,
+                                         overwrite_vendor=False)
+            with mock.patch.object(SNMP.gr, "api_session", return_value=Session()):
+                self.assertEqual(SNMP.command_inventory_sync({}, args), 0)
+            self.assertEqual(address["custom_device_vendor"], "cisco")
+            self.assertEqual(Api.patches[0]["custom_device_vendor"], "cisco")
+        finally:
+            if not handle.closed:
+                handle.close()
+            os.unlink(handle.name)
+
+    def test_inventory_sync_preserves_conflicting_vendor_by_default(self):
+        address = dict(row(driver="cisco-small-business", model="SF220-24P",
+                           version="1.1.3.1"), id="10", custom_device_vendor="dell")
+
+        class Api:
+            patches = []
+            def addresses(self):
+                return [address]
+            def request(self, method, path, payload=None):
+                if path == "devices/":
+                    return {"data": []}
+                if method == "PATCH":
+                    self.patches.append(payload)
+                return address
+
+        class Session:
+            def __enter__(self):
+                return Api()
+            def __exit__(self, *_args):
+                return False
+
+        handle = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        try:
+            json.dump({"results": [{"ip": "192.0.2.10", "model": "SF220-24P",
+                                     "firmware": "1.1.3.1", "result": "success"}]}, handle)
+            handle.close()
+            args = types.SimpleNamespace(report=[handle.name], apply=True,
+                                         overwrite_vendor=False)
+            with mock.patch.object(SNMP.gr, "api_session", return_value=Session()):
+                self.assertEqual(SNMP.command_inventory_sync({}, args), 0)
+            self.assertEqual(Api.patches, [])
+            self.assertEqual(address["custom_device_vendor"], "dell")
+        finally:
+            if not handle.closed:
+                handle.close()
+            os.unlink(handle.name)
+
+    def test_inventory_sync_overwrites_vendor_only_when_explicit(self):
+        address = dict(row(driver="cisco-small-business", model="SF220-24P",
+                           version="1.1.3.1"), id="10", custom_device_vendor="dell")
+
+        class Api:
+            patches = []
+            def addresses(self):
+                return [address]
+            def request(self, method, path, payload=None):
+                if path == "devices/":
+                    return {"data": []}
+                if method == "PATCH":
+                    address.update(payload); self.patches.append(payload)
+                return address
+
+        class Session:
+            def __enter__(self):
+                return Api()
+            def __exit__(self, *_args):
+                return False
+
+        handle = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        try:
+            json.dump({"results": [{"ip": "192.0.2.10", "model": "SF220-24P",
+                                     "firmware": "1.1.3.1", "result": "success"}]}, handle)
+            handle.close()
+            args = types.SimpleNamespace(report=[handle.name], apply=True,
+                                         overwrite_vendor=True)
+            with mock.patch.object(SNMP.gr, "api_session", return_value=Session()):
+                self.assertEqual(SNMP.command_inventory_sync({}, args), 0)
+            self.assertEqual(address["custom_device_vendor"], "cisco")
         finally:
             if not handle.closed:
                 handle.close()

@@ -78,7 +78,11 @@ gr snmp report --all --mode ports --profile monitoring-v3
 ```
 
 `inventory-sync` imports only successful model/firmware facts from a version
-collector JSON report into address metadata. It is also dry-run until `--apply`.
+collector JSON report into address metadata. It also derives `device_vendor`
+from an unambiguous detected driver/model family. A missing vendor is filled;
+an existing different value is reported as `VENDOR_CONFLICT` and is preserved
+unless `--overwrite-vendor` is explicitly supplied. Unknown families are
+reported as `VENDOR_UNRESOLVED`. The operation remains dry-run until `--apply`.
 
 Only templates with `apply_supported: true`, the requested action in
 `supported_actions`, and a reviewed workflow execute. Templates select a
@@ -196,6 +200,7 @@ The initial catalog incorporates the pilot evidence:
 |---|---|---|
 | Cisco IOS/IOS XE | transactional SHA/AES128, group ACL | consistent CLI, rollback and save verified |
 | Cisco CBS250-8T-D 3.1.1.7 | configure/rotate | six-device rollout and engine confirmation validated; legacy cleanup not exercised |
+| Cisco CBS350-48P-4G 3.0.0.69 | transactional SHA/DES configure/rotate/cleanup | sw49 passed safe adoption without configuration commands, explicit structural verification, both authPriv probes, conditional save, archive, phpIPAM association and LibreNMS poll; no legacy communities were present |
 | Cisco SG/SF 250/350 firmware 2.x | blocked handler, report/test | SG350XG-2F10 2.5.0.83 accepted the documented command but created `Privacy Method: None`; 32-hex and 16-character alphanumeric privacy inputs both failed the local AES128 gate and rolled back without save, before the monitoring test |
 | Cisco SG350X/SG350XG 2.5.0.83 | transactional SHA/DES configure/rotate | sw64, sw65 and sw67 passed both authPriv probes; sw65/sw67 also validated prompted save, final archive and LibreNMS poll |
 | Cisco SG350X-24PD 2.3.0.130 | transactional SHA/DES configure/rotate | sw66, sw68 and sw69 passed both authPriv probes, prompted save, final archive and LibreNMS poll |
