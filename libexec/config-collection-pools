@@ -180,7 +180,7 @@ def validate_configuration(cfg, allowed_drivers=None):
 
 
 def utc_now():
-    return datetime.datetime.utcnow().replace(microsecond=0)
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None, microsecond=0)
 
 
 def timestamp(value):

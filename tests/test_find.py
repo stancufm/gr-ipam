@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import contextlib
-import importlib.machinery
 import io
 import ipaddress
 import unittest
 
-GR = importlib.machinery.SourceFileLoader("gr_find_test_module", "bin/gr").load_module()
+from support import load_source
+
+
+GR = load_source("gr_find_test_module", "bin/gr")
 
 
 class FindDetailsTests(unittest.TestCase):

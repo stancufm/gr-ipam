@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import importlib.machinery
 import contextlib
 import io
 import json
@@ -8,9 +7,11 @@ import tempfile
 import unittest
 from unittest import mock
 
-GR = importlib.machinery.SourceFileLoader("gr_collect_test_module", "bin/gr").load_module()
-COLLECTOR = importlib.machinery.SourceFileLoader(
-    "gr_collect_helper_test_module", "libexec/collect-version").load_module()
+from support import load_source
+
+
+GR = load_source("gr_collect_test_module", "bin/gr")
+COLLECTOR = load_source("gr_collect_helper_test_module", "libexec/collect-version")
 
 
 class CollectVersionCliTests(unittest.TestCase):

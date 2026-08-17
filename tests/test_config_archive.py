@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 import contextlib
-import importlib.machinery
 import io
 import os
 import subprocess
 import tempfile
 import unittest
 
-GR = importlib.machinery.SourceFileLoader("gr_archive_test_module", "bin/gr").load_module()
-COLLECTOR = importlib.machinery.SourceFileLoader(
-    "gr_config_collector_test_module", "libexec/collect-config").load_module()
+from support import load_source
+
+
+GR = load_source("gr_archive_test_module", "bin/gr")
+COLLECTOR = load_source("gr_config_collector_test_module", "libexec/collect-config")
 
 
 class ConfigurationArchiveTests(unittest.TestCase):

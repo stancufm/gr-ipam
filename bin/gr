@@ -521,7 +521,7 @@ def command_vendor_update_db(cfg):
     os.makedirs(directory, mode=0o755 if system_database else 0o700, exist_ok=True)
     if system_database:
         os.chmod(directory, 0o755)
-    metadata = {"updated_utc": dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), "sources": {}}
+    metadata = {"updated_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "sources": {}}
     for registry, url in IEEE_VENDOR_SOURCES.items():
         target = vendor_db_paths(cfg)[registry]
         request = urllib.request.Request(url, headers={"User-Agent": "gr-ieee-vendor/1.0"})
@@ -676,7 +676,7 @@ def command_vendor_sync(cfg, apply=False, overwrite=False):
                         item["error"] = str(exc)
                         counts["failed"] += 1
             audit.append(item)
-    stamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     report = expand("~/.local/state/gr/vendor-sync/vendor-{}-{}.json".format(
         "apply" if apply else "preview", stamp))
     os.makedirs(os.path.dirname(report), mode=0o700, exist_ok=True)
@@ -1308,14 +1308,14 @@ class SshSessionAudit:
         os.makedirs(directory, mode=0o700, exist_ok=True)
         os.chmod(cfg["ssh_audit_dir"], 0o700)
         os.chmod(directory, 0o700)
-        stamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S.%fZ")
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
         self.path = os.path.join(directory, "{}-{}.ses".format(label, stamp))
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         self.handle = os.fdopen(fd, "w", encoding="ascii")
         self.started = time.time()
         self._write({
             "format": "gr-ssh-session-v1",
-            "started_utc": dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+            "started_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
             "hostname": row.get("_hostname") or "",
             "ip": str(row.get("_ip") or ""),
             "command": command,
@@ -1332,7 +1332,7 @@ class SshSessionAudit:
                          "data": base64.b64encode(data).decode("ascii")})
 
     def close(self, exit_status):
-        self._write({"ended_utc": dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        self._write({"ended_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
                      "exit_status": exit_status})
         os.fsync(self.handle.fileno())
         self.handle.close()
@@ -2250,7 +2250,7 @@ def command_driver_detect(cfg, args):
     rows = [(entry["ip"], entry["hostname"], entry["current"], entry["detected"],
              entry["evidence"], entry["status"]) for entry in entries]
     print_audit_table(("IP", "HOSTNAME", "CURRENT", "DETECTED", "EVIDENCE", "STATUS"), rows)
-    stamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     report_path = expand("~/.local/state/gr/driver-detection/driver-detect-{}-{}.json".format(
         "apply" if args.apply else "preview", stamp))
     os.makedirs(os.path.dirname(report_path), mode=0o700, exist_ok=True)
@@ -2787,7 +2787,7 @@ def show_diff(path, old, new):
 def atomic_user_write(path, content):
     directory = os.path.dirname(path)
     os.makedirs(directory, mode=0o700, exist_ok=True)
-    timestamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     if os.path.exists(path):
         shutil.copy2(path, path + ".backup-" + timestamp)
     fd, temp_path = tempfile.mkstemp(prefix=".gr-", dir=directory, text=True)
@@ -2804,7 +2804,7 @@ def atomic_user_write(path, content):
 
 
 def privileged_hosts_write(path, content):
-    timestamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     fd, temp_path = tempfile.mkstemp(prefix="gr-hosts-", dir="/tmp", text=True)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -3213,7 +3213,7 @@ def command_migrate_drivers(cfg, apply=False, limit=None, overwrite=False):
                         item["error"] = str(exc)
                         counts["failed"] += 1
             entries.append(item)
-    stamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     report = expand("~/.local/state/gr/driver-migration/driver-{}-{}.json".format(
         "apply" if apply else "preview", stamp))
     os.makedirs(os.path.dirname(report), mode=0o700, exist_ok=True)
@@ -3293,7 +3293,7 @@ def command_update(cfg, args):
         if not args.apply:
             print("Dry-run only. Re-run with --apply to write and verify.")
             return 0
-        stamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         report_path = expand("~/.local/state/gr/updates/address-{}-{}.json".format(row.get("id"), stamp))
         os.makedirs(os.path.dirname(report_path), mode=0o700, exist_ok=True)
         report = {"created_utc": stamp, "application": write_cfg["app_id"], "id": row.get("id"),
@@ -3364,7 +3364,7 @@ def command_migrate_ssh(cfg, apply, limit):
         if not ready:
             print("Nothing to migrate.")
             return 0
-        stamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         report_path = expand("~/.local/state/gr/migrations/ssh-{}.json".format(stamp))
         os.makedirs(os.path.dirname(report_path), mode=0o700, exist_ok=True)
         report = {"created_utc": stamp, "application": migration_cfg["app_id"], "status": "running", "updates": []}

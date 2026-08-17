@@ -37,6 +37,8 @@ sudo apt-get install python3 openssh-client sshpass pass gnupg ca-certificates g
 
 All dependencies are mandatory so every documented feature is available. The
 separately packaged legacy client must also be installed as `/usr/bin/ssh1`.
+The Python entry points retain Python 3.7 grammar compatibility and are also
+validated on Python 3.13 without deprecated UTC or module-loader APIs.
 The installer verifies the complete list before modifying the system. If Debian
 packages are missing it aborts and prints the exact `apt-get` command. To let the
 installer install missing packages explicitly, add `--install-dependencies`.

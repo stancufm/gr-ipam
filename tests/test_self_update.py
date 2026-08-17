@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-import importlib.machinery
 import pathlib
 import unittest
 from unittest import mock
 
 
-GR = importlib.machinery.SourceFileLoader("gr_self_update_test_module", "bin/gr").load_module()
+from support import load_source
+
+
+GR = load_source("gr_self_update_test_module", "bin/gr")
 
 
 class SelfUpdateTests(unittest.TestCase):

@@ -369,7 +369,7 @@ def main():
         return 1
     profiles = sorted(set(item["profile"] for item in items))
     passwords = {profile: gr.read_vault_password(gr.vault_secret_name(cfg, profile)) for profile in profiles}
-    stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     report_root = cfg["device_version_dir"]
     os.makedirs(report_root, mode=0o700, exist_ok=True)
     os.chmod(report_root, 0o700)

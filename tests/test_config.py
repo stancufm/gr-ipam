@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import contextlib
-import importlib.machinery
 import io
 import ipaddress
 import json
@@ -8,7 +7,10 @@ import os
 import tempfile
 import unittest
 
-GR = importlib.machinery.SourceFileLoader("gr_config_test_module", "bin/gr").load_module()
+from support import load_source
+
+
+GR = load_source("gr_config_test_module", "bin/gr")
 
 
 class ConfigShowTests(unittest.TestCase):

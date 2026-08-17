@@ -244,7 +244,7 @@ def main():
             results.append(result)
             print("RESULT {} {} {}".format(result["hostname"], result["ip"], result["result"]))
     results.sort(key=lambda item: tuple(int(part) for part in item["ip"].split(".")))
-    stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     try:
         commit, changed = archive_configurations(gr.GLOBAL_CONFIG_ARCHIVE, results, stamp)
     except (OSError, subprocess.SubprocessError, RuntimeError) as exc:

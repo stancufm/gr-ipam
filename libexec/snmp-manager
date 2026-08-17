@@ -547,7 +547,7 @@ def run_device_commands(cfg, row, commands, timeout=70, template=None, values=No
 def report_path(cfg, name):
     root = gr.expand(cfg["snmp_report_dir"])
     os.makedirs(root, mode=0o700, exist_ok=True); os.chmod(root, 0o700)
-    stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return os.path.join(root, "{}-{}".format(stamp, name))
 
 

@@ -26,6 +26,9 @@ Pe jump server installerul se rulează fără `--phpipam-config`, iar `gr doctor
 Debian 10+, Python 3.7+ și acces HTTPS la phpIPAM. Toate dependențele sunt
 obligatorii pentru ca fiecare funcționalitate documentată să fie disponibilă:
 
+Entry point-urile păstrează compatibilitatea de sintaxă cu Python 3.7 și sunt
+validate și pe Python 3.13, fără API-uri UTC sau module-loader depreciate.
+
 ```bash
 sudo apt-get update
 sudo apt-get install python3 openssh-client sshpass pass gnupg ca-certificates git bash-completion less systemd snmp

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import datetime
-import importlib.machinery
 import json
 import os
 import tempfile
@@ -8,9 +7,11 @@ import unittest
 from unittest import mock
 
 
-POOLS = importlib.machinery.SourceFileLoader(
-    "gr_config_collection_pools_test_module",
-    "libexec/config-collection-pools").load_module()
+from support import load_source
+
+
+POOLS = load_source(
+    "gr_config_collection_pools_test_module", "libexec/config-collection-pools")
 
 
 class FakeGr:
