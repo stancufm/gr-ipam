@@ -10,6 +10,7 @@ Options:
   --migration-app-id ID   Write-enabled application (default: gr-migrate)
   --ca-file PATH          CA certificate to install (PEM)
   --config PATH           Install a complete prepared config instead
+  --collector-config PATH Install prepared dedicated collector configuration
   --release-key PATH      Public GPG key used to verify signed release tags
   --update-repository URL HTTPS Git repository used by gr self-update
   --destdir PATH          Package/test installation root (no systemd actions)
@@ -28,6 +29,7 @@ app_id=gr-app
 migration_app_id=gr-migrate
 ca_source=
 config_source=
+collector_config_source=
 destdir=
 enable_timer=0
 install_dependencies=0
@@ -44,6 +46,7 @@ while [ "$#" -gt 0 ]; do
     --migration-app-id) migration_app_id=$2; shift 2 ;;
     --ca-file) ca_source=$2; shift 2 ;;
     --config) config_source=$2; shift 2 ;;
+    --collector-config) collector_config_source=$2; shift 2 ;;
     --release-key) release_key_source=$2; shift 2 ;;
     --update-repository) update_repository=$2; update_repository_set=1; shift 2 ;;
     --destdir) destdir=$2; shift 2 ;;
@@ -116,6 +119,10 @@ if [ -n "$ca_source" ] && [ ! -r "$ca_source" ]; then
   echo "Cannot read CA file: $ca_source" >&2
   exit 2
 fi
+if [ -n "$collector_config_source" ] && [ ! -r "$collector_config_source" ]; then
+  echo "Cannot read collector config: $collector_config_source" >&2
+  exit 2
+fi
 if [ -n "$release_key_source" ] && [ ! -r "$release_key_source" ]; then
   echo "Cannot read release key: $release_key_source" >&2
   exit 2
@@ -133,7 +140,7 @@ install -d -m 0755 "$destdir/usr/local/bin" "$destdir/usr/local/libexec/gr" \
   "$destdir/usr/local/share/doc/gr" "$destdir/usr/local/share/gr/phpipam" \
   "$destdir/usr/local/share/gr/snmp" \
   "$destdir/etc/gr" "$destdir/var/lib/gr/ieee-vendors" \
-  "$destdir/etc/systemd/system" "$destdir/etc/systemd/user" \
+  "$destdir/etc/systemd/system" \
   "$destdir/etc/bash_completion.d"
 install -m 0755 "$package_dir/bin/gr" "$destdir/usr/local/bin/gr"
 install -m 0755 "$package_dir/libexec/validate-ssh" "$destdir/usr/local/libexec/gr/validate-ssh"
@@ -158,9 +165,11 @@ install -m 0644 "$package_dir/VERSION" "$destdir/usr/local/share/doc/gr/VERSION"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.service" "$destdir/etc/systemd/system/gr-vendor-update.service"
 install -m 0644 "$package_dir/systemd/gr-vendor-update.timer" "$destdir/etc/systemd/system/gr-vendor-update.timer"
 install -m 0644 "$package_dir/systemd/gr-config-collect.service" \
-  "$destdir/etc/systemd/user/gr-config-collect.service"
+  "$destdir/etc/systemd/system/gr-config-collect.service"
 install -m 0644 "$package_dir/systemd/gr-config-collect.timer" \
-  "$destdir/etc/systemd/user/gr-config-collect.timer"
+  "$destdir/etc/systemd/system/gr-config-collect.timer"
+install -m 0644 "$package_dir/systemd/gr-config-collect@.service" \
+  "$destdir/etc/systemd/system/gr-config-collect@.service"
 install -m 0644 "$package_dir/completions/gr.bash" "$destdir/etc/bash_completion.d/gr"
 
 if [ -n "$config_source" ]; then
@@ -181,6 +190,34 @@ else
 fi
 if [ -n "$ca_source" ]; then
   install -m 0644 "$ca_source" "$destdir/etc/gr/phpipam-ca.pem"
+fi
+if [ -n "$collector_config_source" ]; then
+  install -m 0640 "$collector_config_source" "$destdir/etc/gr/collector.json"
+elif [ ! -e "$destdir/etc/gr/collector.json" ]; then
+  python3 - "$destdir/etc/gr/config.json" "$destdir/etc/gr/collector.json" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    config = json.load(handle)
+config.update({
+    "credential_file": "/var/lib/gr-collector/.config/gr/credentials",
+    "device_version_dir": "/var/lib/gr-collector/device-version",
+    "ssh_audit_enabled": False,
+    "ssh_audit_dir": "/var/lib/gr-collector/audit",
+    "ssh_known_hosts": "/var/lib/gr-collector/known_hosts",
+    "ssh_output": "/var/lib/gr-collector/ssh-config",
+    "snmp_report_dir": "/var/lib/gr-collector/snmp-reports",
+    "config_collection": {
+        "state_dir": "/var/lib/gr-collector/config-collection",
+        "scheduler_enabled": False,
+        "active_marker": "/etc/jumpserver-ha/active",
+        "pools": {},
+    },
+})
+with open(sys.argv[2], "w", encoding="utf-8", newline="\n") as handle:
+    json.dump(config, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+  chmod 0640 "$destdir/etc/gr/collector.json"
 fi
 
 update_config="$destdir/etc/gr/update.json"
@@ -219,7 +256,28 @@ if [ -z "$destdir" ]; then
   if ! getent group gr-config >/dev/null 2>&1; then
     groupadd --system gr-config
   fi
-  install -d -o root -g gr-config -m 2770 /var/lib/gr/config-archive
+  if ! getent group gr-collector >/dev/null 2>&1; then
+    groupadd --system gr-collector
+  fi
+  if ! getent passwd gr-collector >/dev/null 2>&1; then
+    useradd --system --gid gr-collector --groups gr-config \
+      --home-dir /var/lib/gr-collector --create-home --shell /usr/sbin/nologin gr-collector
+  else
+    usermod --append --groups gr-config gr-collector
+  fi
+  install -d -o gr-collector -g gr-collector -m 0700 /var/lib/gr-collector \
+    /var/lib/gr-collector/config-collection /var/lib/gr-collector/.config \
+    /var/lib/gr-collector/.config/gr
+  chown root:gr-collector /etc/gr/collector.json
+  chmod 0640 /etc/gr/collector.json
+  install -d -o gr-collector -g gr-config -m 2770 /var/lib/gr/config-archive
+  chown -R gr-collector:gr-config /var/lib/gr/config-archive
+  find /var/lib/gr/config-archive -type d -exec chmod 2770 {} \;
+  find /var/lib/gr/config-archive -type f -exec chmod 0660 {} \;
+  if ! git config --system --get-all safe.directory 2>/dev/null \
+      | grep -Fxq /var/lib/gr/config-archive; then
+    git config --system --add safe.directory /var/lib/gr/config-archive
+  fi
   systemctl daemon-reload
   if [ "$enable_timer" -eq 1 ]; then
     systemctl enable --now gr-vendor-update.timer
@@ -230,3 +288,4 @@ echo "Installed gr. Each user should run: gr init --configure-auth"
 echo "Then validate with: gr doctor --api"
 echo "Reload Bash completion in existing shells with: source /etc/bash_completion.d/gr"
 echo "Configuration collection timer remains disabled; see CONFIG-COLLECTION-POOLS.md."
+echo "Dedicated collector: gr-collector using /etc/gr/collector.json (timer disabled)."

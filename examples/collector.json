@@ -1,0 +1,26 @@
+{
+  "app_id": "gr-app",
+  "base_url": "https://ipam.example.net",
+  "ca_file": "/etc/ssl/certs/ca-certificates.crt",
+  "credential_file": "/var/lib/gr-collector/.config/gr/credentials",
+  "device_version_dir": "/var/lib/gr-collector/device-version",
+  "hosts_sync_enabled": false,
+  "include_tags": [2],
+  "ssh_audit_enabled": false,
+  "ssh_audit_dir": "/var/lib/gr-collector/audit",
+  "ssh_known_hosts": "/var/lib/gr-collector/known_hosts",
+  "ssh_output": "/var/lib/gr-collector/ssh-config",
+  "ssh_profiles": {},
+  "snmp_template_file": "/etc/gr/snmp-templates.json",
+  "snmp_report_dir": "/var/lib/gr-collector/snmp-reports",
+  "snmp_profiles": {},
+  "monitoring_profiles": {},
+  "config_collection": {
+    "state_dir": "/var/lib/gr-collector/config-collection",
+    "scheduler_enabled": false,
+    "active_marker": "/etc/jumpserver-ha/active",
+    "pools": {}
+  },
+  "username": "gr-api",
+  "vendor_db_dir": "/var/lib/gr/ieee-vendors"
+}

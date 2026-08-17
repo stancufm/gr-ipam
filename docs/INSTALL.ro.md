@@ -63,7 +63,14 @@ gr doctor --api
 Instalarea nu activează colectarea programată a configurațiilor. Configurează și
 validează întâi pool-urile; activarea și regulile HA sunt documentate în
 `CONFIG-COLLECTION-POOLS.ro.md`. Unitățile per utilizator sunt instalate în
-`/etc/systemd/user/gr-config-collect.*`.
+`/etc/systemd/system/gr-config-collect.*`, dar timerul rămâne dezactivat.
+
+Installerul creează contul de sistem blocat `gr-collector`, home-ul privat
+`/var/lib/gr-collector` și configurația inițială `/etc/gr/collector.json`.
+Credențialele API și SSH criptate necesare pool-urilor se provizionează separat
+pentru această identitate. Nu se reutilizează home-ul, cheile SSH private sau
+agentul GPG interactiv al unui operator. O configurație pregătită se poate
+instala cu `--collector-config PATH`.
 
 Installerul creează arhiva globală de configurații și grupul de autorizare.
 Accesul se acordă explicit, urmat de un login nou:
@@ -72,9 +79,10 @@ Accesul se acordă explicit, urmat de un login nou:
 sudo usermod -aG gr-config OPERATOR
 ```
 
-`/var/lib/gr/config-archive` are modul `2770` și proprietarul `root:gr-config`.
-Configurațiile pot conține secrete; nu acordați grupul inutil și nu configurați
-un remote Git fără o destinație securizată analizată.
+`/var/lib/gr/config-archive` are modul `2770` și proprietarul
+`gr-collector:gr-config`. Configurațiile pot conține secrete; nu acordați
+grupul inutil. În HA, replicarea aparține mecanismului separat
+`jumpserver-ha`; nu configurați un remote Git concurent.
 
 ### Upgrade de la gr 1.x la 2.x
 

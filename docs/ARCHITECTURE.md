@@ -77,8 +77,11 @@ layering.
 - SNMP AUTH/PRIV values and monitoring API tokens: named `pass` entries;
 - SSH keys and persistent gr known hosts: owned and managed by the Linux user;
 - reports: `~/.local/state/gr/`, directory mode `0700`, files mode `0600`.
+- scheduled collector: locked system account `gr-collector`, dedicated
+  `/etc/gr/collector.json`, private `/var/lib/gr-collector`, and separately
+  provisioned least-privilege API/vault material;
 - device configuration history: `/var/lib/gr/config-archive`, mode `2770`,
-  shared only with authorized members of `gr-config`.
+  owned by `gr-collector:gr-config` and readable only by authorized members.
 
 No credential is stored in phpIPAM. phpIPAM contains only the profile name that
 selects a secret in the current user's vault. The independent `device_driver`
@@ -122,10 +125,17 @@ timer updates the shared database once for all users.
 ### Global configuration archive
 
 Drivers own both version and running-configuration commands. Authentication
-uses the initiating operator's private vault, while normalized configurations
-are written under a global lock to `/var/lib/gr/config-archive/devices/`. Git
-creates one collection commit only when staged content differs from HEAD.
-Browsing uses `gr config devices/history/view`; gr configures no archive remote.
+uses the initiating operator's private vault for interactive runs and the
+dedicated collector vault for scheduled runs. Normalized configurations are
+written under a lock stored inside `.git` to
+`/var/lib/gr/config-archive/devices/`. Git creates one collection commit only
+when staged content differs from HEAD. Browsing uses
+`gr config devices/history/view`; GR configures no archive remote.
+
+The system timer runs as `gr-collector`, is disabled by default, and is fenced
+by the HA active marker. The independent `jumpserver-ha` project replicates the
+archive and collector identity data; standby must never schedule collection
+before promotion.
 
 ## Data flows
 

@@ -46,7 +46,7 @@ CONFIG_POOL_MANAGER = os.environ.get(
 SNMP_MANAGER = os.environ.get("GR_SNMP_MANAGER", "/usr/local/libexec/gr/snmp-manager")
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.9.0"
+GR_VERSION = "2.10.0"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -2954,9 +2954,27 @@ def command_doctor(cfg, test_api=False, system_only=False):
     check("self-update helper", os.path.isfile(SELF_UPDATER), SELF_UPDATER, essential=system_only)
     check("configuration pool helper", os.path.isfile(CONFIG_POOL_MANAGER),
           CONFIG_POOL_MANAGER, essential=system_only)
-    for unit in ("/etc/systemd/user/gr-config-collect.service",
-                 "/etc/systemd/user/gr-config-collect.timer"):
+    for unit in ("/etc/systemd/system/gr-config-collect.service",
+                 "/etc/systemd/system/gr-config-collect.timer",
+                 "/etc/systemd/system/gr-config-collect@.service"):
         check("configuration pool unit", os.path.isfile(unit), unit, essential=system_only)
+    try:
+        collector_account = subprocess.run(
+            ["getent", "passwd", "gr-collector"], stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL).returncode == 0
+    except OSError:
+        collector_account = False
+    check("collector service account", collector_account, "gr-collector",
+          essential=system_only)
+    collector_config = "/etc/gr/collector.json"
+    collector_config_ok = os.path.isfile(collector_config)
+    collector_detail = collector_config
+    if collector_config_ok:
+        collector_mode = os.stat(collector_config).st_mode & 0o777
+        collector_config_ok = collector_mode == 0o640
+        collector_detail = "{} mode {:04o}".format(collector_config, collector_mode)
+    check("collector configuration", collector_config_ok, collector_detail,
+          essential=system_only)
     check("update configuration", os.path.isfile("/etc/gr/update.json"), "/etc/gr/update.json",
           essential=system_only)
     check("release verification key", os.path.isfile("/etc/gr/release-key.asc"),

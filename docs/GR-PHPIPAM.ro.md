@@ -298,16 +298,17 @@ formatul `YYYY-MM-DD HH:MM:SS`; ID-urile stabile și valorile JSON rămân UTC.
 
 `gr collect config` extrage configurația curentă folosind comenzile definite de
 driver și salvează textul normalizat în repository-ul Git global privat
-`/var/lib/gr/config-archive`. Arhiva aparține grupului `gr-config`; numai membrii
-autorizați pot citi sau colecta configurații. Profilurile și seiful de parole
-rămân per utilizator și nu sunt introduse în Git.
+`/var/lib/gr/config-archive`. Arhiva aparține grupului `gr-config`, iar rulările
+programate scriu prin contul dedicat `gr-collector`. Membrii autorizați pot citi
+istoricul; rulările interactive folosesc în continuare profilurile proprii.
+Secretele Vault nu sunt introduse în Git.
 
 ```bash
 gr collect config --all [--vendor VENDOR] [--workers N]
 gr collect config --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
 ```
 
-Pool-urile denumite și timerul opțional, dezactivat implicit, sunt documentate
+Pool-urile denumite și timerul de sistem dezactivat implicit sunt documentate
 în `CONFIG-COLLECTION-POOLS.ro.md`. Începe cu `gr collect config pools` pentru a
 valida selectorii și eligibilitatea fără a contacta echipamentele.
 

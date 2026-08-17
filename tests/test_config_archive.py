@@ -36,6 +36,16 @@ class ConfigurationArchiveTests(unittest.TestCase):
                 ["git", "--git-dir=" + os.path.join(archive, ".git"),
                  "--work-tree=" + archive, "config", "user.name"],
                 universal_newlines=True).strip(), "gr configuration collector")
+            self.assertEqual(subprocess.check_output(
+                ["git", "--git-dir=" + os.path.join(archive, ".git"),
+                 "--work-tree=" + archive, "config", "core.sharedRepository"],
+                universal_newlines=True).strip(), "group")
+            self.assertEqual(subprocess.check_output(
+                ["git", "--git-dir=" + os.path.join(archive, ".git"),
+                 "--work-tree=" + archive, "status", "--porcelain"],
+                universal_newlines=True), "")
+            self.assertTrue(os.path.isfile(os.path.join(
+                archive, ".git", "gr-collect.lock")))
 
     def test_archive_browsing_lists_history_and_latest(self):
         with tempfile.TemporaryDirectory() as archive:

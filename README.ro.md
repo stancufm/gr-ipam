@@ -21,6 +21,8 @@ Poate căuta adrese, deschide conexiuni SSH, păstra parolele dispozitivelor în
 - comenzile remote neinteractive pot reutiliza secretul SSH pentru sudo sau un
   secret sudo separat în profilul de credențiale.
 - autocomplete-ul Bash acoperă comenzile, valorile valide și navigarea în audit.
+- pool-urile programate rulează sub contul de sistem dedicat `gr-collector` și
+  sunt permise numai pe peer-ul HA activ.
 
 ## Cerințe și instalare
 
@@ -72,4 +74,4 @@ gr self-update check
 - [Pregătire phpIPAM](phpipam/SETUP.ro.md)
 - [Contribuții](CONTRIBUTING.ro.md)
 
-Versiunea `2.6.1` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).
+Versiunea `2.10.0` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).

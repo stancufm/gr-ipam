@@ -10,9 +10,16 @@
 
 `libexec/collect-config` rulează comenzile de configurație ale driverului și
 salvează numai modificările normalizate în arhiva Git globală privată
-`/var/lib/gr/config-archive`, accesibilă grupului `gr-config`. Autentificarea
-folosește seiful privat al operatorului, iar scrierea folosește lock global.
-Un commit este creat numai când conținutul diferă; gr nu configurează remote.
+`/var/lib/gr/config-archive`, deținută de `gr-collector:gr-config` cu modul
+`2770`. Rulările interactive folosesc seiful operatorului, iar cele programate
+folosesc identitatea și configurația dedicate `gr-collector` din
+`/etc/gr/collector.json`. Lock-ul este păstrat în `.git`, iar un commit este
+creat numai când conținutul diferă; GR nu configurează remote.
+
+Timerul systemd rulează ca `gr-collector`, este dezactivat implicit și este
+blocat de markerul nodului HA activ. Proiectul independent `jumpserver-ha`
+replică arhiva și datele identităților; standby-ul nu programează colectarea
+înainte de promovare.
 
 `libexec/config-collection-pools` rezolvă pool-urile declarative din inventarul
 phpIPAM, serializează rulările programate și deleagă seturile eligibile către

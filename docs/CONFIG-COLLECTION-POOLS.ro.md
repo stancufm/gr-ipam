@@ -1,56 +1,65 @@
 # Pool-uri pentru colectarea programată a configurațiilor
 
-GR poate colecta configurațiile în arhiva Git globală prin
-`gr collect config`. Pool-urile denumite adaugă programare periodică fără
-credențiale, comenzi SSH sau un inventar paralel în cron.
+[English](CONFIG-COLLECTION-POOLS.md)
 
-## Model și siguranță
+GR colectează configurațiile în arhiva Git globală prin `gr collect config`.
+Pool-urile denumite adaugă programare periodică fără credențiale, comenzi SSH
+sau un inventar paralel în cron.
 
-phpIPAM rămâne sursa de adevăr pentru ținte, hostname, driver și metadatele SSH.
-Un pool conține numai selectori. Fiecare țintă rezolvată trebuie să aibă SSH
-activ, profil, driver GR explicit diferit de `generic` și comandă de extragere.
-O țintă respinsă oprește pool-ul înaintea oricărei conexiuni; nu este omisă
-silencios.
+## Model de execuție și siguranță
+
+phpIPAM rămâne autoritatea pentru ținte, hostname-uri, drivere și metadate SSH.
+Un pool conține numai selectori. Fiecare țintă trebuie să aibă SSH activ,
+profil, driver explicit diferit de `generic` și comandă de colectare. O țintă
+respinsă oprește pool-ul înaintea oricărei conexiuni la echipamente.
+
+Rulările programate folosesc contul de sistem dedicat și blocat
+`gr-collector`. Nu depind de loginul unui administrator, de
+`loginctl enable-linger` sau de home-ul unei persoane. Comenzile GR interactive
+continuă să folosească configurația și Vault-ul operatorului curent.
 
 Schedulerul:
 
-- este dezactivat implicit și nu este activat de instalare sau upgrade;
-- folosește un singur lock, astfel încât rulările manuale și timerul nu se
-  suprapun;
-- validează toate cheile și limitează workerii la 1-12;
-- scrie atomic numai stare rezumativă sigură, cu mod `0600` într-un director
-  `0700`;
-- reîncearcă un pool eșuat după `retry_interval`, nu la fiecare tick;
-- verifică opțional markerul nodului activ și fereastra de mentenanță;
-- deleagă colectarea și commitul în arhivă colectorului existent.
+- este dezactivat la instalare și upgrade;
+- folosește un lock neblocant pentru a evita rulările suprapuse;
+- limitează workerii la 1-12 și validează fiecare setare;
+- reîncearcă eșecurile după `retry_interval`;
+- verifică markerul HA activ și fereastra opțională de mentenanță;
+- creează commit numai pentru configurații normalizate modificate.
 
-Pool-urile nu conțin secrete. Parolele echipamentelor sunt citite din profilurile
-SSH criptate existente. Pentru o rulare neasistată, utilizatorul serviciului
-trebuie să poată decripta profilurile fără pinentry grafic. Verifică anterior în
-aceeași sesiune cu `gr vault test PROFIL`; GR nu slăbește Vault-ul și nu salvează
-fraza GPG pentru scheduler.
+Lock-ul este în `.git` al arhivei, deci nu poate apărea ca artefact neversionat.
 
-## Configurare
+## Configurație și credențiale dedicate
 
-Adaugă obiectul `config_collection` în configurația JSON GR de sistem sau a
-utilizatorului. Exemplul complet este în
-`examples/config-collection-pools.json`.
+Serviciul citește `/etc/gr/collector.json`; pornește de la
+`examples/collector.json`. Starea privată este în
+`/var/lib/gr-collector/config-collection`. Configurează autentificarea API și
+profilurile SSH criptate special pentru `gr-collector`. Nu copia integral
+home-ul sau cheile private ale unui utilizator. Validează accesul API și Vault
+într-o sesiune controlată a contului de serviciu înainte de activarea timerului.
 
-- `state_dir`: starea per utilizator, implicit
-  `~/.local/state/gr/config-collection`;
-- `scheduler_enabled`: trebuie să fie `true` pentru ca `--due` să lucreze;
-- `active_marker`: cale opțională care trebuie să existe pe nodul HA activ;
-- `pools`: obiectele pool denumite.
+Administratorul îl poate inițializa dintr-un TTY fără a-i activa shell de
+login:
 
-Fiecare pool necesită `interval` și cel puțin un selector: `ips`,
-`hostname_regex`, `vendor` sau `driver`. Selectorii aceluiași pool se combină cu
-AND. Sunt acceptate `enabled`, `retry_interval`, `workers`, `exclude_ips`,
-`exclude_hostnames` și o `maintenance_window` în ora locală Europe/Bucharest,
-cu `days`, `start` și `end`. Intervalele folosesc `m`, `h` sau `d`, între 15
-minute și 365 zile.
+```text
+sudo -u gr-collector env HOME=/var/lib/gr-collector \
+  gr --config /etc/gr/collector.json init --configure-auth
+sudo -u gr-collector env HOME=/var/lib/gr-collector \
+  gr --config /etc/gr/collector.json doctor --api
+```
 
-Pool-urile trebuie să nu se suprapună. `gr collect config pools` raportează
-suprapunerile ca atenție pentru a evita colectarea dublă.
+Pool-urile nu conțin secrete în clar. GR nu salvează fraza GPG pentru rulări
+neasistate. Mediul trebuie să ofere contului de serviciu un mecanism aprobat de
+deblocare neinteractivă; altfel timerul rămâne oprit și pool-urile se rulează
+interactiv.
+
+Setările `config_collection` sunt `state_dir`, `scheduler_enabled`,
+`active_marker` și `pools`. Fiecare pool cere `interval` și cel puțin un
+selector dintre `ips`, `hostname_regex`, `vendor` sau `driver`. Selectorii se
+combină cu AND. Sunt disponibile `enabled`, `retry_interval`, `workers`,
+`exclude_ips`, `exclude_hostnames` și `maintenance_window` în ora
+Europe/Bucharest. Intervalele folosesc `m`, `h` sau `d`, între 15 minute și 365
+zile. `gr collect config pools` raportează suprapunerile ca atenție.
 
 ## Comenzi
 
@@ -61,38 +70,41 @@ gr collect config --pool critical
 gr collect config --due
 ```
 
-`pools` rezolvă inventarul și eligibilitatea fără a contacta echipamentele.
-`status` citește numai starea locală. `--pool` rulează imediat un pool;
-`--due` respectă activarea schedulerului, markerul HA, intervalul, retry-ul și
-fereastra de mentenanță. Comenzile directe existente rămân neschimbate.
+`pools` și `status` sunt read-only. `--pool` rulează imediat un pool; `--due`
+respectă activarea, markerul HA, intervalul, retry-ul și fereastra de
+mentenanță. Comenzile directe folosesc în continuare operatorul curent.
 
-## Timer systemd al utilizatorului
-
-Pachetul instalează `gr-config-collect.service` și `.timer` în
-`/etc/systemd/user`. Unitățile rulează ca operatorul, pentru a utiliza
-configurația API și Vault-ul său, fără un cont hardcodat. După configurarea și
-validarea pool-urilor pe nodul activ:
+După configurare și validare pe nodul HA activ:
 
 ```text
-systemctl --user daemon-reload
-systemctl --user enable --now gr-config-collect.timer
-systemctl --user status gr-config-collect.timer
-journalctl --user -u gr-config-collect.service
+sudo systemctl daemon-reload
+sudo systemctl start gr-config-collect@critical.service
+sudo systemctl enable --now gr-config-collect.timer
+systemctl status gr-config-collect.timer
+journalctl -u gr-config-collect.service
 ```
 
-Pentru rulare fără login interactiv, administratorul poate activa explicit
-systemd user lingering pentru contul ales. Se face numai pe peer-ul HA activ.
-La demotion se dezactivează timerul sau se elimină markerul activ. Upgrade-urile
-păstrează starea timerului și nu îl activează.
+Unitatea template permite rularea explicită a unui pool sub identitatea de
+serviciu. Instalarea și upgrade-ul nu activează timerul. La demotion, markerul
+HA blochează `--due`; timerul trebuie dezactivat și ca protecție suplimentară.
 
-Arhiva autoritativă `/var/lib/gr/config-archive` trebuie replicată pe standby cu
-owner, grup și mod păstrate. Standby-ul poate citi arhiva, dar nu colectează până
-la promovarea validată.
+## Arhivă și HA
+
+`/var/lib/gr/config-archive` aparține `gr-collector:gr-config` și are modul
+`2770`. Operatorii din `gr-config` pot citi istoricul și pot face colectări
+interactive explicite, dar nu dețin procesul programat. Configurațiile pot
+conține secrete, deci grupul rămâne restrâns.
+Installerul înregistrează numai această cale exactă drept Git
+`safe.directory`; nu activează niciodată o regulă wildcard.
+
+Proiectul `jumpserver-ha` este singura autoritate de replicare spre standby. El
+păstrează proprietarii numerici, ACL-urile și atributele extinse și menține
+colectarea oprită pe standby până la promovare. Nu configura o a doua cale Git
+și nu porni timerul GR pe ambii peers.
 
 ## Recuperare
 
-La eșec, verifică `gr collect config status` și jurnalul utilizatorului. Repară
-metadatele phpIPAM, disponibilitatea Vault-ului sau accesul la echipament, apoi
-rulează manual pool-ul afectat. Nu este nevoie să ștergi `state.json`: eșecul
-devine eligibil după `retry_interval`, iar succesul manual actualizează atomic
-aceeași stare.
+Verifică starea cu configurația colectorului și jurnalul systemd. Repară
+metadatele phpIPAM, Vault-ul sau accesul la echipament, apoi rulează numai
+pool-ul afectat. Eșecul devine eligibil după `retry_interval`, iar succesul
+manual actualizează atomic aceeași stare.
