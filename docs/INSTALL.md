@@ -37,6 +37,8 @@ sudo apt-get install python3 openssh-client sshpass pass gnupg ca-certificates g
 
 All dependencies are mandatory so every documented feature is available. The
 separately packaged legacy client must also be installed as `/usr/bin/ssh1`.
+The Python entry points retain Python 3.7 grammar compatibility and are also
+validated on Python 3.13 without deprecated UTC or module-loader APIs.
 The installer verifies the complete list before modifying the system. If Debian
 packages are missing it aborts and prints the exact `apt-get` command. To let the
 installer install missing packages explicitly, add `--install-dependencies`.
@@ -73,13 +75,15 @@ Installed paths:
 | `/usr/local/libexec/gr/` | global operational helpers |
 | `/usr/local/share/doc/gr/` | installed documentation |
 | `/etc/gr/config.json` | global non-secret configuration |
+| `/etc/gr/collector.json` | dedicated scheduled-collector configuration, mode `0640` |
 | `/etc/gr/phpipam-ca.pem` | optional private CA |
 | `/etc/gr/update.json` | root-owned HTTPS release repository |
 | `/etc/gr/release-key.asc` | pinned public release-signing key |
 | `/etc/bash_completion.d/gr` | global Bash completion, including dynamic audit candidates |
 | `/var/lib/gr/ieee-vendors/` | shared IEEE database |
 | `/etc/systemd/system/gr-vendor-update.*` | optional weekly update |
-| `/etc/systemd/user/gr-config-collect.*` | disabled-by-default per-user configuration pool timer |
+| `/etc/systemd/system/gr-config-collect.*` | disabled-by-default system collector units |
+| `/var/lib/gr-collector/` | private home and scheduler state for `gr-collector` |
 
 ## 4. Initialize users
 
@@ -98,6 +102,13 @@ Scheduled configuration collection is not activated by installation. Configure
 and validate pools first; activation and HA guidance are in
 `CONFIG-COLLECTION-POOLS.md`.
 
+The installer creates the locked `gr-collector` system account and installs a
+starter `/etc/gr/collector.json`. Provision only the API and encrypted SSH
+credentials required by scheduled pools for this identity. A prepared service
+configuration can be installed with `--collector-config PATH`. The service
+must not reuse a human operator's home, private SSH keys, or interactive GPG
+agent. The timer remains disabled until an administrator explicitly enables it.
+
 The installer creates the global configuration archive and its authorization
 group. Grant access explicitly, then start a new login session:
 
@@ -105,9 +116,10 @@ group. Grant access explicitly, then start a new login session:
 sudo usermod -aG gr-config OPERATOR
 ```
 
-`/var/lib/gr/config-archive` is mode `2770`, owned by `root:gr-config`. Device
-configurations may contain secrets; do not grant this group broadly and do not
-add a Git remote without a reviewed secure destination.
+`/var/lib/gr/config-archive` is mode `2770`, owned by
+`gr-collector:gr-config`. Device configurations may contain secrets; do not
+grant this group broadly. In an HA deployment, replication is owned by the
+separate `jumpserver-ha` mechanism; do not add a competing Git remote.
 
 ### Upgrading from gr 1.x to 2.x
 

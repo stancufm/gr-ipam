@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 import contextlib
-import importlib.machinery
 import io
 import os
 import subprocess
 import tempfile
 import unittest
 
-GR = importlib.machinery.SourceFileLoader("gr_archive_test_module", "bin/gr").load_module()
-COLLECTOR = importlib.machinery.SourceFileLoader(
-    "gr_config_collector_test_module", "libexec/collect-config").load_module()
+from support import load_source
+
+
+GR = load_source("gr_archive_test_module", "bin/gr")
+COLLECTOR = load_source("gr_config_collector_test_module", "libexec/collect-config")
 
 
 class ConfigurationArchiveTests(unittest.TestCase):
@@ -36,6 +37,16 @@ class ConfigurationArchiveTests(unittest.TestCase):
                 ["git", "--git-dir=" + os.path.join(archive, ".git"),
                  "--work-tree=" + archive, "config", "user.name"],
                 universal_newlines=True).strip(), "gr configuration collector")
+            self.assertEqual(subprocess.check_output(
+                ["git", "--git-dir=" + os.path.join(archive, ".git"),
+                 "--work-tree=" + archive, "config", "core.sharedRepository"],
+                universal_newlines=True).strip(), "group")
+            self.assertEqual(subprocess.check_output(
+                ["git", "--git-dir=" + os.path.join(archive, ".git"),
+                 "--work-tree=" + archive, "status", "--porcelain"],
+                universal_newlines=True), "")
+            self.assertTrue(os.path.isfile(os.path.join(
+                archive, ".git", "gr-collect.lock")))
 
     def test_archive_browsing_lists_history_and_latest(self):
         with tempfile.TemporaryDirectory() as archive:

@@ -300,15 +300,17 @@ formatted as `YYYY-MM-DD HH:MM:SS`; stable report IDs and JSON timestamps remain
 `gr collect config` retrieves the running configuration with commands owned by
 the selected device driver and stores normalized text in the global private Git
 repository `/var/lib/gr/config-archive`. The archive belongs to group
-`gr-config`; only authorized group members can read or collect configurations.
-Credential profiles and vault secrets remain per user and are never committed.
+`gr-config` and is written by the dedicated `gr-collector` account for
+scheduled runs. Authorized group members can read history; interactive runs
+continue to use their own credential profiles. Vault secrets are never
+committed.
 
 ```bash
 gr collect config --all [--vendor VENDOR] [--workers N]
 gr collect config --ip IP [--ip IP ...] [--vendor VENDOR] [--workers N]
 ```
 
-Named pools and the optional disabled-by-default user timer are documented in
+Named pools and the disabled-by-default system timer are documented in
 `CONFIG-COLLECTION-POOLS.md`. Start with `gr collect config pools` to validate
 selectors and eligibility without contacting devices.
 

@@ -2,7 +2,6 @@
 import base64
 import contextlib
 import io
-import importlib.machinery
 import ipaddress
 import json
 import os
@@ -11,7 +10,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-GR = importlib.machinery.SourceFileLoader("gr_test_module", "bin/gr").load_module()
+from support import load_source
+
+
+GR = load_source("gr_test_module", "bin/gr")
 
 
 class AuditTests(unittest.TestCase):

@@ -1,56 +1,66 @@
 # Scheduled configuration collection pools
 
+[Română](CONFIG-COLLECTION-POOLS.ro.md)
+
 GR can collect device configurations into the global Git archive with
 `gr collect config`. Named pools add safe periodic scheduling without putting
 credentials, SSH commands, or a second device inventory in cron.
 
-## Model and safety
+## Execution and safety model
 
-phpIPAM remains the target, hostname, driver and SSH metadata source of truth.
+phpIPAM remains authoritative for targets, hostnames, drivers and SSH metadata.
 A pool contains selectors only. Every resolved target must have SSH enabled, a
-profile, an explicit non-generic driver and a configuration command. A rejected
-target makes the pool fail before any connection is opened; targets are never
-silently omitted.
+profile, an explicit non-generic driver and a configuration command. One
+rejected target fails the pool before any device connection is opened.
+
+Scheduled runs use the dedicated, locked-down `gr-collector` system account.
+They do not depend on an administrator login, `loginctl enable-linger`, or a
+particular human home directory. Interactive GR commands continue to use the
+calling operator's configuration and vault.
 
 The scheduler:
 
-- is disabled by default and is never enabled by installation or upgrade;
+- is disabled by installation and upgrade;
 - uses one non-blocking lock, so manual and timer runs cannot overlap;
-- clamps workers to 1-12 and validates every configuration key;
-- writes only safe summary state, atomically, with mode `0600` below a `0700`
-  directory;
-- retries failed pools on `retry_interval`, not every timer tick;
-- checks an optional active-node marker and maintenance window for `--due`;
-- delegates collection and Git archive commits to the existing collector.
+- clamps workers to 1-12 and validates every setting;
+- retries failures on `retry_interval`, not every timer tick;
+- checks the active HA marker and optional maintenance window;
+- commits only changed normalized configurations.
 
-Pool files contain no secrets. Device passwords continue to come from the
-existing encrypted SSH profiles. An unattended run must be able to decrypt
-those profiles without a graphical prompt. Validate this in the same user
-session with `gr vault test PROFILE` before enabling the timer; GR does not
-weaken the vault or store a passphrase for scheduling.
+The collector lock is stored inside the archive's `.git` directory, so it can
+never appear as an untracked configuration artifact.
 
-## Configuration
+## Dedicated configuration and credentials
 
-Add `config_collection` to the normal system or user GR JSON configuration.
-See `examples/config-collection-pools.json` for a complete example.
+The service reads `/etc/gr/collector.json`; start from
+`examples/collector.json`. It has a private state directory at
+`/var/lib/gr-collector/config-collection`. Configure API authentication and
+the encrypted SSH profiles specifically for `gr-collector`. Do not copy a
+human user's complete home or private keys as a shortcut. Validate vault and
+API access in a controlled service-account session before enabling scheduling.
 
-Top-level settings:
+An administrator can initialize it from a TTY without enabling a login shell:
 
-- `state_dir`: per-user runtime state; default
-  `~/.local/state/gr/config-collection`;
-- `scheduler_enabled`: must be `true` before `--due` performs work;
-- `active_marker`: optional path which must exist on the active HA node;
-- `pools`: named pool objects.
+```text
+sudo -u gr-collector env HOME=/var/lib/gr-collector \
+  gr --config /etc/gr/collector.json init --configure-auth
+sudo -u gr-collector env HOME=/var/lib/gr-collector \
+  gr --config /etc/gr/collector.json doctor --api
+```
 
-Each pool requires `interval` and at least one selector: `ips`,
-`hostname_regex`, `vendor`, or `driver`. Selectors in the same pool are ANDed.
-Supported controls are `enabled`, `retry_interval`, `workers`, `exclude_ips`,
-`exclude_hostnames`, and an optional local Europe/Bucharest
-`maintenance_window` with `days`, `start`, and `end`. Intervals use `m`, `h`,
-or `d` and must be between 15 minutes and 365 days.
+Pool files contain no plaintext secrets. GR does not store a GPG passphrase for
+unattended scheduling. The deployment must provide an approved non-interactive
+secret-unlock mechanism for this service identity, or leave the timer disabled
+and run pools interactively.
 
-Use non-overlapping pools. `gr collect config pools` reports overlaps as
-attention because simultaneous schedules would collect the same device twice.
+Top-level `config_collection` settings are `state_dir`, `scheduler_enabled`,
+`active_marker`, and `pools`. Each pool requires `interval` and at least one of
+`ips`, `hostname_regex`, `vendor`, or `driver`. Selectors within a pool are
+ANDed. Optional controls include `enabled`, `retry_interval`, `workers`,
+`exclude_ips`, `exclude_hostnames`, and a Europe/Bucharest
+`maintenance_window`. Intervals use `m`, `h`, or `d`, from 15 minutes through
+365 days. Prefer non-overlapping pools; `gr collect config pools` reports any
+overlap as attention.
 
 ## Commands
 
@@ -61,39 +71,43 @@ gr collect config --pool critical
 gr collect config --due
 ```
 
-`pools` resolves phpIPAM targets and validates eligibility without contacting
-devices. `status` reads local state only. `--pool` starts one pool immediately;
-`--due` honors scheduler, active-marker, interval, retry, and maintenance-window
-controls. Existing direct commands such as `gr collect config --ip ADDRESS`
-remain unchanged.
+`pools` and `status` are read-only. `--pool` starts one pool immediately;
+`--due` honors scheduler, active marker, interval, retry, and maintenance
+window. Direct commands such as `gr collect config --ip ADDRESS` are unchanged
+and use the current operator.
 
-## User systemd timer
-
-The package installs `gr-config-collect.service` and `.timer` in
-`/etc/systemd/user`. They deliberately run as the operator, so GR can use that
-user's API configuration and encrypted vault without a hard-coded service
-account. After configuring and validating pools on the active node:
+After configuration and validation on the active HA peer:
 
 ```text
-systemctl --user daemon-reload
-systemctl --user enable --now gr-config-collect.timer
-systemctl --user status gr-config-collect.timer
-journalctl --user -u gr-config-collect.service
+sudo systemctl daemon-reload
+sudo systemctl start gr-config-collect@critical.service
+sudo systemctl enable --now gr-config-collect.timer
+systemctl status gr-config-collect.timer
+journalctl -u gr-config-collect.service
 ```
 
-For operation without an interactive login, the administrator may enable
-systemd user lingering explicitly for the chosen account. Do this only on the
-active HA peer. On demotion, disable the timer or remove the configured active
-marker. Upgrades preserve the disabled/enabled state and never activate it.
+The template unit provides explicit manual pool execution under the service
+identity. Installation and upgrade preserve configuration and never enable the
+timer. On demotion, the HA active marker fences `--due`; the timer should also
+be disabled as defence in depth.
 
-The authoritative `/var/lib/gr/config-archive` must be replicated to the
-standby with owner, group and mode preserved. The standby may read it but must
-not schedule collection until promotion has been validated.
+## Archive and HA
+
+`/var/lib/gr/config-archive` is owned by `gr-collector:gr-config`, mode `2770`.
+Operators granted membership in `gr-config` can read history and perform
+explicit interactive collections but do not own the scheduled writer.
+Configurations can contain secrets, so access must remain limited.
+The installer registers only this exact shared repository as a system Git
+`safe.directory`; it never enables a wildcard trust rule.
+
+The `jumpserver-ha` project is the sole authority for replication to standby.
+It preserves numeric ownership, ACLs and extended attributes and keeps
+collection disabled on standby until promotion. Do not configure a second Git
+replication path or run the GR timer on both peers.
 
 ## Recovery
 
-If a run fails, inspect `gr collect config status` and the user journal. Fix
-phpIPAM metadata, vault availability, or device access, then run the affected
-pool manually. Removing `state.json` is unnecessary: a failure becomes
-eligible again after `retry_interval`; a successful manual run updates the same
-state atomically.
+Inspect `gr collect config status` using the collector configuration and the
+system journal. Repair phpIPAM metadata, vault availability, or device access,
+then rerun only the affected pool. A failed pool becomes eligible after
+`retry_interval`; a successful manual run updates the same state atomically.

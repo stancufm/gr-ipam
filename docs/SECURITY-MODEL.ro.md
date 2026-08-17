@@ -4,7 +4,16 @@
 
 Actualizarea aplicației acceptă numai repository-uri HTTPS și taguri semnate cu cheia publică de release fixată de administrator. Cheia privată nu este prezentă pe jumpserver.
 
-Administratorul jump serverului controlează codul și configurația globală. Fiecare utilizator controlează credențiala API, cheia GPG, seiful și rapoartele sale. phpIPAM este de încredere pentru inventar și metadate, nu pentru parole; verificarea cheilor host SSH rămâne activă.
+Administratorul jump serverului controlează codul și configurația globală.
+Fiecare utilizator controlează credențiala API, cheia GPG, seiful și rapoartele
+sale. Contul blocat `gr-collector` deține numai configurația, starea și
+credențialele cu privilegii minime pentru colectarea programată; nu este cont de
+login uman. phpIPAM este de încredere pentru inventar și metadate, nu pentru
+parole; verificarea cheilor host SSH rămâne activă.
+
+Arhiva globală este scrisă de `gr-collector` și de operatorii interactivi
+autorizați explicit în `gr-config`. Replicarea HA aparține exclusiv proiectului `jumpserver-ha`, cu
+fencing pe rolul activ și excluderi explicite pentru secrete.
 
 Credențialele și rapoartele au `0600`, directoarele private `0700`, parolele SSH sunt criptate cu pass/GPG, iar `sshpass` primește parola prin descriptor anonim. `gr exec --sudo` trimite parola sudo numai pe stdin-ul remote, niciodată în argv; `sudo_password_secret` permite separarea ei de parola SSH. Scrierile cer `--apply`, aplicațiile API read/write sunt separate și algoritmii vechi rămân în clientul izolat.
 

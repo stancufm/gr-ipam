@@ -139,12 +139,14 @@ rollback() {
     restore_item /usr/local/libexec/gr libexec-gr
     restore_item /usr/local/share/doc/gr doc-gr
     restore_item /etc/gr/config.json config.json
+    restore_item /etc/gr/collector.json collector.json
     restore_item /etc/gr/update.json update.json
     restore_item /etc/gr/release-key.asc release-key.asc
     restore_item /etc/systemd/system/gr-vendor-update.service vendor.service
     restore_item /etc/systemd/system/gr-vendor-update.timer vendor.timer
-    restore_item /etc/systemd/user/gr-config-collect.service config-collect.service
-    restore_item /etc/systemd/user/gr-config-collect.timer config-collect.timer
+    restore_item /etc/systemd/system/gr-config-collect.service config-collect.service
+    restore_item /etc/systemd/system/gr-config-collect.timer config-collect.timer
+    restore_item /etc/systemd/system/gr-config-collect@.service config-collect-template.service
     systemctl daemon-reload 2>/dev/null || true
 }
 
@@ -200,12 +202,14 @@ backup_item /usr/local/bin/gr bin-gr
 backup_item /usr/local/libexec/gr libexec-gr
 backup_item /usr/local/share/doc/gr doc-gr
 backup_item /etc/gr/config.json config.json
+backup_item /etc/gr/collector.json collector.json
 backup_item /etc/gr/update.json update.json
 backup_item /etc/gr/release-key.asc release-key.asc
 backup_item /etc/systemd/system/gr-vendor-update.service vendor.service
 backup_item /etc/systemd/system/gr-vendor-update.timer vendor.timer
-backup_item /etc/systemd/user/gr-config-collect.service config-collect.service
-backup_item /etc/systemd/user/gr-config-collect.timer config-collect.timer
+backup_item /etc/systemd/system/gr-config-collect.service config-collect.service
+backup_item /etc/systemd/system/gr-config-collect.timer config-collect.timer
+backup_item /etc/systemd/system/gr-config-collect@.service config-collect-template.service
 
 started=1
 sh "$repo/install.sh" --config "$config_copy"

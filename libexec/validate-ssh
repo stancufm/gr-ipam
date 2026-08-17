@@ -135,7 +135,7 @@ def main():
         for future in concurrent.futures.as_completed(futures):
             item = future.result()
             print("RESULT {:<25} {:<15} {}".format(item["hostname"], item["ip"], item["result"]))
-    stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     report = os.path.join(state_dir, "sw-ssh-validation-{}.json".format(stamp))
     with open(report, "w", encoding="utf-8") as handle:
         json.dump(selected, handle, ensure_ascii=False, indent=2, sort_keys=True)

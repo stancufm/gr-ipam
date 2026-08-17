@@ -24,11 +24,13 @@ python3 tests/test_snmp.py
 
 test -f AGENTS.md
 test -f examples/config.json
+test -f examples/collector.json
 test -f phpipam/SETUP.md
 test -f release/project-release-key.asc
 test -f completions/gr.bash
 test -f snmp/templates.json
 test -f systemd/gr-config-collect.service
 test -f systemd/gr-config-collect.timer
+test -f systemd/gr-config-collect@.service
 
 echo "gr-ipam development checks passed"

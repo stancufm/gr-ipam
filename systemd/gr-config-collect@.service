@@ -1,5 +1,5 @@
 [Unit]
-Description=Run due GR configuration collection pools
+Description=Run GR configuration collection pool %i
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/etc/gr/collector.json
@@ -10,7 +10,7 @@ User=gr-collector
 Group=gr-collector
 SupplementaryGroups=gr-config
 Environment=HOME=/var/lib/gr-collector
-ExecStart=/usr/local/bin/gr --config /etc/gr/collector.json collect config --due
+ExecStart=/usr/local/bin/gr --config /etc/gr/collector.json collect config --pool %i
 UMask=0007
 Nice=10
 IOSchedulingClass=best-effort

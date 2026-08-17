@@ -29,6 +29,8 @@ and manage SNMPv3 through model/OS templates and LibreNMS validation.
 - Bash completion covers commands, valid values and dynamic audit navigation.
 - SNMP credentials remain in the encrypted vault; phpIPAM stores only intent,
   template/profile names and the monitoring association.
+- Scheduled configuration pools run under the dedicated `gr-collector` system
+  account and are fenced to the active HA peer.
 
 ## Requirements
 
@@ -103,7 +105,7 @@ gr self-update check
 
 ## Project status
 
-Version `2.6.1` is tested through an isolated `DESTDIR` installation on
+Version `2.10.0` is tested through an isolated `DESTDIR` installation on
 Debian. The package contains no credentials, private keys, inventory exports or
 organization-specific addressing.
 

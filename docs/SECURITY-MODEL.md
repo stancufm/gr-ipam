@@ -6,6 +6,9 @@
 
 - The jump server administrator controls global code and configuration.
 - Each Linux user controls only their API credential, GPG key, vault and reports.
+- The locked `gr-collector` service identity owns only scheduled-collection
+  configuration, state and least-privilege credentials; it is not a human
+  login account.
 - phpIPAM is trusted for inventory and connection metadata, not for passwords.
 - Managed devices remain protected by normal SSH host-key verification.
 
@@ -24,6 +27,10 @@
 - legacy algorithms are delegated to a separate client on selected devices;
 - static SSH configuration and `/etc/hosts` are not required;
 - SSH audits use private directories/files but may deliberately contain typed credentials.
+- the global configuration archive is writable by `gr-collector` and by
+  explicitly authorized interactive operators in `gr-config`;
+- HA replication is delegated exclusively to `jumpserver-ha`, with active-node
+  fencing and explicit secret exclusions.
 
 ## Deployment rules
 

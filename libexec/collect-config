@@ -122,15 +122,19 @@ def archive_configurations(archive, results, stamp):
     if not os.path.isdir(archive) or not os.access(archive, os.W_OK | os.X_OK):
         raise RuntimeError("Global archive is not writable: {} (membership in gr-config required)".format(
             archive))
-    lock_path = os.path.join(archive, ".collect.lock")
+    git_directory = os.path.join(archive, ".git")
+    os.makedirs(git_directory, mode=0o2770, exist_ok=True)
+    os.chmod(git_directory, 0o2770)
+    lock_path = os.path.join(git_directory, "gr-collect.lock")
     with open(lock_path, "a+") as lock_handle:
         os.chmod(lock_path, 0o660)
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-        if not os.path.isdir(os.path.join(archive, ".git")):
-            git_call(archive, ["init", "--quiet"])
+        if not os.path.isfile(os.path.join(git_directory, "HEAD")):
+            git_call(archive, ["init", "--quiet", "--shared=group"])
         # Repair an interrupted first run as well as configure a new archive.
         git_call(archive, ["config", "user.name", "gr configuration collector"])
         git_call(archive, ["config", "user.email", "gr@localhost"])
+        git_call(archive, ["config", "core.sharedRepository", "group"])
         devices = os.path.join(archive, "devices")
         os.makedirs(devices, mode=0o2770, exist_ok=True)
         changed_candidates = []
@@ -240,7 +244,7 @@ def main():
             results.append(result)
             print("RESULT {} {} {}".format(result["hostname"], result["ip"], result["result"]))
     results.sort(key=lambda item: tuple(int(part) for part in item["ip"].split(".")))
-    stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     try:
         commit, changed = archive_configurations(gr.GLOBAL_CONFIG_ARCHIVE, results, stamp)
     except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
