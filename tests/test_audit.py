@@ -126,6 +126,29 @@ class AuditTests(unittest.TestCase):
             255, b"Over maximum CLI session", used_sshpass=False),
             "resource-exhausted")
 
+    def test_remote_command_output_is_not_misclassified_as_ssh_authentication(self):
+        self.assertEqual(GR.classify_ssh_failure(
+            126, b"/tmp/install.sh: Permission denied", remote_command=True,
+            used_sshpass=True), "remote-command-exit")
+        self.assertEqual(GR.classify_ssh_failure(
+            1, b"application authentication failed", remote_command=True,
+            used_sshpass=True), "remote-command-exit")
+        self.assertEqual(GR.classify_ssh_failure(
+            5, b"Permission denied (publickey,password).", remote_command=True,
+            used_sshpass=True), "authentication-rejected")
+
+    def test_remote_command_failure_report_explains_that_ssh_succeeded(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            category = GR.report_ssh_failure(
+                126, "192.0.2.10", "operator", "/tmp/gr-known-hosts",
+                stderr_data=b"Permission denied", remote_command=True,
+                used_sshpass=True)
+        self.assertEqual(category, "remote-command-exit")
+        message = stderr.getvalue()
+        self.assertIn("category=remote-command-exit", message)
+        self.assertIn("not classified as an authentication failure", message)
+
     def test_ambiguous_exit_six_does_not_blame_vault_password(self):
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):

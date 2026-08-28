@@ -46,7 +46,7 @@ CONFIG_POOL_MANAGER = os.environ.get(
 SNMP_MANAGER = os.environ.get("GR_SNMP_MANAGER", "/usr/local/libexec/gr/snmp-manager")
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.10.0"
+GR_VERSION = "2.10.1"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -1493,6 +1493,24 @@ def classify_ssh_failure(exit_status, stderr_data=b"", remote_command=False,
         detail = stderr_data.decode("utf-8", "replace").lower()
     else:
         detail = str(stderr_data or "").lower()
+    explicit_login_rejection = (
+        "permission denied (",
+        "permission denied, please try again",
+        "too many authentication failures",
+        "login incorrect",
+        "invalid password",
+    )
+    # OpenSSH uses 255 for transport failures.  Once a managed remote command
+    # returns another status, its stderr belongs to that command and may quite
+    # legitimately contain phrases such as "Permission denied" or
+    # "authentication failed".  Do not reinterpret application output as an
+    # SSH/Vault failure.  sshpass status 5 remains authentication evidence only
+    # when OpenSSH also emitted an explicit login-rejection phrase.
+    if remote_command and exit_status != 255:
+        if (used_sshpass and exit_status == 5 and
+                any(term in detail for term in explicit_login_rejection)):
+            return "authentication-rejected"
+        return "remote-command-exit"
     evidence = (
         ("host-key-changed", ("remote host identification has changed",
                               "offending host key")),
@@ -1525,8 +1543,6 @@ def classify_ssh_failure(exit_status, stderr_data=b"", remote_command=False,
     for category, terms in evidence:
         if any(term in detail for term in terms):
             return category
-    if remote_command and exit_status not in (255,):
-        return "remote-command-exit"
     if used_sshpass and exit_status == 5:
         return "authentication-rejected"
     if used_sshpass and exit_status == 6:

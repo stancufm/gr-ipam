@@ -63,6 +63,12 @@ respingerea loginului de către echipament să poată fi explicate. Codul singur
 nu mai este folosit pentru a acuza credențiala Vault: statusul 6 poate proveni
 din gestionarea cheii host de către `sshpass`, dar și dintr-o comandă/sesiune
 remote care întoarce ea însăși 6.
+Pentru comenzile remote administrate, un status diferit de 255 dovedește că
+OpenSSH a ajuns la comandă. Stderr-ul ei rămâne deci output de aplicație chiar
+dacă include formulări generice precum `Permission denied` sau
+`authentication failed`; `gr` raportează `remote-command-exit`, fără să acuze
+greșit credențiala SSH din Vault. Respingerea explicită a loginului OpenSSH
+rămâne clasificată separat.
 
 Clientul normal folosește `StrictHostKeyChecking=accept-new` cu magazinul privat
 `~/.local/state/gr/known_hosts`: acceptă cheia văzută prima dată, o raportează

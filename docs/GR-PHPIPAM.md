@@ -66,6 +66,11 @@ Interactive diagnosis also considers the bounded tail of terminal output, which
 allows device-side CLI session limits and login rejection to be explained. A code alone is not used to accuse
 the Vault credential: status 6, for example, can be produced by `sshpass` host
 key handling or by a remote command/session that itself returns 6.
+For managed remote commands, a non-255 status proves that OpenSSH reached the
+command. Its stderr therefore remains application output even when it contains
+generic phrases such as `Permission denied` or `authentication failed`; `gr`
+reports `remote-command-exit` instead of incorrectly blaming the SSH Vault
+credential. Explicit OpenSSH login rejection remains classified separately.
 
 Normal clients use `StrictHostKeyChecking=accept-new` with the private
 `~/.local/state/gr/known_hosts` store. This accepts a first-seen key, reports it
