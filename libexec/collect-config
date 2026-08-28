@@ -52,6 +52,30 @@ def normalize_configuration(text, command):
     return "\n".join(cleaned) + ("\n" if cleaned else "")
 
 
+def failure_reason(item):
+    """Return a stable, non-secret diagnostic for a failed collection."""
+    if item.get("result") == "timeout":
+        return "timeout"
+    error = str(item.get("stderr") or "").lower()
+    classifications = (
+        ("no matching key exchange method", "ssh-key-exchange"),
+        ("no matching host key type", "ssh-host-key"),
+        ("no matching cipher", "ssh-cipher"),
+        ("no matching mac", "ssh-mac"),
+        ("host key verification failed", "ssh-host-key-verification"),
+        ("permission denied", "ssh-authentication"),
+        ("connection refused", "connection-refused"),
+        ("connection timed out", "connection-timeout"),
+        ("no route to host", "network-unreachable"),
+    )
+    for phrase, reason in classifications:
+        if phrase in error:
+            return reason
+    if not item.get("configuration") and not error:
+        return "empty-output"
+    return "ssh-exit-{}".format(item.get("returncode", "unknown"))
+
+
 def run_one(gr, version_helper, item, password, known_hosts):
     commands = list(item.pop("_config_commands"))
     configuration_command = commands[-1]
@@ -242,7 +266,10 @@ def main():
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
             results.append(result)
-            print("RESULT {} {} {}".format(result["hostname"], result["ip"], result["result"]))
+            detail = (" reason={}".format(failure_reason(result))
+                      if result["result"] != "success" else "")
+            print("RESULT {} {} {}{}".format(
+                result["hostname"], result["ip"], result["result"], detail))
     results.sort(key=lambda item: tuple(int(part) for part in item["ip"].split(".")))
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     try:

@@ -11,6 +11,12 @@ INSTALLER = os.path.join(ROOT, "install.sh")
 
 
 class InstallDependencyTests(unittest.TestCase):
+    def test_collector_ha_marker_access_is_least_privilege_and_acl_backed(self):
+        with open(INSTALLER, encoding="utf-8") as handle:
+            installer = handle.read()
+        self.assertIn(" systemd snmp acl\"", installer)
+        self.assertIn("setfacl -m u:gr-collector:--x /etc/jumpserver-ha", installer)
+
     def test_destdir_install_skips_host_dependency_policy(self):
         with tempfile.TemporaryDirectory() as root:
             result = subprocess.run(
