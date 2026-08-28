@@ -63,7 +63,7 @@ if [ "$(id -u)" -ne 0 ] && [ -z "$destdir" ]; then
   exit 2
 fi
 
-required_packages="python3 openssh-client sshpass pass gnupg ca-certificates git bash-completion less systemd snmp"
+required_packages="python3 openssh-client sshpass pass gnupg ca-certificates git bash-completion less systemd snmp acl"
 
 check_dependencies() {
   missing_packages=
@@ -270,6 +270,12 @@ if [ -z "$destdir" ]; then
     /var/lib/gr-collector/.config/gr
   chown root:gr-collector /etc/gr/collector.json
   chmod 0640 /etc/gr/collector.json
+  if [ -d /etc/jumpserver-ha ]; then
+    # The HA directory remains non-listable and its protected files remain
+    # inaccessible.  The dedicated collector receives only traversal so it
+    # can test the world-readable active marker by its fixed path.
+    setfacl -m u:gr-collector:--x /etc/jumpserver-ha
+  fi
   install -d -o gr-collector -g gr-config -m 2770 /var/lib/gr/config-archive
   chown -R gr-collector:gr-config /var/lib/gr/config-archive
   find /var/lib/gr/config-archive -type d -exec chmod 2770 {} \;

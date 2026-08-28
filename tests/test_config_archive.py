@@ -14,6 +14,15 @@ COLLECTOR = load_source("gr_config_collector_test_module", "libexec/collect-conf
 
 
 class ConfigurationArchiveTests(unittest.TestCase):
+    def test_failure_reason_classifies_ssh_negotiation_without_raw_stderr(self):
+        item = {"result": "failed", "returncode": 255, "configuration": "",
+                "stderr": "Unable to negotiate: no matching key exchange method found"}
+        self.assertEqual(COLLECTOR.failure_reason(item), "ssh-key-exchange")
+        item["stderr"] = "Permission denied, please try again."
+        self.assertEqual(COLLECTOR.failure_reason(item), "ssh-authentication")
+        item.update({"result": "timeout", "stderr": "configuration command timed out"})
+        self.assertEqual(COLLECTOR.failure_reason(item), "timeout")
+
     def test_normalization_removes_command_echo_prompt_and_ansi(self):
         raw = ("banner\r\nSw1#show running-config\r\n\x1b[2Jversion 1\r\n"
                "hostname Sw1\r\n!\r\nSw1#\r\n")

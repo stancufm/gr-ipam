@@ -27,6 +27,12 @@ Schedulerul:
 - verifică markerul HA activ și fereastra opțională de mentenanță;
 - creează commit numai pentru configurații normalizate modificate.
 
+Într-o instalare HA, collectorul primește numai drept de traversare, nu de
+listare sau citire, pe `/etc/jumpserver-ha`, pentru a verifica markerul fix și
+world-readable `active`. Installerul folosește un ACL dedicat utilizatorului;
+fișierele HA protejate își păstrează permisiunile limitate la grup. Mecanismul
+funcționează indiferent dacă GR sau `jumpserver-ha` este instalat primul.
+
 Lock-ul este în `.git` al arhivei, deci nu poate apărea ca artefact neversionat.
 
 ## Configurație și credențiale dedicate
@@ -73,6 +79,11 @@ gr collect config --due
 `pools` și `status` sunt read-only. `--pool` rulează imediat un pool; `--due`
 respectă activarea, markerul HA, intervalul, retry-ul și fereastra de
 mentenanță. Comenzile directe folosesc în continuare operatorul curent.
+
+Liniile `RESULT` eșuate includ un motiv stabil, de exemplu
+`ssh-key-exchange`, `ssh-host-key`, `ssh-authentication` sau
+`connection-timeout`. Sumarul schedulerului nu copiază stderr-ul SSH brut și
+nu include secrete.
 
 După configurare și validare pe nodul HA activ:
 

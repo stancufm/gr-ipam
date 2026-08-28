@@ -27,6 +27,12 @@ The scheduler:
 - checks the active HA marker and optional maintenance window;
 - commits only changed normalized configurations.
 
+On HA installations the collector needs traversal, but not listing or read
+access, on `/etc/jumpserver-ha` so it can test the fixed, world-readable
+`active` marker. The installer uses a user-specific ACL for that single
+purpose; protected HA files keep their existing group-only permissions. This
+works regardless of whether GR or `jumpserver-ha` is installed first.
+
 The collector lock is stored inside the archive's `.git` directory, so it can
 never appear as an untracked configuration artifact.
 
@@ -75,6 +81,10 @@ gr collect config --due
 `--due` honors scheduler, active marker, interval, retry, and maintenance
 window. Direct commands such as `gr collect config --ip ADDRESS` are unchanged
 and use the current operator.
+
+Failed `RESULT` lines include a stable reason such as `ssh-key-exchange`,
+`ssh-host-key`, `ssh-authentication`, or `connection-timeout`. Raw SSH stderr
+and secret values are not copied into this scheduler summary.
 
 After configuration and validation on the active HA peer:
 
