@@ -108,6 +108,12 @@ conține secrete, deci grupul rămâne restrâns.
 Installerul înregistrează numai această cale exactă drept Git
 `safe.directory`; nu activează niciodată o regulă wildcard.
 
+Metadatele extragerii pe echipament sunt păstrate privat în
+`.git/gr-collection-state.json`. Fișierul conține hostname/IP, timestampuri,
+stare și o clasificare stabilă a eșecului, fără configurații sau credențiale.
+`gr config devices` combină această stare cu istoricul Git, astfel încât
+`LAST EXTRACTED` nu își schimbă sensul când o extragere identică nu creează commit.
+
 Proiectul `jumpserver-ha` este singura autoritate de replicare spre standby. El
 păstrează proprietarii numerici, ACL-urile și atributele extinse și menține
 colectarea oprită pe standby până la promovare. Nu configura o a doua cale Git

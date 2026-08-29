@@ -14,7 +14,10 @@ salvează numai modificările normalizate în arhiva Git globală privată
 `2770`. Rulările interactive folosesc seiful operatorului, iar cele programate
 folosesc identitatea și configurația dedicate `gr-collector` din
 `/etc/gr/collector.json`. Lock-ul este păstrat în `.git`, iar un commit este
-creat numai când conținutul diferă; GR nu configurează remote.
+creat numai când conținutul diferă. Fișierul privat și neurmărit Git
+`.git/gr-collection-state.json` păstrează pentru fiecare IP ultima încercare,
+ultima extragere reușită și starea chiar dacă rezultatul este neschimbat; GR nu
+configurează remote.
 
 Timerul systemd rulează ca `gr-collector`, este dezactivat implicit și este
 blocat de markerul nodului HA activ. Proiectul independent `jumpserver-ha`

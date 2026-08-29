@@ -357,9 +357,13 @@ gr config view sw50 <revizie>
 gr config view sw50 <revizie> --no-more
 ```
 
-`devices` afișează țintele, numărul versiunilor și ultima colectare. `history`
-listează reviziile Git pentru un hostname sau IP exact. `view` folosește pagerul
-automat și afișează ultima configurație sau una istorică. Autocomplete-ul
+`devices` afișează țintele, numărul versiunilor, ultima extragere reușită,
+ultima revizie Git care a schimbat conținutul și starea ultimei colectări.
+Metadatele extragerii se actualizează chiar dacă configurația este neschimbată;
+arhivele vechi afișează `-`/`unknown` până la următoarea colectare. `history`
+listează numai reviziile Git care au schimbat conținutul pentru un hostname sau
+IP exact. `view` folosește pagerul automat și afișează ultima configurație sau
+una istorică. Autocomplete-ul
 propune dinamic echipamentele și reviziile. gr nu configurează niciun remote
 pentru această arhivă; publicarea configurațiilor necesită o decizie separată.
 

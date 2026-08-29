@@ -135,7 +135,9 @@ uses the initiating operator's private vault for interactive runs and the
 dedicated collector vault for scheduled runs. Normalized configurations are
 written under a lock stored inside `.git` to
 `/var/lib/gr/config-archive/devices/`. Git creates one collection commit only
-when staged content differs from HEAD. Browsing uses
+when staged content differs from HEAD. A private, untracked
+`.git/gr-collection-state.json` sidecar records each IP's last attempt, last
+successful extraction and status even when content is unchanged. Browsing uses
 `gr config devices/history/view`; GR configures no archive remote.
 
 The system timer runs as `gr-collector`, is disabled by default, and is fenced

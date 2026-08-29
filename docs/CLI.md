@@ -57,7 +57,7 @@ timeouts and redacts the Vault password from returned output.
 | `gr collect config ...` | Archive normalized running configurations. |
 | `gr collect config pools` | Validate scheduled pool definitions. |
 | `gr collect config status` | Show pool scheduling and recent state. |
-| `gr config devices/history/view` | Browse the global configuration archive. |
+| `gr config devices/history/view` | Browse extraction time, change history and archived configurations. |
 
 Complete scheduling guide: `gr docs config-pools`.
 

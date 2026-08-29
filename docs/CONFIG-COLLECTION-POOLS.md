@@ -110,6 +110,12 @@ Configurations can contain secrets, so access must remain limited.
 The installer registers only this exact shared repository as a system Git
 `safe.directory`; it never enables a wildcard trust rule.
 
+Per-device extraction metadata is stored privately in
+`.git/gr-collection-state.json`. It contains hostname/IP, timestamps, status
+and a stable failure classification, but no configuration text or credential.
+`gr config devices` combines this state with Git history so `LAST EXTRACTED`
+does not change meaning when an identical collection creates no commit.
+
 The `jumpserver-ha` project is the sole authority for replication to standby.
 It preserves numeric ownership, ACLs and extended attributes and keeps
 collection disabled on standby until promotion. Do not configure a second Git

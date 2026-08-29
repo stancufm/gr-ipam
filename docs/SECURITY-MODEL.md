@@ -31,6 +31,9 @@
 - SSH audits use private directories/files but may deliberately contain typed credentials.
 - the global configuration archive is writable by `gr-collector` and by
   explicitly authorized interactive operators in `gr-config`;
+- per-device extraction state is untracked inside the archive's `.git`
+  directory, contains no credentials or configuration text, and inherits the
+  archive's restricted group access;
 - HA replication is delegated exclusively to `jumpserver-ha`, with active-node
   fencing and explicit secret exclusions.
 
