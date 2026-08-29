@@ -58,7 +58,7 @@ așteptare per comandă și elimină parola Vault din rezultat.
 | `gr collect config ...` | Arhivează configurațiile curente normalizate. |
 | `gr collect config pools` | Validează pool-urile programate. |
 | `gr collect config status` | Afișează planificarea și ultima stare a pool-urilor. |
-| `gr config devices/history/view` | Navighează arhiva globală de configurații. |
+| `gr config devices/history/view` | Navighează timpul extragerii, istoricul schimbărilor și configurațiile arhivate. |
 
 Ghid complet: `gr docs config-pools --language ro`.
 

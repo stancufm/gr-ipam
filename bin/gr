@@ -58,7 +58,7 @@ CONFIG_POOL_MANAGER = os.environ.get(
 SNMP_MANAGER = os.environ.get("GR_SNMP_MANAGER", "/usr/local/libexec/gr/snmp-manager")
 SELF_UPDATER = "/usr/local/libexec/gr/gr-update"
 BASH_COMPLETION = os.environ.get("GR_BASH_COMPLETION", "/etc/bash_completion.d/gr")
-GR_VERSION = "2.11.0"
+GR_VERSION = "2.11.1"
 DISPLAY_TIMEZONE = "Europe/Bucharest"
 DISPLAY_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 os.environ["TZ"] = DISPLAY_TIMEZONE
@@ -127,6 +127,7 @@ DEVICE_DRIVER_SPECS = {
 }
 DEVICE_DRIVERS = tuple(DEVICE_DRIVER_SPECS)
 GLOBAL_CONFIG_ARCHIVE = os.environ.get("GR_CONFIG_ARCHIVE", "/var/lib/gr/config-archive")
+CONFIG_COLLECTION_STATE_NAME = "gr-collection-state.json"
 REQUIRED_ADDRESS_CUSTOM_FIELDS = (
     "custom_ssh_enabled", "custom_ssh_user", "custom_ssh_port", "custom_ssh_profile",
     "custom_ssh_jump", "custom_ssh_client", "custom_device_driver", "custom_device_vendor",
@@ -2243,6 +2244,18 @@ def config_archive_files():
     return sorted(files, key=lambda item: (item["hostname"].lower(), item["ip"]))
 
 
+def config_archive_collection_state():
+    path = os.path.join(
+        GLOBAL_CONFIG_ARCHIVE, ".git", CONFIG_COLLECTION_STATE_NAME)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            state = json.load(handle)
+        devices = state.get("devices", {}) if isinstance(state, dict) else {}
+        return devices if isinstance(devices, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def config_archive_target(value):
     needle = str(value or "").lower()
     matches = [item for item in config_archive_files()
@@ -2282,15 +2295,25 @@ def command_config_devices(filter_value=None):
     if filter_value:
         needle = filter_value.lower()
         items = [item for item in items if needle in item["hostname"].lower() or needle in item["ip"]]
+    collection_state = config_archive_collection_state()
     rows = []
     for item in items:
         history = config_archive_history(item)
-        rows.append((item["hostname"], item["ip"], str(len(history)),
-                     history[0][1] if history else "-"))
+        device_state = collection_state.get(item["ip"], {})
+        if not isinstance(device_state, dict):
+            device_state = {}
+        rows.append((
+            item["hostname"], item["ip"], str(len(history)),
+            format_local_timestamp(device_state.get("last_success")),
+            history[0][1] if history else "-",
+            str(device_state.get("last_status") or "unknown"),
+        ))
     if not rows:
         print("No archived device configurations found.")
         return 0
-    print_audit_table(("HOSTNAME", "IP", "VERSIONS", "LATEST (EUROPE/BUCHAREST)"), rows)
+    print_audit_table(("HOSTNAME", "IP", "VERSIONS",
+                       "LAST EXTRACTED (EUROPE/BUCHAREST)",
+                       "LAST CHANGED (EUROPE/BUCHAREST)", "STATUS"), rows)
     print("\nHistory: gr config history <hostname-or-ip>")
     return 0
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import contextlib
 import io
+import json
 import os
 import subprocess
 import tempfile
@@ -32,11 +33,13 @@ class ConfigurationArchiveTests(unittest.TestCase):
     def test_git_archive_commits_only_changed_content(self):
         with tempfile.TemporaryDirectory() as archive:
             item = {"hostname": "sw1", "ip": "192.0.2.1", "result": "success",
-                    "configuration": "hostname sw1\n"}
+                    "configuration": "hostname sw1\n",
+                    "collected_at": "2026-08-10T10:00:00Z"}
             commit, changed = COLLECTOR.archive_configurations(archive, [item], "20260810T100000Z")
             self.assertTrue(commit)
             self.assertEqual(changed, 1)
             second = dict(item)
+            second["collected_at"] = "2026-08-10T11:00:00Z"
             commit2, changed2 = COLLECTOR.archive_configurations(
                 archive, [second], "20260810T110000Z")
             self.assertEqual(commit2, "")
@@ -56,11 +59,34 @@ class ConfigurationArchiveTests(unittest.TestCase):
                 universal_newlines=True), "")
             self.assertTrue(os.path.isfile(os.path.join(
                 archive, ".git", "gr-collect.lock")))
+            state_path = os.path.join(
+                archive, ".git", "gr-collection-state.json")
+            with open(state_path, encoding="utf-8") as handle:
+                state = json.load(handle)
+            self.assertEqual(
+                state["devices"]["192.0.2.1"]["last_success"],
+                "2026-08-10T11:00:00Z")
+            self.assertEqual(
+                state["devices"]["192.0.2.1"]["last_status"], "success")
+            failed = {
+                "hostname": "sw1", "ip": "192.0.2.1", "result": "failed",
+                "returncode": 255, "stderr": "Permission denied",
+                "configuration": "", "collected_at": "2026-08-10T12:00:00Z",
+            }
+            COLLECTOR.archive_configurations(archive, [failed], "20260810T120000Z")
+            with open(state_path, encoding="utf-8") as handle:
+                state = json.load(handle)
+            device = state["devices"]["192.0.2.1"]
+            self.assertEqual(device["last_attempt"], "2026-08-10T12:00:00Z")
+            self.assertEqual(device["last_success"], "2026-08-10T11:00:00Z")
+            self.assertEqual(device["last_status"], "failed")
+            self.assertEqual(device["last_error"], "ssh-authentication")
 
     def test_archive_browsing_lists_history_and_latest(self):
         with tempfile.TemporaryDirectory() as archive:
             item = {"hostname": "sw1", "ip": "192.0.2.1", "result": "success",
-                    "configuration": "hostname sw1\n"}
+                    "configuration": "hostname sw1\n",
+                    "collected_at": "2026-08-10T10:00:00Z"}
             COLLECTOR.archive_configurations(archive, [item], "20260810T100000Z")
             old_archive = GR.GLOBAL_CONFIG_ARCHIVE
             GR.GLOBAL_CONFIG_ARCHIVE = archive
@@ -69,6 +95,10 @@ class ConfigurationArchiveTests(unittest.TestCase):
                 with contextlib.redirect_stdout(output):
                     GR.command_config_devices()
                 self.assertIn("sw1", output.getvalue())
+                self.assertIn("LAST EXTRACTED", output.getvalue())
+                self.assertIn("LAST CHANGED", output.getvalue())
+                self.assertIn("2026-08-10 13:00:00", output.getvalue())
+                self.assertIn("success", output.getvalue())
                 shown = io.StringIO()
                 with contextlib.redirect_stdout(shown):
                     GR.command_config_view("192.0.2.1", use_pager=False)

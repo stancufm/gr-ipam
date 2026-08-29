@@ -12,10 +12,12 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 GR_PATH = os.environ.get("GR_PATH", "/usr/local/bin/gr")
 VERSION_HELPER_PATH = os.environ.get(
     "GR_VERSION_HELPER_PATH", "/usr/local/libexec/gr/collect-version")
+COLLECTION_STATE_NAME = "gr-collection-state.json"
 
 
 def load_module(name, path):
@@ -76,6 +78,19 @@ def failure_reason(item):
     return "ssh-exit-{}".format(item.get("returncode", "unknown"))
 
 
+def utc_timestamp():
+    return datetime.datetime.now(datetime.timezone.utc).replace(
+        microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def batch_timestamp(stamp):
+    try:
+        parsed = datetime.datetime.strptime(str(stamp), "%Y%m%dT%H%M%SZ")
+        return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError):
+        return utc_timestamp()
+
+
 def run_one(gr, version_helper, item, password, known_hosts):
     commands = list(item.pop("_config_commands"))
     configuration_command = commands[-1]
@@ -121,6 +136,7 @@ def run_one(gr, version_helper, item, password, known_hosts):
                 os.close(read_fd)
         except OSError:
             pass
+    item["collected_at"] = utc_timestamp()
     return item
 
 
@@ -139,6 +155,59 @@ def git_call(archive, args, check=True, capture=False):
                           stdout=subprocess.PIPE if capture else None,
                           stderr=subprocess.PIPE if capture else None,
                           universal_newlines=True)
+
+
+def read_collection_state(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            state = json.load(handle)
+        if isinstance(state, dict) and isinstance(state.get("devices"), dict):
+            return state
+    except (OSError, ValueError):
+        pass
+    return {"version": 1, "devices": {}}
+
+
+def write_collection_state(path, state):
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=".gr-collection-state-", dir=os.path.dirname(path), text=True)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o660)
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
+def update_collection_state(git_directory, results, default_timestamp):
+    path = os.path.join(git_directory, COLLECTION_STATE_NAME)
+    state = read_collection_state(path)
+    devices = state.setdefault("devices", {})
+    for item in results:
+        ip = str(item.get("ip") or "")
+        if not ip:
+            continue
+        attempted = str(item.get("collected_at") or default_timestamp)
+        device = devices.setdefault(ip, {})
+        device.update({
+            "hostname": str(item.get("hostname") or ip),
+            "last_attempt": attempted,
+            "last_status": str(item.get("result") or "failed"),
+        })
+        if item.get("result") == "success":
+            device["last_success"] = attempted
+            device.pop("last_error", None)
+        else:
+            device["last_error"] = failure_reason(item)
+    state["version"] = 1
+    write_collection_state(path, state)
 
 
 def archive_configurations(archive, results, stamp):
@@ -187,16 +256,17 @@ def archive_configurations(archive, results, stamp):
         if changed_candidates:
             git_call(archive, ["add", "--"] + changed_candidates)
         diff = git_call(archive, ["diff", "--cached", "--quiet"], check=False)
-        if diff.returncode == 0:
-            return "", 0
-        staged_output = git_call(
-            archive, ["diff", "--cached", "--name-only", "--", "devices"],
-            capture=True).stdout
-        staged_count = len([line for line in staged_output.splitlines() if line.strip()])
-        message = "Collect device configurations {} ({} changed)".format(
-            stamp, staged_count)
-        git_call(archive, ["commit", "--quiet", "-m", message])
-        commit = git_call(archive, ["rev-parse", "HEAD"], capture=True).stdout.strip()
+        commit, staged_count = "", 0
+        if diff.returncode != 0:
+            staged_output = git_call(
+                archive, ["diff", "--cached", "--name-only", "--", "devices"],
+                capture=True).stdout
+            staged_count = len([line for line in staged_output.splitlines() if line.strip()])
+            message = "Collect device configurations {} ({} changed)".format(
+                stamp, staged_count)
+            git_call(archive, ["commit", "--quiet", "-m", message])
+            commit = git_call(archive, ["rev-parse", "HEAD"], capture=True).stdout.strip()
+        update_collection_state(git_directory, results, batch_timestamp(stamp))
         return commit, staged_count
 
 

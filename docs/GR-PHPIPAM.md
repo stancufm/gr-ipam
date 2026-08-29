@@ -359,9 +359,12 @@ gr config view sw50 <revision>
 gr config view sw50 <revision> --no-more
 ```
 
-`devices` lists each target, version count and newest collection time.
-`history` lists Git revisions for one exact hostname or IP. `view` uses the
-automatic pager and displays the latest or selected historical configuration.
+`devices` lists each target, version count, the last successful extraction,
+the last content-changing Git revision and the latest collection status.
+Extraction metadata is updated even when the configuration is unchanged;
+older archives show `-`/`unknown` until the next collection populates it.
+`history` lists content-changing Git revisions for one exact hostname or IP.
+`view` uses the automatic pager and displays the latest or selected historical configuration.
 Bash completion proposes targets and revisions dynamically from the archive.
 The archive has no remote configured by gr; publishing device configurations
 requires a separate, explicit security decision.
