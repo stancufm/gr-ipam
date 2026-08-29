@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from support import load_source
 
@@ -84,6 +85,59 @@ class ConfigShowTests(unittest.TestCase):
         self.assertTrue(args.sudo)
         with self.assertRaises(GR.GrError):
             GR.main(["exec", "server.example", "--sudo"])
+
+    def test_device_probe_accepts_only_safe_command_language(self):
+        self.assertEqual(
+            GR.normalize_device_probe_commands([
+                "terminal datadump", "show logging", "configure terminal",
+                "logging ?", "end",
+            ]),
+            ["terminal datadump", "show logging", "configure terminal",
+             "logging ?\x03", "end"])
+        for unsafe in ("logging host 192.0.2.1", "write", "copy running startup",
+                       "show logging\nwrite", "show logging; write",
+                       "show logging | include host", "show logging\x1awrite"):
+            with self.assertRaises(GR.GrError):
+                GR.normalize_device_probe_commands([unsafe])
+
+    def test_device_probe_parser_and_dispatch(self):
+        args = GR.build_parser().parse_args([
+            "device", "probe", "legacy-switch", "--command", "show logging",
+            "--command", "logging ?", "--command-timeout", "90",
+        ])
+        self.assertEqual(args.device_action, "probe")
+        self.assertEqual(args.commands, ["show logging", "logging ?"])
+        self.assertEqual(args.command_timeout, 90)
+        with mock.patch.object(GR, "load_config", return_value={}), \
+                mock.patch.object(GR, "command_device_probe", return_value=0) as probe:
+            self.assertEqual(GR.main([
+                "device", "probe", "legacy-switch", "--command", "show logging"]), 0)
+        probe.assert_called_once()
+
+    def test_snmp_help_is_forwarded_to_the_real_helper(self):
+        with mock.patch.object(GR, "load_config", side_effect=AssertionError("help loaded config")), \
+                mock.patch.object(GR, "command_helper", return_value=0) as helper:
+            self.assertEqual(GR.main(["snmp", "--help"]), 0)
+        helper.assert_called_once_with(GR.SNMP_MANAGER, ["--help"])
+        with mock.patch.object(GR, "load_config", side_effect=AssertionError("help loaded config")), \
+                mock.patch.object(GR, "command_helper", return_value=0) as helper:
+            self.assertEqual(GR.main(["snmp"]), 0)
+        helper.assert_called_once_with(GR.SNMP_MANAGER, ["--help"])
+
+    def test_documentation_topics_resolve_installed_language_files(self):
+        with tempfile.TemporaryDirectory() as root:
+            old_root = GR.DEFAULT_DOCUMENTATION_ROOT
+            try:
+                GR.DEFAULT_DOCUMENTATION_ROOT = root
+                for filename in ("CLI.md", "CLI.ro.md"):
+                    with open(os.path.join(root, filename), "w", encoding="utf-8") as handle:
+                        handle.write(filename)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(GR.command_docs_topic("cli", "ro"), 0)
+                self.assertEqual(output.getvalue(), "CLI.ro.md")
+            finally:
+                GR.DEFAULT_DOCUMENTATION_ROOT = old_root
 
     def test_device_driver_fallback_is_always_generic(self):
         row = {"custom_ssh_profile": "cisco", "custom_device_vendor": "cisco"}

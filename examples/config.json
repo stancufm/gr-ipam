@@ -8,7 +8,7 @@
   "hosts_file": "/etc/hosts",
   "hosts_sync_enabled": false,
   "include_tags": [2],
-  "ssh_legacy_fallback": false,
+  "ssh_legacy_fallback": true,
   "ssh_audit_enabled": false,
   "ssh_audit_dir": "~/.local/state/gr/audit",
   "ssh_known_hosts": "~/.local/state/gr/known_hosts",

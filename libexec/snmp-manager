@@ -1328,20 +1328,33 @@ def command_monitor(cfg, templates, args):
 
 def add_selectors(parser):
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--all", action="store_true")
-    group.add_argument("--ip", action="append")
-    group.add_argument("--subnet")
-    group.add_argument("--range", dest="ip_range", metavar="START-END")
+    group.add_argument("--all", action="store_true", help="select all eligible phpIPAM addresses")
+    group.add_argument("--ip", action="append", help="select an exact IP; repeatable")
+    group.add_argument("--subnet", help="select addresses inside a CIDR")
+    group.add_argument("--range", dest="ip_range", metavar="START-END",
+                       help="select an inclusive IP range")
     group.add_argument("--file", help="text or CSV file containing IP addresses")
     parser.add_argument("--exclude-ip", action="append", default=[],
                         help="exclude one IP address; repeat for OOBM or duplicate paths")
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(prog="gr snmp", description=__doc__)
-    parser.add_argument("--config")
+    parser = argparse.ArgumentParser(
+        prog="gr snmp", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""safe starting points:
+  gr snmp templates
+  gr snmp templates --target 192.0.2.10
+  gr snmp test --ip 192.0.2.10
+  gr snmp report --all --mode inventory
+  gr docs snmp
+
+configure, rotate, cleanup, assign and LibreNMS mutations remain dry-run
+until --apply is explicitly supplied.""")
+    parser.add_argument("--config", help="use only this GR configuration file")
     sub = parser.add_subparsers(dest="action", required=True)
-    templates = sub.add_parser("templates"); templates.add_argument("--target")
+    templates = sub.add_parser("templates", help="list templates or resolve one target")
+    templates.add_argument("--target", help="exact phpIPAM hostname or IP to resolve")
     capabilities = sub.add_parser(
         "capabilities", help="read-only contextual-help probe for candidate handlers")
     add_selectors(capabilities)
@@ -1349,30 +1362,47 @@ def build_parser():
         "--show-help", action="store_true",
         help="print sanitized contextual help even when the dialect is confirmed")
     for action in ("configure", "rotate", "cleanup"):
-        command = sub.add_parser(action); add_selectors(command)
-        command.add_argument("--apply", action="store_true")
+        action_help = {
+            "configure": "plan or apply the selected SNMPv3 template",
+            "rotate": "replace managed SNMPv3 credentials transactionally",
+            "cleanup": "remove legacy SNMP v1/v2 configuration transactionally",
+        }[action]
+        command = sub.add_parser(action, help=action_help); add_selectors(command)
+        command.add_argument("--apply", action="store_true",
+                             help="execute the reviewed plan; default is dry-run")
         command.add_argument(
             "--include-disabled", action="store_true",
             help="pilot one explicit --ip before SNMP intent is enabled in phpIPAM")
-        command.add_argument("--profile"); command.add_argument("--username")
-        command.add_argument("--prompt-credentials", action="store_true")
+        command.add_argument("--profile", help="override the phpIPAM SNMP profile")
+        command.add_argument("--username", help="override the profile SNMPv3 username")
+        command.add_argument("--prompt-credentials", action="store_true",
+                             help="read temporary SNMP credentials interactively")
         command.add_argument("--previous-profile",
                              help="vault-backed old profile required for recoverable rotation")
-        command.add_argument("--timeout", type=int, default=5)
+        command.add_argument("--timeout", type=int, default=5,
+                             help="SNMP probe timeout in seconds (default: 5)")
         command.add_argument(
             "--monitoring-profile",
             help="SSH execution host used for the pre-save remote SNMP test")
-        command.add_argument("--source", action="append")
-        command.add_argument("--group")
-        command.add_argument("--view")
-        command.add_argument("--acl")
-    test = sub.add_parser("test"); add_selectors(test)
-    test.add_argument("--profile"); test.add_argument("--username")
-    test.add_argument("--prompt-credentials", action="store_true")
-    test.add_argument("--include-disabled", action="store_true")
-    test.add_argument("--timeout", type=int, default=5)
-    report = sub.add_parser("report"); add_selectors(report)
-    report.add_argument("--mode", choices=("offline", "ports", "inventory", "live"), default="inventory")
+        command.add_argument("--source", action="append",
+                             help="approved SNMP source address; repeatable")
+        command.add_argument("--group", help="override the template group name")
+        command.add_argument("--view", help="override the template view name")
+        command.add_argument("--acl", help="override the template ACL name")
+    test = sub.add_parser("test", help="test SNMP credentials without changing the device")
+    add_selectors(test)
+    test.add_argument("--profile", help="override the phpIPAM SNMP profile")
+    test.add_argument("--username", help="override the profile SNMPv3 username")
+    test.add_argument("--prompt-credentials", action="store_true",
+                      help="read temporary SNMP credentials interactively")
+    test.add_argument("--include-disabled", action="store_true",
+                      help="include explicitly selected targets without SNMP intent")
+    test.add_argument("--timeout", type=int, default=5,
+                      help="SNMP probe timeout in seconds (default: 5)")
+    report = sub.add_parser("report", help="create offline, port, inventory or live reports")
+    add_selectors(report)
+    report.add_argument("--mode", choices=("offline", "ports", "inventory", "live"),
+                        default="inventory", help="report source (default: inventory)")
     report.add_argument("--profile",
                         help="SNMP profile used to bind a ports probe to source_address")
     report.add_argument("--timeout", type=float, default=2.0)
@@ -1382,10 +1412,15 @@ def build_parser():
     report.add_argument("--acl")
     report.add_argument("--managed-only", action="store_true",
                         help="report only rows with a managed driver or explicit SNMP/monitoring intent")
-    assign = sub.add_parser("assign"); add_selectors(assign)
-    assign.add_argument("--enabled", choices=("yes", "no"), default="yes")
-    assign.add_argument("--profile"); assign.add_argument("--template")
-    assign.add_argument("--monitoring-profile"); assign.add_argument("--apply", action="store_true")
+    assign = sub.add_parser("assign", help="preview or write SNMP intent fields in phpIPAM")
+    add_selectors(assign)
+    assign.add_argument("--enabled", choices=("yes", "no"), default="yes",
+                        help="desired custom_snmp_enabled value (default: yes)")
+    assign.add_argument("--profile", help="SNMP credential profile name")
+    assign.add_argument("--template", help="explicit SNMP template name")
+    assign.add_argument("--monitoring-profile", help="monitoring integration profile")
+    assign.add_argument("--apply", action="store_true",
+                        help="write and verify phpIPAM fields; default is dry-run")
     inventory_sync = sub.add_parser("inventory-sync",
                                     help="import model and OS version from a collect-version JSON report")
     inventory_sync.add_argument("--report", action="append", required=True,
@@ -1394,15 +1429,22 @@ def build_parser():
     inventory_sync.add_argument(
         "--overwrite-vendor", action="store_true",
         help="replace a conflicting device_vendor only when inventory detection is unambiguous")
-    monitor = sub.add_parser("monitor"); add_selectors(monitor)
-    monitor.add_argument("--monitoring-profile", required=True)
-    monitor.add_argument("--add", action="store_true"); monitor.add_argument("--apply", action="store_true")
+    monitor = sub.add_parser("monitor", help="compare or reconcile devices with LibreNMS")
+    add_selectors(monitor)
+    monitor.add_argument("--monitoring-profile", required=True,
+                         help="configured LibreNMS integration profile")
+    monitor.add_argument("--add", action="store_true",
+                         help="propose adding missing devices")
+    monitor.add_argument("--apply", action="store_true",
+                         help="perform requested LibreNMS/phpIPAM changes")
     monitor.add_argument("--sync-credentials", action="store_true",
                          help="update SNMPv3 fields on an existing LibreNMS device")
     monitor.add_argument("--poll", action="store_true",
                          help="run and validate an immediate LibreNMS poll (requires --apply)")
-    monitor.add_argument("--profile"); monitor.add_argument("--username")
-    monitor.add_argument("--prompt-credentials", action="store_true")
+    monitor.add_argument("--profile", help="SNMP credential profile for add/sync")
+    monitor.add_argument("--username", help="override SNMPv3 username")
+    monitor.add_argument("--prompt-credentials", action="store_true",
+                         help="read temporary SNMP credentials interactively")
     return parser
 
 

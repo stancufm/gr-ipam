@@ -160,86 +160,13 @@ def write_interactive_command(master_fd, command):
 
 def run_interactive_device(item, password, command, read_fd, login_driver_class,
                            version_commands, cleanup_command_values, timeout=50):
-    master_fd, slave_fd = os.openpty()
-    # Some Cisco Business firmware redraws long editable CLI lines when the
-    # PTY is only 80 columns wide.  Those redraws can resemble fresh prompts
-    # to an interactive state machine.  A driver may request a wider remote
-    # terminal while ordinary collection retains the operating-system default.
-    pty_columns = int(getattr(login_driver_class, "GR_PTY_COLUMNS", 0) or 0)
-    if pty_columns:
-        import fcntl
-        import struct
-        import termios
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ,
-                    struct.pack("HHHH", 24, pty_columns, 0, 0))
-    # Contextual-help probes need literal control characters (for example
-    # Ctrl-C to cancel an incomplete CLI line).  Limit raw PTY mode to login
-    # drivers that opt in explicitly; ordinary collection remains unchanged.
-    if getattr(login_driver_class, "GR_RAW_PTY", False):
-        tty.setraw(slave_fd)
-    command = command[:-1]
-    command.insert(command.index("-p"), "-tt")
-    process = subprocess.Popen(command, stdin=slave_fd, stdout=slave_fd, stderr=subprocess.PIPE,
-                               close_fds=True, pass_fds=(read_fd,))
-    os.close(slave_fd)
-    os.close(read_fd)
-    read_fd = None
-    driver = login_driver_class(item["user"], password)
-    stdout_chunks, stderr_chunks = [], []
-    streams = {master_fd: stdout_chunks, process.stderr.fileno(): stderr_chunks}
-    deadline = time.monotonic() + timeout
-    # Sx220 uses the first exit to leave privileged mode (hostname# -> hostname>)
-    # and needs a second exit to close the CLI session. Newer Small Business
-    # models normally disconnect on the first exit, leaving the second unused.
-    pending_commands = [(value + "\n").encode("utf-8") for value in version_commands]
-    cleanup_commands = [(value + "\n").encode("utf-8") for value in cleanup_command_values]
-    collection_complete = False
-    timed_out = False
-    try:
-        while streams:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                timed_out = True
-                process.kill()
-                break
-            ready, _, _ = select.select(list(streams), [], [], min(remaining, 1.0))
-            if not ready and process.poll() is not None:
-                break
-            for descriptor in ready:
-                try:
-                    data = os.read(descriptor, 65536)
-                except OSError:
-                    data = b""
-                if not data:
-                    streams.pop(descriptor, None)
-                    continue
-                streams[descriptor].append(data)
-                if descriptor == master_fd:
-                    for action, response in driver.feed(data):
-                        if action == "credential":
-                            os.write(master_fd, response)
-                        elif action in ("ready", "prompt"):
-                            next_command, completed = next_prompt_command(
-                                pending_commands, cleanup_commands)
-                            collection_complete = collection_complete or completed
-                            if next_command is not None:
-                                write_interactive_command(master_fd, next_command)
-        if timed_out:
-            process.wait()
-        else:
-            process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        process.kill()
-        process.wait()
-    finally:
-        try:
-            os.close(master_fd)
-        except OSError:
-            pass
-    stdout = redact_secret(b"".join(stdout_chunks), password).decode("utf-8", "replace")
-    stderr = redact_secret(b"".join(stderr_chunks), password).decode("utf-8", "replace")
-    return process.returncode, stdout, stderr, timed_out, collection_complete
+    # The native PTY executor lives in the main GR module so collectors,
+    # diagnostics and future transactional helpers share the same login and
+    # secret-handling behavior.
+    return load_gr().run_interactive_device(
+        item, password, command, read_fd, login_driver_class,
+        version_commands, cleanup_command_values, timeout=timeout,
+        command_timeout=timeout)
 
 
 def run_one(item, password, output_dir):

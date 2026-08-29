@@ -145,6 +145,27 @@ la promptul CLI. Comenzile de închidere sunt urmărite separat, astfel încât 
 echipament care închide conexiunea după primul `exit` nu mai este raportat fals
 ca eșuat.
 
+`gr exec` rămâne intenționat un executor pentru comenzi SSH remote normale.
+Pentru un echipament de rețea care necesită al doilea login al driverului se
+folosește proba PTY nativă și limitată:
+
+```console
+gr device probe legacy-switch \
+  --command "terminal datadump" \
+  --command "show logging" \
+  --command "configure terminal" \
+  --command "logging ?" \
+  --command "end"
+```
+
+Proba acceptă numai comenzi `show`/`display`/`get`, controale de sesiune
+cunoscute și help contextual terminat în `?`. Linia de help este anulată cu
+Ctrl-C, nu cu Enter. Comenzile sunt trimise numai după recunoașterea promptului,
+durata totală și așteptarea per comandă sunt limitate, parola Vault este
+eliminată din rezultat și nu se creează transcript sensibil. Configurarea
+arbitrară nu face parte din `device probe`; modulele tranzacționale își păstrează
+propriile porți `--apply`, validare, save și rollback.
+
 Echipamentele Dell SmartFabric OS10 folosesc `device_driver=dell-os10`.
 Driverul rulează `show version` și extrage versiunea OS și `System Type`,
 independent de profilul de credențiale SSH selectat.
@@ -460,7 +481,11 @@ de afișare. Rapoartele sunt căutate în `device_version_dir`, implicit
 
 ## Diagnostic și documentație
 
-`gr doctor --api` verifică fișierele, permisiunile, dependențele, baza IEEE și API-ul. `gr docs --language en` afișează ghidul englez, iar `gr docs --language ro` ghidul român. Toate scrierile de inventar rămân dry-run până la `--apply`.
+`gr doctor --api` verifică fișierele, permisiunile, dependențele, baza IEEE și
+API-ul. `gr docs` afișează indexul instalat al comenzilor, `gr docs list`
+listează subiectele, `gr docs guide --language ro` deschide acest ghid, iar
+`gr docs snmp --language ro` deschide ghidul SNMP complet. Toate scrierile de
+inventar rămân dry-run până la `--apply`.
 
 Inventarul SNMP pe bază de template-uri, configurarea tranzacțională, rotația,
 cleanup-ul, rapoartele private și reconcilierea LibreNMS sunt documentate în

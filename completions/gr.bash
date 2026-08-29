@@ -31,7 +31,7 @@ _gr_completion() {
     COMPREPLY=()
 
     if (( COMP_CWORD == 1 )); then
-        _gr_complete_words "init doctor config ssh exec collect snmp find search subnet local sync export auth vault update self-update migrate-ssh migrate-drivers driver vendor audit completion docs help --ssh --config --version" "$current"
+        _gr_complete_words "init doctor config ssh exec device collect snmp find search subnet local sync export auth vault update self-update migrate-ssh migrate-drivers driver vendor audit completion docs help --ssh --config --version" "$current"
         return
     fi
 
@@ -148,6 +148,15 @@ _gr_completion() {
                 _gr_complete_words "--sudo --user --port --profile --client --no-vault --audit --no-audit --config --help --" "$current"
             fi
             ;;
+        device)
+            if (( COMP_CWORD == 2 )); then
+                _gr_complete_words "probe" "$current"
+            elif [[ $subcommand == probe && $COMP_CWORD -eq 3 ]]; then
+                _gr_complete_dynamic inventory-targets "$current"
+            elif [[ $subcommand == probe && $current == -* ]]; then
+                _gr_complete_words "--command --timeout --command-timeout --user --port --profile --client --driver --config --help" "$current"
+            fi
+            ;;
         ssh)
             if (( COMP_CWORD == 2 )); then
                 _gr_complete_words "validate" "$current"
@@ -174,7 +183,7 @@ _gr_completion() {
             ;;
         snmp)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "templates assign inventory-sync configure rotate cleanup test report monitor" "$current"
+                _gr_complete_words "templates capabilities assign inventory-sync configure rotate cleanup test report monitor" "$current"
             elif [[ $previous == --mode ]]; then
                 _gr_complete_words "inventory live offline ports" "$current"
             elif [[ $previous == --enabled ]]; then
@@ -233,7 +242,11 @@ _gr_completion() {
             fi
             ;;
         docs|help)
-            _gr_complete_words "--language --help" "$current"
+            if (( COMP_CWORD == 2 )); then
+                _gr_complete_words "list cli guide snmp config-pools audit architecture security install update --language --help" "$current"
+            else
+                _gr_complete_words "--language --help" "$current"
+            fi
             ;;
     esac
 }

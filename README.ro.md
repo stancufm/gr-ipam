@@ -47,6 +47,7 @@ gr find core-switch --details
 gr --ssh core-switch
 gr --ssh --audit core-switch
 gr exec linux-server --sudo -- systemctl status nginx
+gr device probe legacy-switch --command "show logging"
 gr config set ssh_audit_enabled true
 gr audit show core-switch latest
 gr config show
@@ -59,11 +60,14 @@ gr collect reports latest
 gr collect config pools
 gr snmp report --ip 192.0.2.10 --mode inventory
 gr snmp test --ip 192.0.2.10
+gr snmp --help
+gr docs snmp --language ro
 gr self-update check
 ```
 
 ## Documentație
 
+- [Indexul comenzilor instalate](docs/CLI.ro.md)
 - [Instalare](docs/INSTALL.ro.md)
 - [Arhitectură](docs/ARCHITECTURE.ro.md)
 - [Securitate](docs/SECURITY-MODEL.ro.md)
@@ -74,4 +78,4 @@ gr self-update check
 - [Pregătire phpIPAM](phpipam/SETUP.ro.md)
 - [Contribuții](CONTRIBUTING.ro.md)
 
-Versiunea `2.10.0` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).
+Versiunea `2.11.0` nu include credențiale, chei, exporturi de inventar sau adrese interne. Proiectul este disponibil sub [licența MIT](LICENSE).

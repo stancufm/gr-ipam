@@ -25,6 +25,8 @@
 - write commands require explicit `--apply`;
 - read and write API applications are separated;
 - legacy algorithms are delegated to a separate client on selected devices;
+- driver-aware probes inject second-stage credentials only inside a private PTY,
+  redact them from returned output and never create an SSH audit transcript;
 - static SSH configuration and `/etc/hosts` are not required;
 - SSH audits use private directories/files but may deliberately contain typed credentials.
 - the global configuration archive is writable by `gr-collector` and by

@@ -4,6 +4,7 @@ import io
 import json
 import os
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 
@@ -24,6 +25,85 @@ class CollectVersionCliTests(unittest.TestCase):
             mock.call(7, b"\x03"),
         ])
         sleep.assert_called_once_with(0.35)
+
+    def test_core_executor_redacts_all_supplied_secrets(self):
+        self.assertEqual(
+            GR.redact_device_secrets(b"auth-one and priv-two", ("auth-one", "priv-two")),
+            b"[REDACTED] and [REDACTED]")
+
+    def test_core_executor_enables_raw_pty_for_contextual_help(self):
+        with mock.patch.object(GR.os, "openpty", return_value=(10, 11)), \
+                mock.patch.object(GR.tty, "setraw") as setraw, \
+                mock.patch.object(GR.fcntl, "ioctl"), \
+                mock.patch.object(GR.subprocess, "Popen", side_effect=RuntimeError("stop")):
+            with self.assertRaisesRegex(RuntimeError, "stop"):
+                GR.run_interactive_device(
+                    {"user": "cisco"}, "secret",
+                    ["ssh", "-p", "22", "cisco@192.0.2.10", "placeholder"], 12,
+                    GR.CiscoSmallBusinessLogin, ["logging ?\x03"], ["exit"],
+                    raw_pty=True)
+        setraw.assert_called_once_with(11)
+
+    def test_cisco_business_retries_control_c_only_for_retained_help_line(self):
+        driver = GR.CiscoSmallBusinessLogin("cisco", "secret")
+        driver.state = "ready"
+        driver.contextual_help_pending = True
+        self.assertEqual(
+            driver.feed(b"\r\nLegacy-1(config)#logging "),
+            [("credential", b"\x15\x03")])
+        self.assertEqual(
+            driver.feed(b"\r\nLegacy-1(config)#"),
+            [("prompt", b"")])
+        self.assertFalse(driver.contextual_help_pending)
+
+    def test_cli_error_detection_ignores_zero_severity_counter(self):
+        output = "Error: 0\n% Unrecognized command\n"
+        self.assertEqual(len(GR.DEVICE_CLI_ERROR_RE.findall(output)), 1)
+
+    @unittest.skipUnless(os.name == "posix", "PTY integration requires POSIX")
+    def test_native_device_executor_drives_second_stage_login_and_commands(self):
+        with tempfile.TemporaryDirectory() as root:
+            fake = os.path.join(root, "fake-legacy-device")
+            with open(fake, "w", encoding="utf-8") as handle:
+                handle.write(textwrap.dedent("""\
+                    #!/usr/bin/env python3
+                    import sys
+                    def prompt(value):
+                        print(value, flush=True)
+                    prompt("User Name:")
+                    sys.stdin.readline()
+                    prompt("Password:")
+                    sys.stdin.readline()
+                    prompt("Do you want to change the password now (Y/N)[N] ?")
+                    sys.stdin.readline()
+                    prompt("Legacy-1#")
+                    exits = 0
+                    for line in sys.stdin:
+                        value = line.strip()
+                        if value == "exit":
+                            exits += 1
+                            if exits == 1:
+                                prompt("Legacy-1>")
+                                continue
+                            break
+                        prompt("RESULT " + value)
+                        prompt("Legacy-1#")
+                """))
+            os.chmod(fake, 0o700)
+            read_fd, write_fd = os.pipe()
+            os.write(write_fd, b"transport-password\n")
+            os.close(write_fd)
+            result = GR.run_interactive_device(
+                {"user": "cisco"}, "vault-secret",
+                [fake, "-p", "22", "cisco@192.0.2.10", "placeholder"], read_fd,
+                GR.CiscoSmallBusinessLogin, ["show logging"], ["exit", "exit"],
+                timeout=15, command_timeout=5)
+        returncode, stdout, stderr, timed_out, complete = result
+        self.assertEqual(returncode, 0, stderr)
+        self.assertFalse(timed_out)
+        self.assertTrue(complete)
+        self.assertIn("RESULT show logging", stdout)
+        self.assertNotIn("vault-secret", stdout)
 
     def test_report_command_uses_actual_driver_commands(self):
         fortigate = [{"device_driver": "fortigate-fortios",
