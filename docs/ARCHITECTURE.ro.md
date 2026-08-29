@@ -33,6 +33,13 @@ LibreNMS. Catalogul editabil este date; activarea scrierii cere și un handler
 de cod revizuit. Handlerul modifică running, verifică structura și accesul
 autentificat, salvează numai la succes și altfel face rollback.
 
+Executorul nativ pentru CLI-uri interactive se află în `bin/gr`. El deține
+PTY-ul, automatul celui de-al doilea login, coada de comenzi condiționată de
+prompt, anularea help-ului contextual, limitele de timp și eliminarea secretelor
+din rezultat. `gr device probe`, colectarea versiunii și colectarea configurației
+reutilizează acest executor în locul sesiunilor `expect`, Paramiko sau Netmiko
+imbricate.
+
 Registrul de drivere include în prezent comportamente generic, Cisco IOS,
 Cisco Small Business adaptiv, Dell SmartFabric OS10, HPE
 ArubaOS-Switch/ProVision și HPE Comware 7. Profilurile de credențiale nu sunt

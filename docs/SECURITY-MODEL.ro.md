@@ -15,7 +15,7 @@ Arhiva globală este scrisă de `gr-collector` și de operatorii interactivi
 autorizați explicit în `gr-config`. Replicarea HA aparține exclusiv proiectului `jumpserver-ha`, cu
 fencing pe rolul activ și excluderi explicite pentru secrete.
 
-Credențialele și rapoartele au `0600`, directoarele private `0700`, parolele SSH sunt criptate cu pass/GPG, iar `sshpass` primește parola prin descriptor anonim. `gr exec --sudo` trimite parola sudo numai pe stdin-ul remote, niciodată în argv; `sudo_password_secret` permite separarea ei de parola SSH. Scrierile cer `--apply`, aplicațiile API read/write sunt separate și algoritmii vechi rămân în clientul izolat.
+Credențialele și rapoartele au `0600`, directoarele private `0700`, parolele SSH sunt criptate cu pass/GPG, iar `sshpass` primește parola prin descriptor anonim. `gr exec --sudo` trimite parola sudo numai pe stdin-ul remote, niciodată în argv; `sudo_password_secret` permite separarea ei de parola SSH. Probele adaptate driverului injectează loginul secundar numai în PTY-ul privat, elimină parola din rezultat și nu creează transcript de audit. Scrierile cer `--apply`, aplicațiile API read/write sunt separate și algoritmii vechi rămân în clientul izolat.
 
 Auditul SSH poate conține integral parole tastate, tokenuri și date afișate. Fișierele `.ses` trebuie accesate minimal, păstrate pe stocare criptată, supuse unei politici de retenție și excluse din Git, ticketing și mesagerie. `--no-audit` trebuie permis sau interzis prin politica organizației.
 

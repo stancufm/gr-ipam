@@ -73,6 +73,7 @@ gr find core-switch --details
 gr --ssh core-switch
 gr --ssh --audit core-switch
 gr exec linux-server --sudo -- systemctl status nginx
+gr device probe legacy-switch --command "show logging"
 gr config set ssh_audit_enabled true
 gr audit show core-switch latest
 gr config show
@@ -88,11 +89,14 @@ gr collect reports latest
 gr collect config pools
 gr snmp report --ip 192.0.2.10 --mode inventory
 gr snmp test --ip 192.0.2.10
+gr snmp --help
+gr docs snmp
 gr self-update check
 ```
 
 ## Documentation
 
+- [Installed CLI command index](docs/CLI.md)
 - [Installation and upgrades](docs/INSTALL.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security model](docs/SECURITY-MODEL.md)
@@ -105,7 +109,7 @@ gr self-update check
 
 ## Project status
 
-Version `2.10.0` is tested through an isolated `DESTDIR` installation on
+Version `2.11.0` is tested through an isolated `DESTDIR` installation on
 Debian. The package contains no credentials, private keys, inventory exports or
 organization-specific addressing.
 

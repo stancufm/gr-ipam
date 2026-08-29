@@ -30,6 +30,12 @@ inventory + SSH metadata       encrypted secrets      /var/lib/gr
 phpIPAM metadata updates, vendor lookup/synchronization, configuration checks,
 documentation and vault management.
 
+The native interactive-device executor also lives in `bin/gr`. It owns the
+PTY, second-stage login state machine, prompt-gated command queue, contextual
+help cancellation, bounded deadlines and output redaction. `gr device probe`,
+version collection and configuration collection reuse this executor instead of
+nesting external `expect`, Paramiko or Netmiko sessions.
+
 ### Operational helpers
 
 - `libexec/validate-ssh` validates `sw*` devices concurrently and writes a JSON

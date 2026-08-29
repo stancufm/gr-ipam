@@ -144,6 +144,27 @@ Collection success is determined when every data command has returned to the
 CLI prompt. Cleanup commands are tracked separately, so a device that closes
 the connection after the first `exit` is not reported as a false failure.
 
+`gr exec` intentionally remains a normal SSH remote-command executor. For a
+network appliance that needs the driver's second-stage login, use the native
+bounded PTY probe instead:
+
+```console
+gr device probe legacy-switch \
+  --command "terminal datadump" \
+  --command "show logging" \
+  --command "configure terminal" \
+  --command "logging ?" \
+  --command "end"
+```
+
+The probe accepts only `show`/`display`/`get` commands, known session controls
+and contextual help ending in `?`. Help candidates are cancelled with Ctrl-C,
+not newline. Commands are sent only after a recognized prompt, the overall and
+per-command idle timers are bounded, the Vault password is redacted, and no
+sensitive session transcript is created. Arbitrary configuration is not part
+of `device probe`; transactional modules must retain their own `--apply`,
+verification, save and rollback gates.
+
 Dell SmartFabric OS10 devices use `device_driver=dell-os10`. The driver runs
 `show version` and parses the OS version and `System Type` independently from
 the selected SSH credential profile.
@@ -463,7 +484,11 @@ user.
 
 ## Diagnostics and documentation
 
-`gr doctor --api` checks configuration, permissions, executables, IEEE data and API access. `gr docs --language en` shows this guide; `gr docs --language ro` shows Romanian documentation. Inventory writes remain dry-run until `--apply`.
+`gr doctor --api` checks configuration, permissions, executables, IEEE data and
+API access. `gr docs` shows the installed command index, `gr docs list` lists
+every topic, `gr docs guide` opens this guide and `gr docs snmp` opens the full
+SNMP guide. Add `--language ro` for Romanian documentation. Inventory writes
+remain dry-run until `--apply`.
 
 Template-driven SNMP inventory, transactional configuration, rotation, cleanup,
 private reporting and LibreNMS reconciliation are documented in `SNMP.md`.
