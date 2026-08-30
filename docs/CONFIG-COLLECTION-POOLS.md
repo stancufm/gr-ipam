@@ -105,7 +105,8 @@ be disabled as defence in depth.
 
 `/var/lib/gr/config-archive` is owned by `gr-collector:gr-config`, mode `2770`.
 Operators granted membership in `gr-config` can read history and perform
-explicit interactive collections but do not own the scheduled writer.
+explicit interactive collections without owning the archive's `.git`
+directory or lock file, but do not own the scheduled writer.
 Configurations can contain secrets, so access must remain limited.
 The installer registers only this exact shared repository as a system Git
 `safe.directory`; it never enables a wildcard trust rule.

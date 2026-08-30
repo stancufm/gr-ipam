@@ -6,6 +6,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from support import load_source
 
@@ -81,6 +82,29 @@ class ConfigurationArchiveTests(unittest.TestCase):
             self.assertEqual(device["last_success"], "2026-08-10T11:00:00Z")
             self.assertEqual(device["last_status"], "failed")
             self.assertEqual(device["last_error"], "ssh-authentication")
+
+    def test_group_member_can_use_archive_without_owning_shared_paths(self):
+        with tempfile.TemporaryDirectory() as archive:
+            item = {"hostname": "sw1", "ip": "192.0.2.1", "result": "success",
+                    "configuration": "hostname sw1\n",
+                    "collected_at": "2026-08-10T10:00:00Z"}
+            real_chmod = os.chmod
+            shared_paths = {
+                os.path.join(archive, ".git"),
+                os.path.join(archive, ".git", "gr-collect.lock"),
+            }
+
+            def chmod_as_group_member(path, mode):
+                if path in shared_paths:
+                    raise PermissionError("not owner")
+                return real_chmod(path, mode)
+
+            with mock.patch.object(COLLECTOR.os, "chmod", side_effect=chmod_as_group_member), \
+                    mock.patch.object(COLLECTOR.os, "access", return_value=True):
+                commit, changed = COLLECTOR.archive_configurations(
+                    archive, [item], "20260810T100000Z")
+            self.assertTrue(commit)
+            self.assertEqual(changed, 1)
 
     def test_archive_browsing_lists_history_and_latest(self):
         with tempfile.TemporaryDirectory() as archive:
