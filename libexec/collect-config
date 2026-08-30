@@ -157,6 +157,15 @@ def git_call(archive, args, check=True, capture=False):
                           universal_newlines=True)
 
 
+def apply_shared_mode(path, mode, required_access):
+    """Tighten permissions when owned; accept an already usable group-owned path."""
+    try:
+        os.chmod(path, mode)
+    except PermissionError:
+        if not os.access(path, required_access):
+            raise
+
+
 def read_collection_state(path):
     try:
         with open(path, encoding="utf-8") as handle:
@@ -217,10 +226,10 @@ def archive_configurations(archive, results, stamp):
             archive))
     git_directory = os.path.join(archive, ".git")
     os.makedirs(git_directory, mode=0o2770, exist_ok=True)
-    os.chmod(git_directory, 0o2770)
+    apply_shared_mode(git_directory, 0o2770, os.W_OK | os.X_OK)
     lock_path = os.path.join(git_directory, "gr-collect.lock")
     with open(lock_path, "a+") as lock_handle:
-        os.chmod(lock_path, 0o660)
+        apply_shared_mode(lock_path, 0o660, os.W_OK)
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
         if not os.path.isfile(os.path.join(git_directory, "HEAD")):
             git_call(archive, ["init", "--quiet", "--shared=group"])

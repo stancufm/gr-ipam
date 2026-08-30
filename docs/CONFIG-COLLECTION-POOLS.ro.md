@@ -103,7 +103,8 @@ HA blochează `--due`; timerul trebuie dezactivat și ca protecție suplimentar�
 
 `/var/lib/gr/config-archive` aparține `gr-collector:gr-config` și are modul
 `2770`. Operatorii din `gr-config` pot citi istoricul și pot face colectări
-interactive explicite, dar nu dețin procesul programat. Configurațiile pot
+interactive explicite fără să dețină directorul `.git` sau lock-ul arhivei,
+dar nu dețin procesul programat. Configurațiile pot
 conține secrete, deci grupul rămâne restrâns.
 Installerul înregistrează numai această cale exactă drept Git
 `safe.directory`; nu activează niciodată o regulă wildcard.
