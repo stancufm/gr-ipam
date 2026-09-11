@@ -161,7 +161,7 @@ _gr_completion() {
             if (( COMP_CWORD == 2 )); then
                 _gr_complete_words "validate" "$current"
             elif [[ $subcommand == validate ]]; then
-                _gr_complete_words "--run --workers --ip --config --help" "$current"
+                _gr_complete_words "--run --workers --all --ip --pool --range --subnet --class --config --help" "$current"
             fi
             ;;
         collect)

@@ -26,7 +26,7 @@ Acesta este punctul de intrare al documentației instalate. Folosiți
 | `gr driver list` | Arată driverele și comenzile lor de colectare. |
 | `gr driver detect ...` | Detectează/aplică driverul din inventarul colectat. |
 | `gr vendor ...` | Verifică baza IEEE și reconciliază vendorii în phpIPAM. |
-| `gr ssh validate` | Listează sau testează metadatele SSH ale switchurilor. |
+| `gr ssh validate ...` | Listează sau testează accesul SSH adaptat driverului pentru un IP, pool, interval, subnet sau toate țintele. |
 
 ## Comenzi și CLI-uri de echipamente
 
@@ -48,6 +48,25 @@ editabile. Firmware-ul care păstrează linia este recuperat cu Ctrl-U/Ctrl-C,
 tot fără newline. GR așteaptă promptul real între comenzi, răspunde negativ schimbării
 opționale a parolei Cisco Business, limitează durata sesiunii și timpul de
 așteptare per comandă și elimină parola Vault din rezultat.
+
+Validarea SSH în masă este tot read-only și cere întotdeauna un selector
+explicit:
+
+```console
+gr ssh validate --ip 192.0.2.50
+gr ssh validate --pool switch-cisco-ios --run
+gr ssh validate --range 192.0.2.10-192.0.2.69 --run
+gr ssh validate --subnet 192.0.2.0/24 --run
+gr ssh validate --all
+```
+
+Validatorul cere metadate SSH active și complete, un driver explicit diferit
+de `generic` și un `device_vendor` care corespunde vendorului înregistrat al
+driverului. Secvența read-only este aleasă din catalogul driverului, iar
+echipamentele care necesită login interactiv folosesc handlerul lor nativ.
+Metadatele lipsă sau contradictorii sunt raportate fără deschiderea unei
+conexiuni. Parolele circulă printr-un descriptor privat și nu apar în argumente
+sau rapoarte.
 
 ## Colectare și arhive
 

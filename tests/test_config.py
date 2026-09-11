@@ -154,11 +154,14 @@ class ConfigShowTests(unittest.TestCase):
         fortigate = GR.device_driver_spec("fortigate-fortios")
         self.assertFalse(ios["interactive_cli"])
         self.assertTrue(ios["config_interactive_cli"])
+        self.assertEqual(ios["validation_commands"], ("show version",))
         self.assertEqual(ios["version_commands"], ("show version",))
         self.assertEqual(ios["config_commands"],
                          ("enable", "terminal length 0", "show running-config"))
         self.assertIs(GR.device_login_driver("cisco-ios"), GR.CiscoIosLogin)
         self.assertTrue(smb["interactive_cli"])
+        self.assertEqual(smb["validation_commands"],
+                         ("terminal datadump", "show version"))
         self.assertIn("show system", smb["version_commands"])
         smb_login = GR.CiscoSmallBusinessLogin("cisco", "secret")
         smb_login.state = "ready"
@@ -185,10 +188,23 @@ class ConfigShowTests(unittest.TestCase):
                           "display device manuinfo"))
         self.assertIs(GR.device_login_driver("hpe-comware7"), GR.HpeComwareLogin)
         self.assertTrue(fortigate["interactive_cli"])
+        self.assertEqual(fortigate["validation_commands"], ("get system status",))
         self.assertEqual(fortigate["version_commands"], ("get system status",))
         self.assertEqual(fortigate["config_commands"], ("show full-configuration",))
         self.assertIs(GR.device_login_driver("fortigate-fortios"),
                       GR.FortiGateFortiOsLogin)
+
+    def test_ssh_validate_requires_one_explicit_selector(self):
+        parser = GR.build_parser()
+        selected = parser.parse_args(
+            ["ssh", "validate", "--range", "192.0.2.10-192.0.2.20", "--run"])
+        self.assertEqual(selected.ip_range, "192.0.2.10-192.0.2.20")
+        self.assertTrue(selected.run)
+        selected = parser.parse_args(
+            ["ssh", "validate", "--class", "192.0.2.0/24"])
+        self.assertEqual(selected.subnet, "192.0.2.0/24")
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["ssh", "validate"])
 
     def test_legacy_profile_driver_is_migration_only(self):
         cfg = {"ssh_profiles": {"credential": {

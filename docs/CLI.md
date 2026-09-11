@@ -25,7 +25,7 @@ for syntax and `gr docs TOPIC` for the complete guide behind a workflow.
 | `gr driver list` | Show implemented drivers and their collection commands. |
 | `gr driver detect ...` | Detect or apply a driver from collected inventory. |
 | `gr vendor ...` | Inspect/update IEEE data and reconcile phpIPAM vendors. |
-| `gr ssh validate` | List or test SSH metadata for switch targets. |
+| `gr ssh validate ...` | List or test driver-aware SSH access for an explicit IP, pool, range, subnet or all targets. |
 
 ## Commands and device CLIs
 
@@ -47,6 +47,24 @@ editable line. Firmware that retains it is recovered with Ctrl-U/Ctrl-C, still
 without a newline. GR waits for the real prompt between commands, declines an
 optional Cisco Business password-expiry change, applies bounded session/idle
 timeouts and redacts the Vault password from returned output.
+
+Bulk SSH validation is also read-only and always requires an explicit target
+selector:
+
+```console
+gr ssh validate --ip 192.0.2.50
+gr ssh validate --pool switch-cisco-ios --run
+gr ssh validate --range 192.0.2.10-192.0.2.69 --run
+gr ssh validate --subnet 192.0.2.0/24 --run
+gr ssh validate --all
+```
+
+The validator requires enabled and complete SSH metadata, an explicit
+non-generic driver and a `device_vendor` matching that driver's registered
+vendor. It chooses a read-only command sequence from the driver catalog and
+uses the native interactive login handler where required. Missing or conflicting
+metadata is reported without opening an SSH connection. Passwords travel through
+a private file descriptor and are never placed in process arguments or reports.
 
 ## Collection and archives
 
