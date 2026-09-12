@@ -264,11 +264,15 @@ sudo gr vendor update-db
 gr vendor list
 gr vendor lookup <mac>
 gr vendor sync [--apply]
-gr ssh validate [--run] [--ip IP]
+gr ssh validate (--ip IP... | --pool NAME | --range START-END | --subnet CIDR | --all) [--run]
 gr collect version --ip IP
 ```
 
 The shared IEEE database is replaced atomically. Synchronization, validation and collection reports are private and must not be committed.
+`gr ssh validate` never selects targets by hostname convention. It requires an
+explicit selector, checks the configured driver against `device_vendor`, and
+uses the driver's registered read-only validation commands. `--class` is an
+alias for `--subnet`. Without `--run` it performs a metadata-only preview.
 `gr vendor list` reads the distinct phpIPAM `device_vendor` values and shows
 their address counts. The same live values drive Bash completion for
 `--vendor` and `--device-vendor`.

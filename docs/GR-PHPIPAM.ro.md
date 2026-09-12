@@ -263,11 +263,15 @@ gr vendor list
 gr vendor lookup <mac>
 gr vendor sync
 gr vendor sync --apply
-gr ssh validate [--run] [--ip IP]
+gr ssh validate (--ip IP... | --pool NUME | --range START-END | --subnet CIDR | --all) [--run]
 gr collect version --ip IP
 ```
 
 Baza IEEE comună este actualizată atomic. Sincronizările și colectările produc rapoarte private. Nu comiteți rapoarte, inventare sau audituri.
+`gr ssh validate` nu mai selectează ținte după convenția hostname-ului. Cere un
+selector explicit, verifică driverul configurat față de `device_vendor` și
+folosește comenzile read-only înregistrate pentru driver. `--class` este alias
+pentru `--subnet`. Fără `--run` comanda face numai preview-ul metadatelor.
 `gr vendor list` citește valorile distincte `device_vendor` din phpIPAM și
 afișează numărul adreselor. Aceleași valori reale alimentează autocomplete
 pentru `--vendor` și `--device-vendor`.

@@ -69,6 +69,7 @@ DEVICE_DRIVER_SPECS = {
     "generic": {
         "vendor": "",
         "interactive_cli": False,
+        "validation_commands": (),
         "version_commands": ("show version",),
         "cleanup_commands": (),
         "config_commands": (),
@@ -76,6 +77,7 @@ DEVICE_DRIVER_SPECS = {
     "cisco-ios": {
         "vendor": "cisco",
         "interactive_cli": False,
+        "validation_commands": ("show version",),
         "config_interactive_cli": True,
         "version_commands": ("show version",),
         "cleanup_commands": ("exit",),
@@ -84,6 +86,7 @@ DEVICE_DRIVER_SPECS = {
     "cisco-small-business": {
         "vendor": "cisco",
         "interactive_cli": True,
+        "validation_commands": ("terminal datadump", "show version"),
         "version_commands": ("terminal datadump", "show version", "show system"),
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("terminal datadump", "show running-config"),
@@ -91,6 +94,7 @@ DEVICE_DRIVER_SPECS = {
     "planet-sgs": {
         "vendor": "planet-technology",
         "interactive_cli": True,
+        "validation_commands": ("enable", "show version"),
         "version_commands": ("enable", "show version"),
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("enable", "show running-config"),
@@ -98,6 +102,7 @@ DEVICE_DRIVER_SPECS = {
     "dell-os10": {
         "vendor": "dell",
         "interactive_cli": False,
+        "validation_commands": ("show version",),
         "version_commands": ("show version",),
         "cleanup_commands": (),
         "config_commands": ("terminal length 0", "show running-configuration"),
@@ -105,6 +110,7 @@ DEVICE_DRIVER_SPECS = {
     "hpe-arubaos-switch": {
         "vendor": "hpe-aruba",
         "interactive_cli": True,
+        "validation_commands": ("no page", "show version"),
         "version_commands": ("no page", "show version", "show system"),
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("no page", "show running-config"),
@@ -112,6 +118,7 @@ DEVICE_DRIVER_SPECS = {
     "hpe-comware7": {
         "vendor": "hpe-comware",
         "interactive_cli": True,
+        "validation_commands": ("screen-length disable", "display version"),
         "version_commands": ("screen-length disable", "display version",
                              "display device manuinfo"),
         "cleanup_commands": ("quit",),
@@ -120,6 +127,7 @@ DEVICE_DRIVER_SPECS = {
     "fortigate-fortios": {
         "vendor": "fortinet",
         "interactive_cli": True,
+        "validation_commands": ("get system status",),
         "version_commands": ("get system status",),
         "cleanup_commands": ("exit",),
         "config_commands": ("show full-configuration",),
@@ -2510,9 +2518,11 @@ def command_driver_list():
     for driver in DEVICE_DRIVERS:
         spec = device_driver_spec(driver)
         rows.append((driver, "yes" if spec["interactive_cli"] else "no",
+                     "; ".join(spec["validation_commands"]) or "-",
                      "; ".join(spec["version_commands"]),
                      "; ".join(spec["config_commands"]) or "-"))
-    print_audit_table(("DRIVER", "INTERACTIVE LOGIN", "VERSION COMMANDS", "CONFIG COMMANDS"), rows)
+    print_audit_table(("DRIVER", "INTERACTIVE LOGIN", "VALIDATION COMMANDS",
+                       "VERSION COMMANDS", "CONFIG COMMANDS"), rows)
     return 0
 
 
@@ -3852,10 +3862,21 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                                help="write configuration directly instead of using the pager")
     ssh_command = sub.add_parser("ssh", help="validate SSH metadata and connectivity in bulk")
     ssh_sub = ssh_command.add_subparsers(dest="ssh_action")
-    ssh_validate = ssh_sub.add_parser("validate", help="list or validate SSH access to sw* devices")
+    ssh_validate = ssh_sub.add_parser(
+        "validate", help="list or validate driver-aware SSH access for an explicit target set")
     ssh_validate.add_argument("--run", action="store_true", help="perform connections; otherwise list only")
-    ssh_validate.add_argument("--workers", type=int, default=6)
-    ssh_validate.add_argument("--ip", action="append", dest="ips", help="limit to an IP (repeatable)")
+    ssh_validate.add_argument("--workers", type=int, default=6,
+                              help="parallel SSH sessions (default: 6; effective range: 1-12)")
+    ssh_selector = ssh_validate.add_mutually_exclusive_group(required=True)
+    ssh_selector.add_argument("--all", action="store_true",
+                              help="select all phpIPAM addresses; ineligible targets are reported")
+    ssh_selector.add_argument("--ip", action="append", dest="ips",
+                              help="select an exact IP (repeatable)")
+    ssh_selector.add_argument("--pool", help="select using a configured collection pool")
+    ssh_selector.add_argument("--range", dest="ip_range", metavar="START-END",
+                              help="select an inclusive IPv4 or IPv6 range")
+    ssh_selector.add_argument("--subnet", "--class", dest="subnet", metavar="CIDR",
+                              help="select addresses inside a subnet/CIDR")
     collect = sub.add_parser("collect", help="collect operational inventory from devices")
     collect_sub = collect.add_subparsers(dest="collect_action")
     collect_version = collect_sub.add_parser("version", help="run and parse show version")
@@ -4167,8 +4188,18 @@ def main(argv=None):
         helper_args = ["--workers", str(args.workers)]
         if args.run:
             helper_args.append("--run")
+        if args.all:
+            helper_args.append("--all")
         for ip in args.ips or []:
             helper_args.extend(["--ip", ip])
+        if args.pool:
+            helper_args.extend(["--pool", args.pool])
+        if args.ip_range:
+            helper_args.extend(["--range", args.ip_range])
+        if args.subnet:
+            helper_args.extend(["--subnet", args.subnet])
+        if args.config:
+            helper_args[0:0] = ["--config", args.config]
         return command_helper(SSH_VALIDATOR, helper_args)
     if args.command == "collect":
         if args.collect_action == "reports":

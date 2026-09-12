@@ -21,6 +21,7 @@ python3 tests/test_find.py
 python3 tests/test_install.py
 python3 tests/test_self_update.py
 python3 tests/test_snmp.py
+python3 tests/test_validate_ssh.py
 
 test -f AGENTS.md
 test -f examples/config.json
