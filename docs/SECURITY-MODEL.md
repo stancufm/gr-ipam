@@ -30,6 +30,9 @@
 - `gr device save` requires an explicit selector and `--apply`, accepts only
   driver-owned persistence sequences, and records the applied terminal session
   without recording credentials injected from the Vault;
+- `gr device rename` trusts only the phpIPAM hostname, requires `--apply` and a
+  successful pre-change archive, verifies the new prompt before a separate save
+  session, and never records injected Vault credentials;
 - static SSH configuration and `/etc/hosts` are not required;
 - SSH audits use private directories/files but may deliberately contain typed credentials.
 - the global configuration archive is writable by `gr-collector` and by

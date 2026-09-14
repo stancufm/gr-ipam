@@ -267,6 +267,32 @@ gr ssh validate (--ip IP... | --pool NUME | --range START-END | --subnet CIDR | 
 gr collect version --ip IP
 ```
 
+### Alinierea hostname-ului unui echipament cu phpIPAM
+
+phpIPAM rămâne sursa de adevăr pentru numele echipamentelor. Actualizați mai
+întâi inventarul, verificați planul și aplicați numai după confirmarea țintei și
+a driverului:
+
+```bash
+gr update 192.0.2.50 --hostname edge-switch --apply
+gr device rename 192.0.2.50
+gr device rename 192.0.2.50 --apply
+```
+
+`gr device rename ȚINTĂ [HOSTNAME]` acceptă un singur IP sau hostname exact din
+phpIPAM. Hostname-ul opțional este doar o verificare și trebuie să corespundă
+inventarului. Preview-ul nu citește secrete Vault, nu colectează backup și nu se
+conectează la echipament. Cu `--apply`, GR cere un backup al configurației după
+IP-ul exact, execută comenzile de redenumire din catalogul driverului, verifică
+noul prompt CLI și abia apoi rulează fluxul normal de save într-o sesiune
+separată. Astfel, o comandă de redenumire respinsă nu poate fi urmată de save.
+
+Catalogul acoperă Cisco IOS, Cisco Business, PLANET SGS, Dell OS10,
+ArubaOS-Switch, Comware 7 și FortiOS. Ghilimelele pentru hostname pe Cisco
+Business SF220/SG220 sunt selectate din `device_model`. Nicio adresă internă sau
+convenție de hostname nu controlează dialectul. Sesiunile aplicate sunt auditate
+privat și exclud credențialele Vault.
+
 ### Persistarea configurațiilor running
 
 `gr device save` folosește câmpul phpIPAM explicit `device_driver` pentru a

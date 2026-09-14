@@ -15,6 +15,8 @@ for syntax and `gr docs TOPIC` for the complete guide behind a workflow.
   read-only commands, session controls and contextual help ending in `?`.
 - `gr device save` is dry-run by default and requires `--apply` before it
   sends a driver-owned persistence command.
+- `gr device rename` takes its intended hostname from phpIPAM, previews by
+  default, and requires `--apply` before backup or device access.
 
 ## Inventory and access
 
@@ -28,6 +30,7 @@ for syntax and `gr docs TOPIC` for the complete guide behind a workflow.
 | `gr driver detect ...` | Detect or apply a driver from collected inventory. |
 | `gr vendor ...` | Inspect/update IEEE data and reconcile phpIPAM vendors. |
 | `gr ssh validate ...` | List or test driver-aware SSH access for an explicit IP, pool, range, subnet or all targets. |
+| `gr device rename TARGET [HOSTNAME]` | Preview or align one device hostname with authoritative phpIPAM intent. |
 | `gr device save ...` | Preview or persist running configurations by IP, model or every eligible driver. |
 
 ## Commands and device CLIs
@@ -50,6 +53,26 @@ editable line. Firmware that retains it is recovered with Ctrl-U/Ctrl-C, still
 without a newline. GR waits for the real prompt between commands, declines an
 optional Cisco Business password-expiry change, applies bounded session/idle
 timeouts and redacts the Vault password from returned output.
+
+Align a device with the hostname already stored in phpIPAM:
+
+```console
+gr update 192.0.2.50 --hostname edge-switch --apply
+gr device rename 192.0.2.50
+gr device rename 192.0.2.50 --apply
+gr device rename 192.0.2.50 edge-switch --apply
+```
+
+The optional final hostname is only a safety assertion and must exactly equal
+phpIPAM; it cannot override inventory. Applied execution first archives the
+current configuration by exact IP and aborts if that backup fails. GR then
+runs only the driver-owned hostname sequence, stops on a CLI error, and
+requires a prompt containing the new hostname. Only after that verification
+does a second session run the existing driver-owned save sequence. Cisco
+Business quoting is selected by model, never by an address list. FortiOS
+persists the verified change automatically. If the final save fails, GR reports
+that the running hostname changed but was not confirmed as saved; it does not
+guess at a rollback.
 
 Persist running configuration only after reviewing the generated plan:
 
