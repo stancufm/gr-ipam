@@ -16,6 +16,8 @@ Acesta este punctul de intrare al documentației instalate. Folosiți
   controale de sesiune și help contextual terminat în `?`.
 - `gr device save` este dry-run implicit și cere `--apply` înainte să trimită
   comanda de persistare definită de driver.
+- `gr device rename` preia hostname-ul dorit din phpIPAM, este dry-run implicit
+  și cere `--apply` înainte de backup sau accesarea echipamentului.
 
 ## Inventar și acces
 
@@ -29,6 +31,7 @@ Acesta este punctul de intrare al documentației instalate. Folosiți
 | `gr driver detect ...` | Detectează/aplică driverul din inventarul colectat. |
 | `gr vendor ...` | Verifică baza IEEE și reconciliază vendorii în phpIPAM. |
 | `gr ssh validate ...` | Listează sau testează accesul SSH adaptat driverului pentru un IP, pool, interval, subnet sau toate țintele. |
+| `gr device rename ȚINTĂ [HOSTNAME]` | Previzualizează sau aliniază hostname-ul unui echipament cu intenția din phpIPAM. |
 | `gr device save ...` | Previzualizează sau persistă configurația running după IP, model ori pentru toate driverele eligibile. |
 
 ## Comenzi și CLI-uri de echipamente
@@ -51,6 +54,26 @@ editabile. Firmware-ul care păstrează linia este recuperat cu Ctrl-U/Ctrl-C,
 tot fără newline. GR așteaptă promptul real între comenzi, răspunde negativ schimbării
 opționale a parolei Cisco Business, limitează durata sesiunii și timpul de
 așteptare per comandă și elimină parola Vault din rezultat.
+
+Alinierea unui echipament cu hostname-ul deja stocat în phpIPAM:
+
+```console
+gr update 192.0.2.50 --hostname edge-switch --apply
+gr device rename 192.0.2.50
+gr device rename 192.0.2.50 --apply
+gr device rename 192.0.2.50 edge-switch --apply
+```
+
+Hostname-ul final opțional este doar o verificare de siguranță și trebuie să
+fie identic cu phpIPAM; nu poate suprascrie inventarul. Aplicarea arhivează mai
+întâi configurația curentă după IP-ul exact și se oprește dacă backupul eșuează.
+GR rulează apoi numai secvența de hostname definită de driver, se oprește la o
+eroare CLI și cere un prompt care conține noul hostname. Numai după această
+verificare, o a doua sesiune rulează secvența de save deja definită de driver.
+Ghilimelele Cisco Business sunt alese după model, niciodată după o listă de
+adrese. FortiOS persistă automat schimbarea verificată. Dacă save-ul final
+eșuează, GR raportează că hostname-ul running s-a schimbat, dar nu este confirmat
+ca salvat; nu presupune un rollback.
 
 Persistarea configurației running se face numai după verificarea planului:
 

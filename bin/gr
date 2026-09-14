@@ -75,6 +75,7 @@ DEVICE_DRIVER_SPECS = {
         "cleanup_commands": (),
         "config_commands": (),
         "save_commands": (),
+        "rename_commands": (),
     },
     "cisco-ios": {
         "vendor": "cisco",
@@ -85,6 +86,7 @@ DEVICE_DRIVER_SPECS = {
         "cleanup_commands": ("exit",),
         "config_commands": ("enable", "terminal length 0", "show running-config"),
         "save_commands": ("enable", "write memory"),
+        "rename_commands": ("enable", "configure terminal", "hostname {hostname}", "end"),
     },
     "cisco-small-business": {
         "vendor": "cisco",
@@ -94,6 +96,8 @@ DEVICE_DRIVER_SPECS = {
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("terminal datadump", "show running-config"),
         "save_commands": ("terminal datadump", "copy running-config startup-config"),
+        "rename_commands": ("terminal datadump", "configure terminal",
+                            "hostname {hostname}", "end"),
     },
     "planet-sgs": {
         "vendor": "planet-technology",
@@ -103,6 +107,7 @@ DEVICE_DRIVER_SPECS = {
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("enable", "show running-config"),
         "save_commands": ("enable", "write"),
+        "rename_commands": ("enable", "configure terminal", "hostname {hostname}", "end"),
     },
     "dell-os10": {
         "vendor": "dell",
@@ -112,6 +117,7 @@ DEVICE_DRIVER_SPECS = {
         "cleanup_commands": (),
         "config_commands": ("terminal length 0", "show running-configuration"),
         "save_commands": ("write memory",),
+        "rename_commands": ("configure terminal", "hostname {hostname}", "end"),
     },
     "hpe-arubaos-switch": {
         "vendor": "hpe-aruba",
@@ -121,6 +127,7 @@ DEVICE_DRIVER_SPECS = {
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("no page", "show running-config"),
         "save_commands": ("write memory",),
+        "rename_commands": ("configure terminal", "hostname {hostname}", "exit"),
     },
     "hpe-comware7": {
         "vendor": "hpe-comware",
@@ -131,6 +138,8 @@ DEVICE_DRIVER_SPECS = {
         "cleanup_commands": ("quit",),
         "config_commands": ("screen-length disable", "display current-configuration"),
         "save_commands": ("save force",),
+        "rename_commands": ("screen-length disable", "system-view",
+                            "sysname {hostname}", "return"),
     },
     "fortigate-fortios": {
         "vendor": "fortinet",
@@ -143,6 +152,7 @@ DEVICE_DRIVER_SPECS = {
         # running-to-startup save command does not exist.
         "save_commands": (),
         "save_mode": "automatic",
+        "rename_commands": ("config system global", "set hostname {hostname}", "end"),
     },
 }
 DEVICE_DRIVERS = tuple(DEVICE_DRIVER_SPECS)
@@ -1326,9 +1336,9 @@ class HpeArubaOsSwitchLogin:
 
 
 class HpeComwareLogin:
-    """Recognize the HPE Comware angle-bracket command prompt."""
+    """Recognize HPE Comware command and system-view prompts."""
 
-    PROMPT_RE = re.compile(br"(?:^|[\r\n])<[^>\r\n]{1,128}>\s*$")
+    PROMPT_RE = re.compile(br"(?:^|[\r\n])(?:<[^>\r\n]{1,128}>|\[[^\]\r\n]{1,128}\])\s*$")
     ANSI_RE = re.compile(br"\x1b\[[0-?]*[ -/]*[@-~]")
 
     def __init__(self, _username, _password):
@@ -1447,7 +1457,7 @@ def normalize_device_probe_commands(values):
 def run_interactive_device(item, password, command, read_fd, login_driver_class,
                            command_values, cleanup_command_values, timeout=180,
                            command_timeout=60, raw_pty=False, audit=None,
-                           stop_on_complete=False):
+                           stop_on_complete=False, abort_on_cli_error=False):
     """Drive an interactive network CLI through a private PTY.
 
     Passwords are injected by the login state machine, never included in argv,
@@ -1504,6 +1514,13 @@ def run_interactive_device(item, password, command, read_fd, login_driver_class,
                 idle_deadline = time.monotonic() + max(1, command_timeout)
                 streams[descriptor].append(data)
                 if descriptor == master_fd:
+                    if abort_on_cli_error:
+                        visible_output = redact_device_secrets(
+                            b"".join(stdout_chunks), (password,)).decode("utf-8", "replace")
+                        if DEVICE_CLI_ERROR_RE.search(visible_output):
+                            process.terminate()
+                            streams.clear()
+                            break
                     for action, response in driver.feed(data):
                         if action == "credential":
                             os.write(master_fd, response)
@@ -2572,11 +2589,12 @@ def command_driver_list():
                      "; ".join(spec["validation_commands"]) or "-",
                      "; ".join(spec["version_commands"]),
                      "; ".join(spec["config_commands"]) or "-",
+                     "; ".join(spec.get("rename_commands") or ()) or "-",
                      spec.get("save_mode") or "command",
                      "; ".join(spec.get("save_commands") or ()) or "-"))
     print_audit_table(("DRIVER", "INTERACTIVE LOGIN", "VALIDATION COMMANDS",
-                       "VERSION COMMANDS", "CONFIG COMMANDS", "SAVE MODE",
-                       "SAVE COMMANDS"), rows)
+                       "VERSION COMMANDS", "CONFIG COMMANDS", "RENAME COMMANDS",
+                       "SAVE MODE", "SAVE COMMANDS"), rows)
     return 0
 
 
@@ -2910,6 +2928,90 @@ def command_device_probe(cfg, args):
     return 0 if success else 2
 
 
+DEVICE_HOSTNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$")
+
+
+def device_connection_block_detail(cfg, row):
+    """Explain incomplete inventory/Vault metadata without reading a secret."""
+    meta = phpipam_ssh_metadata(row)
+    if not meta["enabled"]:
+        return "custom_ssh_enabled is false"
+    if not meta["user"] or not meta["port"]:
+        return "incomplete SSH user/port metadata"
+    if meta["client"] not in ("normal", "legacy"):
+        return "invalid SSH client metadata"
+    if not meta["profile"]:
+        return "missing SSH credential profile"
+    if meta["profile"] not in cfg.get("ssh_profiles", {}):
+        return "unknown SSH credential profile {}".format(meta["profile"])
+    if not vault_secret_name(cfg, meta["profile"]):
+        return "profile {} has no Vault secret".format(meta["profile"])
+    return ""
+
+
+def device_hostname_cli_value(row, driver, hostname):
+    """Render a validated hostname using only model-owned quoting rules."""
+    if not DEVICE_HOSTNAME_RE.fullmatch(str(hostname or "")):
+        raise GrError(
+            "Device hostname must contain only letters, digits and hyphens "
+            "(1-63 characters)")
+    normalized = normalize_device_driver(driver)
+    model = str(custom_value(row, "device_model") or "").strip().upper()
+    quoted = normalized == "hpe-arubaos-switch"
+    if normalized == "cisco-small-business" and model.startswith(("SF220-", "SG220-")):
+        quoted = True
+    return '"{}"'.format(hostname) if quoted else hostname
+
+
+def device_rename_commands(row, driver, hostname):
+    """Return the driver-owned hostname sequence without any save command."""
+    normalized = normalize_device_driver(driver)
+    if normalized == "generic":
+        raise GrError("Device rename requires an explicit non-generic device driver")
+    templates = device_driver_spec(normalized).get("rename_commands") or ()
+    if not templates:
+        raise GrError("Hostname rename is not implemented for driver {}".format(normalized))
+    value = device_hostname_cli_value(row, normalized, hostname)
+    return [template.format(hostname=value) for template in templates]
+
+
+def device_rename_plan(cfg, row, requested_hostname=None):
+    """Build a non-secret rename plan with phpIPAM as the hostname authority."""
+    inventory_hostname = str(row.get("_hostname") or "").strip()
+    if not inventory_hostname:
+        raise GrError(
+            "phpIPAM has no hostname for {}; update inventory first".format(row["_ip"]))
+    requested = str(requested_hostname or inventory_hostname).strip()
+    if requested_hostname is not None and requested != inventory_hostname:
+        raise GrError(
+            "Requested hostname {!r} differs from phpIPAM {!r}; update phpIPAM first, "
+            "then rerun device rename".format(requested, inventory_hostname))
+    driver = resolve_device_driver(row)
+    commands = device_rename_commands(row, driver, requested)
+    spec = device_driver_spec(driver)
+    save_commands = device_save_commands(row, driver)
+    detail = device_connection_block_detail(cfg, row)
+    return {
+        "row": row, "ip": str(row["_ip"]), "hostname": requested,
+        "driver": driver, "commands": commands,
+        "save_commands": save_commands,
+        "save_mode": "automatic" if spec.get("save_mode") == "automatic" else "command",
+        "status": "blocked" if detail else "ready", "detail": detail,
+    }
+
+
+def device_hostname_prompt_seen(stdout, driver, hostname):
+    """Require a post-change prompt containing the inventory hostname."""
+    clean = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", str(stdout or ""))
+    escaped = re.escape(hostname)
+    if normalize_device_driver(driver) == "hpe-comware7":
+        pattern = r"(?im)(?:^|[\r\n])(?:<{}>|\[{}\])\s*$".format(escaped, escaped)
+    else:
+        pattern = r"(?im)(?:^|[\r\n]){}(?:\([^\r\n)]{{1,64}}\))?\s*[>#]\s*$".format(
+            escaped)
+    return bool(re.search(pattern, clean))
+
+
 def device_save_commands(row, driver):
     """Return the reviewed running-to-startup command sequence for one device."""
     normalized = normalize_device_driver(driver)
@@ -2982,20 +3084,7 @@ def device_save_plan(cfg, row):
         return {"row": row, "ip": ip, "hostname": hostname, "model": model,
                 "driver": driver, "mode": "command", "commands": [],
                 "status": "blocked", "detail": str(exc)}
-    meta = phpipam_ssh_metadata(row)
-    detail = ""
-    if not meta["enabled"]:
-        detail = "custom_ssh_enabled is false"
-    elif not meta["user"] or not meta["port"]:
-        detail = "incomplete SSH user/port metadata"
-    elif meta["client"] not in ("normal", "legacy"):
-        detail = "invalid SSH client metadata"
-    elif not meta["profile"]:
-        detail = "missing SSH credential profile"
-    elif meta["profile"] not in cfg.get("ssh_profiles", {}):
-        detail = "unknown SSH credential profile {}".format(meta["profile"])
-    elif not vault_secret_name(cfg, meta["profile"]):
-        detail = "profile {} has no Vault secret".format(meta["profile"])
+    detail = device_connection_block_detail(cfg, row)
     return {"row": row, "ip": ip, "hostname": hostname, "model": model,
             "driver": driver, "mode": "command", "commands": commands,
             "status": "blocked" if detail else "ready",
@@ -3017,11 +3106,9 @@ def device_save_failure_detail(stdout, stderr, timed_out, cli_errors):
     return "save command sequence did not complete"
 
 
-def apply_device_save(cfg, plan, timeout=600, command_timeout=180):
-    """Apply one reviewed save plan through the target's native CLI driver."""
-    row = plan["row"]
+def prepare_device_session(cfg, row):
+    """Prepare one credential-safe interactive SSH session from inventory metadata."""
     meta = phpipam_ssh_metadata(row)
-    driver = plan["driver"]
     client_binary = "/usr/bin/ssh1" if meta["client"] == "legacy" else "ssh"
     if not shutil.which(client_binary):
         raise GrError("SSH client is not installed: {}".format(client_binary))
@@ -3039,15 +3126,23 @@ def apply_device_save(cfg, plan, timeout=600, command_timeout=180):
         ssh_command.extend(["-i", identity])
     if meta["jump"]:
         ssh_command.extend(["-J", meta["jump"]])
-    ssh_command.extend(["{}@{}".format(meta["user"], plan["ip"]),
+    ssh_command.extend(["{}@{}".format(meta["user"], row["_ip"]),
                         "gr-interactive-placeholder"])
     secret = vault_secret_name(cfg, meta["profile"])
     if not secret or not vault_secret_exists(secret):
         raise GrError(
-            "Configuration save requires a configured Vault secret for profile {}".format(
+            "Device operation requires a configured Vault secret for profile {}".format(
                 meta["profile"]))
     password = read_vault_password(secret)
     ssh_command, read_fd = ssh_with_password(ssh_command, password)
+    return meta, password, ssh_command, read_fd
+
+
+def apply_device_save(cfg, plan, timeout=600, command_timeout=180):
+    """Apply one reviewed save plan through the target's native CLI driver."""
+    row = plan["row"]
+    driver = plan["driver"]
+    meta, password, ssh_command, read_fd = prepare_device_session(cfg, row)
     recorder = SshSessionAudit(cfg, row, ssh_command)
     try:
         returncode, stdout, stderr, timed_out, complete = run_interactive_device(
@@ -3066,6 +3161,106 @@ def apply_device_save(cfg, plan, timeout=600, command_timeout=180):
     return {"success": success, "returncode": returncode, "complete": complete,
             "timeout": timed_out, "cli_errors": cli_errors, "stdout": stdout,
             "stderr": stderr, "audit": recorder.path}
+
+
+def apply_device_rename(cfg, plan, timeout=600, command_timeout=180):
+    """Apply only the hostname change and verify its resulting CLI prompt."""
+    row = plan["row"]
+    meta, password, ssh_command, read_fd = prepare_device_session(cfg, row)
+    recorder = SshSessionAudit(cfg, row, ssh_command)
+    try:
+        returncode, stdout, stderr, timed_out, complete = run_interactive_device(
+            {"user": meta["user"]}, password, ssh_command, read_fd,
+            device_login_driver(plan["driver"]), plan["commands"], (), timeout=timeout,
+            command_timeout=command_timeout, audit=recorder, stop_on_complete=True,
+            abort_on_cli_error=True)
+    except Exception:
+        try:
+            recorder.close(1)
+        except Exception:
+            pass
+        raise
+    cli_errors = len(DEVICE_CLI_ERROR_RE.findall(stdout))
+    prompt_verified = device_hostname_prompt_seen(
+        stdout, plan["driver"], plan["hostname"])
+    success = complete and not timed_out and cli_errors == 0 and prompt_verified
+    recorder.close(0 if success else (returncode or 1))
+    return {"success": success, "returncode": returncode, "complete": complete,
+            "timeout": timed_out, "cli_errors": cli_errors,
+            "prompt_verified": prompt_verified, "stdout": stdout,
+            "stderr": stderr, "audit": recorder.path}
+
+
+def command_device_rename(cfg, args):
+    """Preview or safely rename one device to its authoritative phpIPAM hostname."""
+    row = exact_inventory_target(cfg, args.target)
+    plan = device_rename_plan(cfg, row, args.new_hostname)
+    print_audit_table(
+        ("IP", "IPAM HOSTNAME", "DRIVER", "RENAME COMMANDS", "SAVE MODE",
+         "SAVE COMMANDS", "STATUS", "DETAIL"),
+        [(plan["ip"], plan["hostname"], plan["driver"],
+          "; ".join(plan["commands"]), plan["save_mode"],
+          "; ".join(plan["save_commands"]) or "automatic", plan["status"],
+          plan["detail"] or "-")])
+    if not args.apply:
+        print("\nDRY_RUN=True Re-run with --apply to back up, rename, verify and persist.")
+        return 0
+    if plan["status"] != "ready":
+        print("DEVICE_RENAME_STATUS=blocked detail={}".format(plan["detail"]))
+        return 2
+
+    backup_args = ["--workers", "1", "--ip", plan["ip"],
+                   "--driver", plan["driver"]]
+    if args.config:
+        backup_args.extend(["--config", args.config])
+    print("DEVICE_RENAME_BACKUP=start ip={}".format(plan["ip"]))
+    backup_rc = command_helper(CONFIG_COLLECTOR, backup_args)
+    if backup_rc:
+        print("DEVICE_RENAME_STATUS=failed detail=pre-change-backup-failed rc={}".format(
+            backup_rc))
+        return 2
+    print("DEVICE_RENAME_BACKUP=success ip={}".format(plan["ip"]))
+
+    try:
+        result = apply_device_rename(cfg, plan, args.timeout, args.command_timeout)
+    except Exception as exc:
+        print("DEVICE_RENAME_STATUS=failed detail={}".format(str(exc)[:240]))
+        return 2
+    print("RENAME_SESSION complete={} timeout={} cli_errors={} prompt_verified={} audit={}".format(
+        result["complete"], result["timeout"], result["cli_errors"],
+        result["prompt_verified"], result["audit"]))
+    if not result["success"]:
+        detail = device_save_failure_detail(
+            result["stdout"], result["stderr"], result["timeout"],
+            result["cli_errors"])
+        if not result["prompt_verified"] and result["cli_errors"] == 0:
+            detail = "new hostname prompt was not verified; configuration was not saved"
+        print("DEVICE_RENAME_STATUS=failed detail={}".format(detail))
+        return 2
+
+    if plan["save_mode"] == "automatic":
+        print("DEVICE_RENAME_STATUS=success persist=automatic audit={}".format(
+            result["audit"]))
+        return 0
+    save_plan = dict(plan)
+    save_plan["commands"] = plan["save_commands"]
+    try:
+        save_result = apply_device_save(
+            cfg, save_plan, args.timeout, args.command_timeout)
+    except Exception as exc:
+        print("DEVICE_RENAME_STATUS=failed detail=rename-verified-save-failed:{}".format(
+            str(exc)[:200]))
+        return 2
+    if not save_result["success"]:
+        detail = device_save_failure_detail(
+            save_result["stdout"], save_result["stderr"], save_result["timeout"],
+            save_result["cli_errors"])
+        print("DEVICE_RENAME_STATUS=failed detail=rename-verified-save-failed:{} audit={}".format(
+            detail, save_result["audit"]))
+        return 2
+    print("DEVICE_RENAME_STATUS=success persist=saved rename_audit={} save_audit={}".format(
+        result["audit"], save_result["audit"]))
+    return 0
 
 
 def command_device_save(cfg, args):
@@ -4101,6 +4296,8 @@ def build_parser():
   gr auth test               validate phpIPAM authentication
   gr device probe legacy-switch --command "show logging"
                               run a bounded read-only interactive CLI probe
+  gr device rename 192.0.2.22
+                              preview hostname alignment with phpIPAM
   gr snmp --help             list SNMP templates, tests, reports and transactions
   gr sync                    synchronization preview (dry-run)
   gr docs                    display the complete command index
@@ -4235,6 +4432,21 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                               help="override per-device SSH client")
     device_probe.add_argument("--driver", choices=DEVICE_DRIVERS,
                               help="override per-device login driver")
+    device_rename = device_sub.add_parser(
+        "rename", help="preview or persistently align one device hostname with phpIPAM")
+    device_rename.add_argument("target", help="exact phpIPAM hostname or IP")
+    device_rename.add_argument(
+        "new_hostname", nargs="?",
+        help="optional safety assertion; must equal the hostname already stored in phpIPAM")
+    device_rename.add_argument(
+        "--apply", action="store_true",
+        help="back up, rename, verify and persist; default is dry-run")
+    device_rename.add_argument(
+        "--timeout", type=int, default=600,
+        help="maximum complete session duration in seconds (default: 600)")
+    device_rename.add_argument(
+        "--command-timeout", type=int, default=180,
+        help="maximum idle time for one command in seconds (default: 180)")
     device_save = device_sub.add_parser(
         "save", help="preview or save running configuration with driver-native commands")
     device_save_selector = device_save.add_mutually_exclusive_group(required=True)
@@ -4558,13 +4770,15 @@ def main(argv=None):
         return command_exec(cfg, args.target, args.remote_command, args.sudo, args.user,
                             args.port, args.profile, args.client, args.no_vault, args.audit)
     if args.command == "device":
-        if args.device_action not in ("probe", "save"):
+        if args.device_action not in ("probe", "rename", "save"):
             parser.parse_args(["device", "--help"])
             return 0
         if args.timeout < 1 or args.command_timeout < 1:
             raise GrError("Device operation timeouts must be positive")
         if args.device_action == "save":
             return command_device_save(cfg, args)
+        if args.device_action == "rename":
+            return command_device_rename(cfg, args)
         return command_device_probe(cfg, args)
     if args.command == "subnet":
         return command_subnet(cfg, args.cidr)

@@ -150,11 +150,15 @@ _gr_completion() {
             ;;
         device)
             if (( COMP_CWORD == 2 )); then
-                _gr_complete_words "probe save" "$current"
+                _gr_complete_words "probe rename save" "$current"
             elif [[ $subcommand == probe && $COMP_CWORD -eq 3 ]]; then
                 _gr_complete_dynamic inventory-targets "$current"
             elif [[ $subcommand == probe && $current == -* ]]; then
                 _gr_complete_words "--command --timeout --command-timeout --user --port --profile --client --driver --config --help" "$current"
+            elif [[ $subcommand == rename && $COMP_CWORD -eq 3 ]]; then
+                _gr_complete_dynamic inventory-targets "$current"
+            elif [[ $subcommand == rename && $current == -* ]]; then
+                _gr_complete_words "--apply --timeout --command-timeout --config --help" "$current"
             elif [[ $subcommand == save ]]; then
                 _gr_complete_words "--ip --model --all --apply --timeout --command-timeout --config --help" "$current"
             fi

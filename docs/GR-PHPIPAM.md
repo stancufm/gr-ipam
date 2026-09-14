@@ -268,6 +268,31 @@ gr ssh validate (--ip IP... | --pool NAME | --range START-END | --subnet CIDR | 
 gr collect version --ip IP
 ```
 
+### Align a device hostname with phpIPAM
+
+phpIPAM remains authoritative for device names. Update inventory first, review
+the plan, and apply only after the exact target and driver are correct:
+
+```bash
+gr update 192.0.2.50 --hostname edge-switch --apply
+gr device rename 192.0.2.50
+gr device rename 192.0.2.50 --apply
+```
+
+`gr device rename TARGET [HOSTNAME]` accepts one exact phpIPAM IP or hostname.
+The optional hostname is an assertion and must match the inventory value. The
+preview does not read Vault secrets, collect a backup or connect to the device.
+With `--apply`, GR requires an exact-IP configuration backup, executes the
+driver catalog's rename commands, verifies the changed CLI prompt, and only
+then executes the normal save workflow in a separate session. This ordering
+prevents a rejected rename command from being followed by a save command.
+
+The catalog supports Cisco IOS, Cisco Business, PLANET SGS, Dell OS10,
+ArubaOS-Switch, Comware 7 and FortiOS. Cisco Business SF220/SG220 hostname
+quoting is selected from `device_model`. No internal address or hostname
+convention controls the dialect. Applied sessions are private audits and omit
+Vault credentials.
+
 ### Persist running device configurations
 
 `gr device save` uses the explicit phpIPAM `device_driver` to select the
