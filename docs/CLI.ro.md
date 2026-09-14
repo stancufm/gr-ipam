@@ -14,6 +14,8 @@ Acesta este punctul de intrare al documentației instalate. Folosiți
   nu sunt introduse în argumentele proceselor.
 - `gr device probe` nu creează transcript și acceptă numai comenzi read-only,
   controale de sesiune și help contextual terminat în `?`.
+- `gr device save` este dry-run implicit și cere `--apply` înainte să trimită
+  comanda de persistare definită de driver.
 
 ## Inventar și acces
 
@@ -27,6 +29,7 @@ Acesta este punctul de intrare al documentației instalate. Folosiți
 | `gr driver detect ...` | Detectează/aplică driverul din inventarul colectat. |
 | `gr vendor ...` | Verifică baza IEEE și reconciliază vendorii în phpIPAM. |
 | `gr ssh validate ...` | Listează sau testează accesul SSH adaptat driverului pentru un IP, pool, interval, subnet sau toate țintele. |
+| `gr device save ...` | Previzualizează sau persistă configurația running după IP, model ori pentru toate driverele eligibile. |
 
 ## Comenzi și CLI-uri de echipamente
 
@@ -48,6 +51,27 @@ editabile. Firmware-ul care păstrează linia este recuperat cu Ctrl-U/Ctrl-C,
 tot fără newline. GR așteaptă promptul real între comenzi, răspunde negativ schimbării
 opționale a parolei Cisco Business, limitează durata sesiunii și timpul de
 așteptare per comandă și elimină parola Vault din rezultat.
+
+Persistarea configurației running se face numai după verificarea planului:
+
+```console
+gr device save --ip 192.0.2.50
+gr device save --ip 192.0.2.50 --apply
+gr device save --model "SG350*"
+gr device save --model "SG350*" --model "C9200*" --apply
+gr device save --all
+gr device save --all --apply
+```
+
+`--ip` și `--model` pot fi repetate. Modelul este comparat fără diferență între
+litere mari și mici și acceptă wildcard-urile `*` și `?` față de câmpul
+phpIPAM `device_model`. `--all` înseamnă toate adresele cu driver explicit
+diferit de `generic`; metadatele SSH/Vault incomplete sunt raportate ca
+blocate, fără presupuneri. Cisco IOS, Cisco Business, PLANET, Dell OS10,
+ArubaOS-Switch și Comware folosesc secvența de save înregistrată în driver.
+FortiOS este raportat `automatic`, deoarece modificările sunt persistate imediat
+și nu există o comandă running-to-startup. Sesiunile aplicate sunt auditate
+privat, fără înregistrarea credențialelor injectate din Vault.
 
 Validarea SSH în masă este tot read-only și cere întotdeauna un selector
 explicit:

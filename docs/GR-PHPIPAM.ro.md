@@ -267,6 +267,39 @@ gr ssh validate (--ip IP... | --pool NUME | --range START-END | --subnet CIDR | 
 gr collect version --ip IP
 ```
 
+### Persistarea configurațiilor running
+
+`gr device save` folosește câmpul phpIPAM explicit `device_driver` pentru a
+alege comanda nativă de copiere running-to-startup. Driverul nu este dedus din
+hostname sau din profilul de credențiale. Fiecare rulare cere exact un selector
+și este numai preview până la furnizarea opțiunii `--apply`:
+
+```bash
+gr device save --ip 192.0.2.50
+gr device save --ip 192.0.2.50 --ip 192.0.2.51 --apply
+gr device save --model "SG350*"
+gr device save --model "SG350*" --model "C9200*" --apply
+gr device save --all
+gr device save --all --apply
+```
+
+`--model` compară fără diferență între litere mari și mici câmpul standard
+phpIPAM `device_model` și acceptă `*` și `?`. `--all` selectează adresele cu un
+driver explicit diferit de `generic`. Înainte de SSH, GR verifică activarea și
+metadatele SSH, clientul, profilul de credențiale și asocierea secretului Vault.
+Lipsurile sunt raportate ca blocate. Operația continuă prin întregul set și
+întoarce cod diferit de zero dacă o țintă este blocată sau eșuează.
+
+Mapările sunt vizibile în `gr driver list`. Cisco IOS folosește `enable` și
+`write memory`; Cisco Business folosește în mod normal `terminal datadump` și
+`copy running-config startup-config`, cu dialectul scurt `write` validat pentru
+SF250; PLANET folosește `enable` și `write`; Dell OS10 și ArubaOS-Switch
+folosesc `write memory`; Comware 7 folosește `save force`. FortiOS nu are o
+comandă separată, deoarece modificările sunt persistate imediat, și este
+raportat ca automat fără deschiderea conexiunii. Confirmările de save sunt
+răspunse numai într-o sesiune `--apply` explicită. Credențialele injectate din
+Vault sunt excluse din auditul privat al sesiunii.
+
 Baza IEEE comună este actualizată atomic. Sincronizările și colectările produc rapoarte private. Nu comiteți rapoarte, inventare sau audituri.
 `gr ssh validate` nu mai selectează ținte după convenția hostname-ului. Cere un
 selector explicit, verifică driverul configurat față de `device_vendor` și

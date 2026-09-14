@@ -17,6 +17,7 @@ python3 tests/test_config.py
 python3 tests/test_config_archive.py
 python3 tests/test_collect.py
 python3 tests/test_config_collection_pools.py
+python3 tests/test_device_save.py
 python3 tests/test_find.py
 python3 tests/test_install.py
 python3 tests/test_self_update.py
