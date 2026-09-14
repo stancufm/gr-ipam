@@ -2715,13 +2715,23 @@ def ensure_known_hosts(cfg):
 def ssh_connection_options(client="normal"):
     """Bound transport stalls and apply the project's host-key policy."""
     strict_host_key = "no" if client == "legacy" else "accept-new"
-    return [
+    options = [
         "-o", "StrictHostKeyChecking={}".format(strict_host_key),
         "-o", "ConnectTimeout=20",
         "-o", "ConnectionAttempts=1",
         "-o", "ServerAliveInterval=30",
         "-o", "ServerAliveCountMax=3",
     ]
+    if client == "legacy":
+        # Some explicitly legacy network devices advertise group exchange but
+        # then return a modulus that OpenSSH rejects.  Avoid GEX for this
+        # already-isolated client and prefer the strongest fixed SHA-1 group
+        # it can share before falling back to group1.
+        options.extend([
+            "-o",
+            "KexAlgorithms=diffie-hellman-group14-sha1,diffie-hellman-group1-sha1",
+        ])
+    return options
 
 
 def exact_inventory_target(cfg, target):

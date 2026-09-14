@@ -96,7 +96,12 @@ class AuditTests(unittest.TestCase):
         self.assertIn("ConnectionAttempts=1", normal)
         self.assertIn("ServerAliveInterval=30", normal)
         self.assertIn("ServerAliveCountMax=3", normal)
-        self.assertIn("StrictHostKeyChecking=no", GR.ssh_connection_options("legacy"))
+        legacy = GR.ssh_connection_options("legacy")
+        self.assertIn("StrictHostKeyChecking=no", legacy)
+        self.assertIn(
+            "KexAlgorithms=diffie-hellman-group14-sha1,diffie-hellman-group1-sha1",
+            legacy)
+        self.assertFalse(any(value.startswith("KexAlgorithms=") for value in normal))
 
     def test_ssh_failure_classification_uses_evidence_before_exit_code(self):
         self.assertEqual(GR.classify_ssh_failure(

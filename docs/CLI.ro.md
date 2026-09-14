@@ -9,7 +9,8 @@ Acesta este punctul de intrare al documentației instalate. Folosiți
 - Scrierile de inventar, SNMP și monitorizare sunt doar previzualizate până la
   folosirea explicită a opțiunii `--apply`.
 - Algoritmii SSH vechi rămân izolați în `/usr/bin/ssh1` și sunt selectați per
-  adresă prin `ssh_client=legacy`; GR nu îi activează global.
+  adresă prin `ssh_client=legacy`; GR nu îi activează global. Sesiunile legacy
+  preferă grupuri DH fixe și evită implementările defecte de group exchange.
 - Parolele SSH/SNMP sunt citite din Vault-ul criptat al identității curente și
   nu sunt introduse în argumentele proceselor.
 - `gr device probe` nu creează transcript și acceptă numai comenzi read-only,
