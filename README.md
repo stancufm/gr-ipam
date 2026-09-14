@@ -113,7 +113,7 @@ gr self-update check
 
 ## Project status
 
-Version `2.12.0` is tested through an isolated `DESTDIR` installation on
+Version `2.13.0` is tested through an isolated `DESTDIR` installation on
 Debian. The package contains no credentials, private keys, inventory exports or
 organization-specific addressing.
 
