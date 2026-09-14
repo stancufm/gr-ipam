@@ -74,6 +74,8 @@ gr --ssh core-switch
 gr --ssh --audit core-switch
 gr exec linux-server --sudo -- systemctl status nginx
 gr device probe legacy-switch --command "show logging"
+gr device save --ip 192.0.2.10
+gr device save --ip 192.0.2.10 --apply
 gr config set ssh_audit_enabled true
 gr audit show core-switch latest
 gr config show

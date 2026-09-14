@@ -13,6 +13,8 @@ for syntax and `gr docs TOPIC` for the complete guide behind a workflow.
   and are not placed in process arguments.
 - `gr device probe` never creates a session transcript and accepts only
   read-only commands, session controls and contextual help ending in `?`.
+- `gr device save` is dry-run by default and requires `--apply` before it
+  sends a driver-owned persistence command.
 
 ## Inventory and access
 
@@ -26,6 +28,7 @@ for syntax and `gr docs TOPIC` for the complete guide behind a workflow.
 | `gr driver detect ...` | Detect or apply a driver from collected inventory. |
 | `gr vendor ...` | Inspect/update IEEE data and reconcile phpIPAM vendors. |
 | `gr ssh validate ...` | List or test driver-aware SSH access for an explicit IP, pool, range, subnet or all targets. |
+| `gr device save ...` | Preview or persist running configurations by IP, model or every eligible driver. |
 
 ## Commands and device CLIs
 
@@ -47,6 +50,27 @@ editable line. Firmware that retains it is recovered with Ctrl-U/Ctrl-C, still
 without a newline. GR waits for the real prompt between commands, declines an
 optional Cisco Business password-expiry change, applies bounded session/idle
 timeouts and redacts the Vault password from returned output.
+
+Persist running configuration only after reviewing the generated plan:
+
+```console
+gr device save --ip 192.0.2.50
+gr device save --ip 192.0.2.50 --apply
+gr device save --model "SG350*"
+gr device save --model "SG350*" --model "C9200*" --apply
+gr device save --all
+gr device save --all --apply
+```
+
+`--ip` and `--model` can be repeated. Model matching is case-insensitive and
+accepts shell-style `*` and `?` wildcards against phpIPAM `device_model`.
+`--all` means every address with an explicit non-`generic` driver; incomplete
+SSH/Vault metadata is reported as blocked rather than guessed. Cisco IOS, Cisco
+Business, PLANET, Dell OS10, ArubaOS-Switch and Comware use their registered
+save command sequence. FortiOS is reported as `automatic` because changes are
+persisted immediately and it has no running-to-startup command. Applied
+sessions are recorded privately for review, without recording injected Vault
+credentials.
 
 Bulk SSH validation is also read-only and always requires an explicit target
 selector:

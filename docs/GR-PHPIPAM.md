@@ -268,6 +268,39 @@ gr ssh validate (--ip IP... | --pool NAME | --range START-END | --subnet CIDR | 
 gr collect version --ip IP
 ```
 
+### Persist running device configurations
+
+`gr device save` uses the explicit phpIPAM `device_driver` to select the
+vendor-native running-to-startup command. It never derives a driver from a
+hostname or credential profile. Every invocation requires exactly one selector
+and is a preview until `--apply` is supplied:
+
+```bash
+gr device save --ip 192.0.2.50
+gr device save --ip 192.0.2.50 --ip 192.0.2.51 --apply
+gr device save --model "SG350*"
+gr device save --model "SG350*" --model "C9200*" --apply
+gr device save --all
+gr device save --all --apply
+```
+
+`--model` matches the standard phpIPAM `device_model` field
+case-insensitively and supports `*` and `?`. `--all` selects addresses with an
+explicit non-`generic` driver. Before opening SSH, GR checks enabled SSH
+metadata, client, credential profile and Vault-secret mapping. Missing metadata
+is reported as blocked. The operation continues through the selected set and
+returns nonzero if any target is blocked or fails.
+
+Driver mappings are visible in `gr driver list`. Cisco IOS uses `enable` and
+`write memory`; Cisco Business normally uses `terminal datadump` and
+`copy running-config startup-config`, with the validated SF250 short `write`
+dialect; PLANET uses `enable` and `write`; Dell OS10 and ArubaOS-Switch use
+`write memory`; Comware 7 uses `save force`. FortiOS has no separate save
+command because changes persist immediately, so it is reported as automatic
+without opening a connection. Save-only confirmation prompts are answered only
+inside an explicit applied save session. Injected Vault credentials are
+excluded from the private session audit.
+
 The shared IEEE database is replaced atomically. Synchronization, validation and collection reports are private and must not be committed.
 `gr ssh validate` never selects targets by hostname convention. It requires an
 explicit selector, checks the configured driver against `device_vendor`, and

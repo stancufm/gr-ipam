@@ -14,6 +14,7 @@ import ipaddress
 import json
 import errno
 import fcntl
+import fnmatch
 import os
 import re
 import select
@@ -73,6 +74,7 @@ DEVICE_DRIVER_SPECS = {
         "version_commands": ("show version",),
         "cleanup_commands": (),
         "config_commands": (),
+        "save_commands": (),
     },
     "cisco-ios": {
         "vendor": "cisco",
@@ -82,6 +84,7 @@ DEVICE_DRIVER_SPECS = {
         "version_commands": ("show version",),
         "cleanup_commands": ("exit",),
         "config_commands": ("enable", "terminal length 0", "show running-config"),
+        "save_commands": ("enable", "write memory"),
     },
     "cisco-small-business": {
         "vendor": "cisco",
@@ -90,6 +93,7 @@ DEVICE_DRIVER_SPECS = {
         "version_commands": ("terminal datadump", "show version", "show system"),
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("terminal datadump", "show running-config"),
+        "save_commands": ("terminal datadump", "copy running-config startup-config"),
     },
     "planet-sgs": {
         "vendor": "planet-technology",
@@ -98,6 +102,7 @@ DEVICE_DRIVER_SPECS = {
         "version_commands": ("enable", "show version"),
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("enable", "show running-config"),
+        "save_commands": ("enable", "write"),
     },
     "dell-os10": {
         "vendor": "dell",
@@ -106,6 +111,7 @@ DEVICE_DRIVER_SPECS = {
         "version_commands": ("show version",),
         "cleanup_commands": (),
         "config_commands": ("terminal length 0", "show running-configuration"),
+        "save_commands": ("write memory",),
     },
     "hpe-arubaos-switch": {
         "vendor": "hpe-aruba",
@@ -114,6 +120,7 @@ DEVICE_DRIVER_SPECS = {
         "version_commands": ("no page", "show version", "show system"),
         "cleanup_commands": ("exit", "exit"),
         "config_commands": ("no page", "show running-config"),
+        "save_commands": ("write memory",),
     },
     "hpe-comware7": {
         "vendor": "hpe-comware",
@@ -123,6 +130,7 @@ DEVICE_DRIVER_SPECS = {
                              "display device manuinfo"),
         "cleanup_commands": ("quit",),
         "config_commands": ("screen-length disable", "display current-configuration"),
+        "save_commands": ("save force",),
     },
     "fortigate-fortios": {
         "vendor": "fortinet",
@@ -131,6 +139,10 @@ DEVICE_DRIVER_SPECS = {
         "version_commands": ("get system status",),
         "cleanup_commands": ("exit",),
         "config_commands": ("show full-configuration",),
+        # FortiOS commits configuration changes immediately. A separate
+        # running-to-startup save command does not exist.
+        "save_commands": (),
+        "save_mode": "automatic",
     },
 }
 DEVICE_DRIVERS = tuple(DEVICE_DRIVER_SPECS)
@@ -1246,6 +1258,26 @@ class CiscoSmallBusinessLogin:
         return []
 
 
+class CiscoSmallBusinessSaveLogin(CiscoSmallBusinessLogin):
+    """Confirm only the bounded prompts emitted by a requested save command."""
+
+    SAVE_DESTINATION_RE = re.compile(
+        br"destination\s+(?:file\s*)?name\s*\[[^\]\r\n]+\]\s*\??\s*$", re.I)
+    SAVE_OVERWRITE_RE = re.compile(
+        br"overwrite(?:\s+file)?\s*\[[^\]\r\n]+\].*?(?:\(y/n\)|\[y/n\]).*?\??\s*$",
+        re.I)
+
+    def feed(self, data):
+        visible = self.ANSI_RE.sub(b"", (self.buffer + data)[-4096:])
+        if self.state == "ready" and self.SAVE_DESTINATION_RE.search(visible):
+            self.buffer = b""
+            return [("credential", b"\n")]
+        if self.state == "ready" and self.SAVE_OVERWRITE_RE.search(visible):
+            self.buffer = b""
+            return [("credential", b"y\n")]
+        return super().feed(data)
+
+
 class CiscoIosLogin(CiscoSmallBusinessLogin):
     """Drive an IOS PTY and handle an optional enable-password prompt."""
 
@@ -1336,6 +1368,14 @@ def device_login_driver(driver):
     return mapping[normalized]
 
 
+def device_save_login_driver(driver):
+    """Return a login state machine scoped to a running-config save session."""
+    normalized = normalize_device_driver(driver)
+    if normalized == "cisco-small-business":
+        return CiscoSmallBusinessSaveLogin
+    return device_login_driver(normalized)
+
+
 DEVICE_CLI_ERROR_RE = re.compile(
     r"(?im)^\s*(?:%\s*(?:invalid input|unknown command|unrecognized command|"
     r"incomplete command|bad parameter(?: value)?)|"
@@ -1406,7 +1446,8 @@ def normalize_device_probe_commands(values):
 
 def run_interactive_device(item, password, command, read_fd, login_driver_class,
                            command_values, cleanup_command_values, timeout=180,
-                           command_timeout=60, raw_pty=False):
+                           command_timeout=60, raw_pty=False, audit=None,
+                           stop_on_complete=False):
     """Drive an interactive network CLI through a private PTY.
 
     Passwords are injected by the login state machine, never included in argv,
@@ -1458,6 +1499,8 @@ def run_interactive_device(item, password, command, read_fd, login_driver_class,
                 if not data:
                     streams.pop(descriptor, None)
                     continue
+                if audit is not None:
+                    audit.record("stdout" if descriptor == master_fd else "stderr", data)
                 idle_deadline = time.monotonic() + max(1, command_timeout)
                 streams[descriptor].append(data)
                 if descriptor == master_fd:
@@ -1468,11 +1511,19 @@ def run_interactive_device(item, password, command, read_fd, login_driver_class,
                             next_command, completed = next_device_prompt_command(
                                 pending_commands, cleanup_commands)
                             sequence_complete = sequence_complete or completed
+                            if completed and stop_on_complete:
+                                process.terminate()
+                                streams.clear()
+                                break
                             if next_command is not None:
                                 driver.contextual_help_pending = next_command.endswith(
                                     b"?\x03\n")
+                                if audit is not None:
+                                    audit.record("stdin", next_command)
                                 write_interactive_device_command(master_fd, next_command)
                                 idle_deadline = time.monotonic() + max(1, command_timeout)
+                if not streams:
+                    break
         if timed_out:
             process.wait()
         else:
@@ -2520,9 +2571,12 @@ def command_driver_list():
         rows.append((driver, "yes" if spec["interactive_cli"] else "no",
                      "; ".join(spec["validation_commands"]) or "-",
                      "; ".join(spec["version_commands"]),
-                     "; ".join(spec["config_commands"]) or "-"))
+                     "; ".join(spec["config_commands"]) or "-",
+                     spec.get("save_mode") or "command",
+                     "; ".join(spec.get("save_commands") or ()) or "-"))
     print_audit_table(("DRIVER", "INTERACTIVE LOGIN", "VALIDATION COMMANDS",
-                       "VERSION COMMANDS", "CONFIG COMMANDS"), rows)
+                       "VERSION COMMANDS", "CONFIG COMMANDS", "SAVE MODE",
+                       "SAVE COMMANDS"), rows)
     return 0
 
 
@@ -2854,6 +2908,217 @@ def command_device_probe(cfg, args):
                                stderr_data=evidence, used_sshpass=True)
     print("DEVICE_PROBE_STATUS={}".format("success" if success else "attention"))
     return 0 if success else 2
+
+
+def device_save_commands(row, driver):
+    """Return the reviewed running-to-startup command sequence for one device."""
+    normalized = normalize_device_driver(driver)
+    if normalized == "generic":
+        raise GrError("Configuration save requires an explicit non-generic device driver")
+    spec = device_driver_spec(normalized)
+    if spec.get("save_mode") == "automatic":
+        return []
+    commands = list(spec.get("save_commands") or ())
+    model = str(custom_value(row, "device_model") or "").strip()
+    # The validated SF250 2.3.5.x dialect uses `write`; the other Cisco
+    # Business families use the explicit running-to-startup copy workflow.
+    if normalized == "cisco-small-business" and model.upper().startswith("SF250-"):
+        commands = ["terminal datadump", "write"]
+    if not commands:
+        raise GrError("Configuration save is not implemented for driver {}".format(normalized))
+    return commands
+
+
+def select_device_save_rows(rows, args):
+    """Select save targets by exact IP, case-insensitive model glob, or all drivers."""
+    normalized = normalized_addresses(rows)
+    if args.all:
+        return [row for row in normalized
+                if str(custom_value(row, "device_driver") or "").strip().lower()
+                not in ("", "generic")]
+    if args.ips:
+        try:
+            wanted = {ipaddress.ip_address(value) for value in args.ips}
+        except ValueError as exc:
+            raise GrError(str(exc))
+        found = {row["_ip"] for row in normalized if row["_ip"] in wanted}
+        missing = sorted((str(value) for value in wanted - found),
+                         key=lambda value: ipaddress.ip_address(value))
+        if missing:
+            raise GrError("No phpIPAM address matches: {}".format(", ".join(missing)))
+        return [row for row in normalized if row["_ip"] in wanted]
+    patterns = [str(value or "").strip().lower() for value in args.models or []]
+    selected = []
+    for row in normalized:
+        model = str(custom_value(row, "device_model") or "").strip().lower()
+        if model and any(fnmatch.fnmatchcase(model, pattern) for pattern in patterns):
+            selected.append(row)
+    return selected
+
+
+def device_save_plan(cfg, row):
+    """Build one non-secret save plan and explain why a target cannot be used."""
+    ip = str(row["_ip"])
+    hostname = row.get("_hostname") or "-"
+    model = str(custom_value(row, "device_model") or "").strip() or "-"
+    try:
+        driver = resolve_device_driver(row)
+    except GrError as exc:
+        return {"row": row, "ip": ip, "hostname": hostname, "model": model,
+                "driver": str(custom_value(row, "device_driver") or "-").strip() or "-",
+                "mode": "-", "commands": [], "status": "blocked", "detail": str(exc)}
+    if driver == "generic":
+        return {"row": row, "ip": ip, "hostname": hostname, "model": model,
+                "driver": driver, "mode": "-", "commands": [], "status": "blocked",
+                "detail": "explicit device_driver required"}
+    spec = device_driver_spec(driver)
+    if spec.get("save_mode") == "automatic":
+        return {"row": row, "ip": ip, "hostname": hostname, "model": model,
+                "driver": driver, "mode": "automatic", "commands": [],
+                "status": "automatic", "detail": "changes persist immediately"}
+    try:
+        commands = device_save_commands(row, driver)
+    except GrError as exc:
+        return {"row": row, "ip": ip, "hostname": hostname, "model": model,
+                "driver": driver, "mode": "command", "commands": [],
+                "status": "blocked", "detail": str(exc)}
+    meta = phpipam_ssh_metadata(row)
+    detail = ""
+    if not meta["enabled"]:
+        detail = "custom_ssh_enabled is false"
+    elif not meta["user"] or not meta["port"]:
+        detail = "incomplete SSH user/port metadata"
+    elif meta["client"] not in ("normal", "legacy"):
+        detail = "invalid SSH client metadata"
+    elif not meta["profile"]:
+        detail = "missing SSH credential profile"
+    elif meta["profile"] not in cfg.get("ssh_profiles", {}):
+        detail = "unknown SSH credential profile {}".format(meta["profile"])
+    elif not vault_secret_name(cfg, meta["profile"]):
+        detail = "profile {} has no Vault secret".format(meta["profile"])
+    return {"row": row, "ip": ip, "hostname": hostname, "model": model,
+            "driver": driver, "mode": "command", "commands": commands,
+            "status": "blocked" if detail else "ready",
+            "detail": detail or "; ".join(commands)}
+
+
+def device_save_failure_detail(stdout, stderr, timed_out, cli_errors):
+    if timed_out:
+        return "timeout"
+    lines = [line.strip() for line in (stdout or "").splitlines()
+             if DEVICE_CLI_ERROR_RE.search(line)]
+    if lines:
+        return lines[-1][:240]
+    error_lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
+    if error_lines:
+        return error_lines[-1][:240]
+    if cli_errors:
+        return "device reported {} CLI error(s)".format(cli_errors)
+    return "save command sequence did not complete"
+
+
+def apply_device_save(cfg, plan, timeout=600, command_timeout=180):
+    """Apply one reviewed save plan through the target's native CLI driver."""
+    row = plan["row"]
+    meta = phpipam_ssh_metadata(row)
+    driver = plan["driver"]
+    client_binary = "/usr/bin/ssh1" if meta["client"] == "legacy" else "ssh"
+    if not shutil.which(client_binary):
+        raise GrError("SSH client is not installed: {}".format(client_binary))
+    known_hosts = ensure_known_hosts(cfg)
+    ssh_command = [client_binary, "-F", "/dev/null", "-p", meta["port"],
+                   "-o", "UserKnownHostsFile={}".format(known_hosts)]
+    ssh_command.extend(ssh_connection_options(meta["client"]))
+    profile_cfg = cfg.get("ssh_profiles", {}).get(meta["profile"], {})
+    identity = str(profile_cfg.get("identity_file") or "").strip()
+    if identity:
+        identity = expand(identity)
+        if not os.path.isfile(identity):
+            raise GrError("Identity file for profile {} is missing: {}".format(
+                meta["profile"], identity))
+        ssh_command.extend(["-i", identity])
+    if meta["jump"]:
+        ssh_command.extend(["-J", meta["jump"]])
+    ssh_command.extend(["{}@{}".format(meta["user"], plan["ip"]),
+                        "gr-interactive-placeholder"])
+    secret = vault_secret_name(cfg, meta["profile"])
+    if not secret or not vault_secret_exists(secret):
+        raise GrError(
+            "Configuration save requires a configured Vault secret for profile {}".format(
+                meta["profile"]))
+    password = read_vault_password(secret)
+    ssh_command, read_fd = ssh_with_password(ssh_command, password)
+    recorder = SshSessionAudit(cfg, row, ssh_command)
+    try:
+        returncode, stdout, stderr, timed_out, complete = run_interactive_device(
+            {"user": meta["user"]}, password, ssh_command, read_fd,
+            device_save_login_driver(driver), plan["commands"], (), timeout=timeout,
+            command_timeout=command_timeout, audit=recorder, stop_on_complete=True)
+    except Exception:
+        try:
+            recorder.close(1)
+        except Exception:
+            pass
+        raise
+    cli_errors = len(DEVICE_CLI_ERROR_RE.findall(stdout))
+    success = complete and not timed_out and cli_errors == 0
+    recorder.close(0 if success else (returncode or 1))
+    return {"success": success, "returncode": returncode, "complete": complete,
+            "timeout": timed_out, "cli_errors": cli_errors, "stdout": stdout,
+            "stderr": stderr, "audit": recorder.path}
+
+
+def command_device_save(cfg, args):
+    """Preview or persist running configuration for an explicit target set."""
+    with api_session(cfg, prompt=False) as client:
+        selected = select_device_save_rows(client.addresses(), args)
+    if not selected:
+        raise GrError("No phpIPAM addresses matched the device save selector")
+    plans = [device_save_plan(cfg, row) for row in selected]
+    rows = [(plan["ip"], plan["hostname"], plan["model"], plan["driver"],
+             plan["mode"], "; ".join(plan["commands"]) or "-", plan["status"],
+             plan["detail"] if plan["status"] == "blocked" else "-")
+            for plan in plans]
+    print_audit_table(("IP", "HOSTNAME", "MODEL", "DRIVER", "MODE", "SAVE COMMANDS",
+                       "STATUS", "DETAIL"), rows)
+    if not args.apply:
+        print("\nDRY_RUN=True Re-run with the same selector and --apply to save running configuration.")
+        return 0
+    counts = {"selected": len(plans), "success": 0, "automatic": 0,
+              "failed": 0, "blocked": 0}
+    for plan in plans:
+        if plan["status"] == "automatic":
+            counts["automatic"] += 1
+            print("SAVE_RESULT ip={} hostname={} driver={} status=automatic detail={}".format(
+                plan["ip"], plan["hostname"], plan["driver"], plan["detail"]))
+            continue
+        if plan["status"] == "blocked":
+            counts["blocked"] += 1
+            print("SAVE_RESULT ip={} hostname={} driver={} status=blocked detail={}".format(
+                plan["ip"], plan["hostname"], plan["driver"], plan["detail"]))
+            continue
+        print("SAVE_START ip={} hostname={} driver={} commands={}".format(
+            plan["ip"], plan["hostname"], plan["driver"], len(plan["commands"])))
+        try:
+            result = apply_device_save(cfg, plan, args.timeout, args.command_timeout)
+        except Exception as exc:
+            counts["failed"] += 1
+            print("SAVE_RESULT ip={} hostname={} driver={} status=failed detail={}".format(
+                plan["ip"], plan["hostname"], plan["driver"], str(exc)[:240]))
+            continue
+        if result["success"]:
+            counts["success"] += 1
+            print("SAVE_RESULT ip={} hostname={} driver={} status=success audit={}".format(
+                plan["ip"], plan["hostname"], plan["driver"], result["audit"]))
+        else:
+            counts["failed"] += 1
+            detail = device_save_failure_detail(
+                result["stdout"], result["stderr"], result["timeout"],
+                result["cli_errors"])
+            print("SAVE_RESULT ip={} hostname={} driver={} status=failed detail={} audit={}".format(
+                plan["ip"], plan["hostname"], plan["driver"], detail, result["audit"]))
+    print("SAVE_SUMMARY={}".format(json.dumps(counts, sort_keys=True)))
+    return 2 if counts["failed"] or counts["blocked"] else 0
 
 
 def connect_ssh(cfg, row, override_user=None, override_port=None, override_profile=None,
@@ -3970,6 +4235,27 @@ Complete documentation: {}""".format(DEFAULT_DOCUMENTATION))
                               help="override per-device SSH client")
     device_probe.add_argument("--driver", choices=DEVICE_DRIVERS,
                               help="override per-device login driver")
+    device_save = device_sub.add_parser(
+        "save", help="preview or save running configuration with driver-native commands")
+    device_save_selector = device_save.add_mutually_exclusive_group(required=True)
+    device_save_selector.add_argument(
+        "--ip", action="append", dest="ips",
+        help="select an exact phpIPAM address; repeatable")
+    device_save_selector.add_argument(
+        "--model", action="append", dest="models", metavar="GLOB",
+        help="select a device_model; repeatable and accepts shell-style wildcards")
+    device_save_selector.add_argument(
+        "--all", action="store_true",
+        help="select every address with an explicit non-generic driver")
+    device_save.add_argument(
+        "--apply", action="store_true",
+        help="execute the displayed save commands; default is dry-run")
+    device_save.add_argument(
+        "--timeout", type=int, default=600,
+        help="maximum complete session duration per device in seconds (default: 600)")
+    device_save.add_argument(
+        "--command-timeout", type=int, default=180,
+        help="maximum idle time for one save command in seconds (default: 180)")
     subnet = sub.add_parser("subnet", help="list phpIPAM addresses in a CIDR")
     subnet.add_argument("cidr")
     local = sub.add_parser("local", help="search the local hosts file")
@@ -4272,11 +4558,13 @@ def main(argv=None):
         return command_exec(cfg, args.target, args.remote_command, args.sudo, args.user,
                             args.port, args.profile, args.client, args.no_vault, args.audit)
     if args.command == "device":
-        if args.device_action != "probe":
+        if args.device_action not in ("probe", "save"):
             parser.parse_args(["device", "--help"])
             return 0
         if args.timeout < 1 or args.command_timeout < 1:
-            raise GrError("Device probe timeouts must be positive")
+            raise GrError("Device operation timeouts must be positive")
+        if args.device_action == "save":
+            return command_device_save(cfg, args)
         return command_device_probe(cfg, args)
     if args.command == "subnet":
         return command_subnet(cfg, args.cidr)
