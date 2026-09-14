@@ -8,7 +8,8 @@ for syntax and `gr docs TOPIC` for the complete guide behind a workflow.
 - phpIPAM is the inventory and intent source of truth.
 - Inventory, SNMP and monitoring writes are previews until `--apply` is used.
 - Weak SSH algorithms are isolated in `/usr/bin/ssh1` and selected per address
-  with `ssh_client=legacy`; GR never enables them globally.
+  with `ssh_client=legacy`; GR never enables them globally. Legacy sessions
+  prefer fixed DH groups and avoid broken group-exchange implementations.
 - SSH and SNMP passwords are read from the current identity's encrypted Vault
   and are not placed in process arguments.
 - `gr device probe` never creates a session transcript and accepts only
