@@ -35,6 +35,40 @@ class SnmpManagerTests(unittest.TestCase):
         with open(os.environ["GR_SNMP_TEMPLATES"], encoding="utf-8") as handle:
             cls.templates = json.load(handle)["templates"]
 
+    def test_unifi_without_template_can_test_and_assign_intent(self):
+        device = {"id": 7, "ip": "192.0.2.10", "hostname": "example-ap",
+                  "custom_device_driver": "generic", "custom_snmp_enabled": 1}
+        state = dict(device)
+        class Api:
+            def request(self, method, path, payload=None):
+                if method == "PATCH":
+                    state.update(payload)
+                return dict(state)
+        class Session:
+            def __enter__(self): return Api()
+            def __exit__(self, *_args): return False
+        test_args = SNMP.build_parser().parse_args([
+            "test", "--ip", "192.0.2.10", "--profile", "example"])
+        assign_args = SNMP.build_parser().parse_args([
+            "assign", "--ip", "192.0.2.10", "--profile", "example",
+            "--monitoring-profile", "librenms", "--apply"])
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(SNMP.gr, "api_session", return_value=Session()), \
+                mock.patch.object(SNMP, "inventory_rows", return_value=[device]), \
+                mock.patch.object(SNMP, "profile_values", return_value={"profile": "example"}), \
+                mock.patch.object(SNMP, "snmpget", return_value=(0, "")), \
+                mock.patch.object(SNMP, "report_path", return_value=os.path.join(directory, "test.json")):
+            self.assertEqual(SNMP.command_test({}, self.templates, test_args), 0)
+            self.assertEqual(SNMP.command_assign({}, self.templates, assign_args), 0)
+        self.assertEqual(state["custom_snmp_profile"], "example")
+        self.assertEqual(state["custom_snmp_template"], "")
+        self.assertEqual(state["custom_monitoring_profile"], "librenms")
+
+    def test_unknown_explicit_template_does_not_fall_back(self):
+        device = row(driver="generic", explicit="missing")
+        with self.assertRaises(SNMP.gr.GrError):
+            SNMP.optional_template(self.templates, device)
+
     def test_template_resolution_prefers_explicit_ip_assignment(self):
         template, source = SNMP.resolve_template(self.templates, row(explicit="cisco-ios-v3"))
         self.assertEqual(template["id"], "cisco-ios-v3")
@@ -1371,7 +1405,8 @@ rule 30 permit source 192.0.2.3 0
         self.assertEqual(rc, 0)
         self.assertEqual(detail, "poll complete")
         command = run.call_args[0][0]
-        self.assertEqual(command[:4], ["gr", "exec", "192.0.2.20", "--sudo"])
+        self.assertEqual(command[:5], ["gr", "exec", "192.0.2.20", "--sudo", "--audit"])
+        self.assertNotIn("--no-audit", command)
         self.assertEqual(command[-2], "-lc")
         self.assertEqual(command[-1],
                          "cd /opt/librenms && exec ./lnms device:poll 40 --no-interaction")

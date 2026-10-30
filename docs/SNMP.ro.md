@@ -256,6 +256,13 @@ gr snmp monitor --all --monitoring-profile librenms --profile monitoring-v3 --sy
 gr snmp monitor --ip 192.0.2.10 --monitoring-profile librenms --poll --apply
 ```
 
+Echipamentele UniFi administrate prin controller pot fi testate și asociate
+unui profil SNMP fără un șablon de configurare SSH: `test` afișează
+`template=none`, iar `assign` lasă câmpul șablon gol. `configure`, `rotate` și
+`cleanup` necesită în continuare un șablon explicit suportat și nu modifică
+controllerul. Pentru controllerul UniFi cu o singură parolă SNMPv3, referințele
+la secretele de autentificare și criptare ale profilului indică aceeași parolă.
+
 Validarea compară existența, `status`, `last_polled` din LibreNMS și `lastSeen`
 din phpIPAM. Adăugarea este dry-run fără `--apply`, apoi asocierea validată se
 salvează în phpIPAM. `--sync-credentials --apply` actualizează câmpurile SNMPv3
@@ -265,7 +272,10 @@ monitorizare din profil și recitește status/`last_polled`. Câmpul `host` din
 profil trebuie să fie un hostname sau IP exact din phpIPAM, cu metadate SSH și
 sudo funcționale. Poller-ul rulează ca utilizatorul `librenms` din
 `/opt/librenms`, iar la eșec este afișat mesajul relevant al poller-ului, nu
-bannerul de conectare `gr exec`. Testele și rapoartele
+bannerul de conectare `gr exec`. Poll-ul activează explicit `gr exec --audit`,
+indiferent de setarea globală, și afișează calea înregistrării prin `POLL_AUDIT`.
+Înregistrarea conține stdout și stderr de la distanță și trebuie protejată și
+păstrată conform politicii locale. Testele și rapoartele
 pot fi programate extern. Pentru rotație se
 creează un profil nou în vault, se rulează dry-run cu
 `rotate --previous-profile VECHI --profile NOU`, se aplică în mentenanță, se

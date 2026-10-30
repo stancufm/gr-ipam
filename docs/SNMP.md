@@ -303,6 +303,13 @@ gr snmp monitor --all --monitoring-profile librenms --profile monitoring-v3 --sy
 gr snmp monitor --ip 192.0.2.10 --monitoring-profile librenms --poll --apply
 ```
 
+UniFi devices managed by a controller can be tested and assigned an SNMP profile
+without an SSH configuration template. `test` reports `template=none`, and
+`assign` leaves the template field empty; `configure`, `rotate`, and `cleanup`
+still require an explicitly supported device template. Controller changes remain
+outside these commands. UniFi controllers with one SNMPv3 password need a
+profile whose authentication and privacy secret references point to that password.
+
 The first command is read-only. `--add` remains a plan until `--apply`; successful
 associations are written back to phpIPAM. Periodic tests and reports may be run by
 an external scheduler. `--sync-credentials --apply` updates the SNMPv3 fields of
@@ -311,8 +318,11 @@ existing LibreNMS devices; the next poll is the authoritative verification.
 in the profile and then refreshes status/`last_polled`. The profile `host` must
 be an exact phpIPAM hostname or IP with working SSH and sudo metadata. The
 poller runs as the `librenms` account from `/opt/librenms`, matching the normal
-LibreNMS CLI runtime, and failures report the actionable poller error rather
-than the `gr exec` connection banner.
+LibreNMS CLI runtime. Polls explicitly enable `gr exec --audit` regardless of
+the global audit default, and print `POLL_AUDIT` with the session recording path.
+Audit recordings include remote stdout and stderr and must be protected and
+retained according to local policy. Failures report the actionable poller error
+rather than the `gr exec` connection banner or audit notice.
 Credential rotation is deliberately an explicit reviewed operation: configure a
 new vault profile, run `rotate --previous-profile OLD --profile NEW` as a dry-run,
 apply in a maintenance window, synchronize LibreNMS, then assign the new profile
