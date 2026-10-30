@@ -223,6 +223,15 @@ def resolve_template(templates, row):
     return candidates[0], "selector"
 
 
+def optional_template(templates, row):
+    """Resolve known templates without requiring one for SNMP polling or intent."""
+    if str(custom(row, "snmp_template") or "").strip():
+        return resolve_template(templates, row)[0]
+    if any(template_matches(template, row) for template in templates):
+        return resolve_template(templates, row)[0]
+    return None
+
+
 def profile_network_values(name, profile):
     sources = profile.get("sources") or []
     if not isinstance(sources, list):
@@ -933,16 +942,17 @@ def command_test(cfg, templates, args):
         rows = select_rows(inventory_rows(api), args, require_enabled=not args.include_disabled)
     results = []
     for row in rows:
-        template, _ = resolve_template(templates, row)
+        template = optional_template(templates, row)
+        template_id = template["id"] if template else "none"
         credentials = profile_values(cfg, row, args)
         rc, error = snmpget(row_ip(row), credentials, args.timeout)
         status = snmp_test_status(rc, error)
         results.append({"ip": row_ip(row), "hostname": row.get("hostname") or "",
-                        "template": template["id"], "profile": credentials["profile"],
+                        "template": template_id, "profile": credentials["profile"],
                         "status": status, "error": error.splitlines()[-1][:200] if error else ""})
         print("RESULT {} {} {} template={} profile={}".format(
             row.get("hostname") or row_ip(row), row_ip(row), status,
-            template["id"], credentials["profile"] or "manual"))
+            template_id, credentials["profile"] or "manual"))
     path = report_path(cfg, "snmp-test.json")
     with open(path, "w", encoding="utf-8") as handle:
         json.dump({"results": results}, handle, indent=2, sort_keys=True); handle.write("\n")
@@ -1074,8 +1084,12 @@ def command_assign(cfg, templates, args):
     changes = []
     for row in rows:
         template_id = args.template or ""
+        if args.enabled == "yes" and template_id and not any(
+                item.get("id") == template_id for item in templates):
+            raise gr.GrError("Unknown explicit SNMP template {}".format(template_id))
         if args.enabled == "yes" and not template_id:
-            template_id = resolve_template(templates, row)[0]["id"]
+            template = optional_template(templates, row)
+            template_id = template["id"] if template else ""
         if args.enabled == "yes" and not args.profile:
             raise gr.GrError("--profile is required when SNMP is enabled")
         payload = {"custom_snmp_enabled": 1 if args.enabled == "yes" else 0,
@@ -1096,8 +1110,11 @@ def command_assign(cfg, templates, args):
         for row, payload in changes:
             api.request("PATCH", "addresses/{}/".format(row["id"]), payload=payload)
             data = response_row(api.request("GET", "addresses/{}/".format(row["id"])))
-            if not isinstance(data, dict) or str(gr.custom_value(data, "snmp_template") or "") != payload["custom_snmp_template"]:
-                raise gr.GrError("phpIPAM verification failed for {}".format(row_ip(row)))
+            for key, expected in payload.items():
+                actual = gr.custom_value(data, key[len("custom_"):]) if isinstance(data, dict) else None
+                if str(actual or "") != str(expected or ""):
+                    raise gr.GrError("phpIPAM verification failed for {} field {}".format(
+                        row_ip(row), key))
     print("ASSIGN_STATUS=success count={}".format(len(changes))); return 0
 
 
@@ -1219,7 +1236,7 @@ def monitoring_poll(profile, device_id):
     poll_command = (
         "cd /opt/librenms && exec ./lnms device:poll {} --no-interaction"
     ).format(normalized_device_id)
-    command = ["gr", "exec", host, "--sudo", "--no-audit", "--",
+    command = ["gr", "exec", host, "--sudo", "--audit", "--",
                "/usr/bin/sudo", "-H", "-u", "librenms",
                "/bin/sh", "-lc", poll_command]
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1231,7 +1248,8 @@ def monitoring_poll(profile, device_id):
 
 def poll_error_summary(detail):
     lines = [line.strip() for line in str(detail or "").splitlines() if line.strip()]
-    actionable = [line for line in lines if not line.startswith("Executing on ")]
+    actionable = [line for line in lines if not line.startswith(
+        ("Executing on ", "Recording remote stdout and stderr to: ", "Remote command audit: "))]
     return (actionable or lines or ["unknown"])[-1][:200]
 
 
@@ -1297,6 +1315,10 @@ def command_monitor(cfg, templates, args):
                 print("PLAN {} poll_librenms_device id={}".format(ip, device.get("device_id")))
                 continue
             poll_rc, poll_error = monitoring_poll(profile, device.get("device_id"))
+            audit_lines = [line for line in poll_error.splitlines()
+                           if line.startswith("Remote command audit: ")]
+            for line in audit_lines:
+                print("POLL_AUDIT {} {}".format(ip, line.split(": ", 1)[1]))
             if poll_rc:
                 print("RESULT {} poll_failed detail={}".format(
                     ip, poll_error_summary(poll_error)))
